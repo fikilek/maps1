@@ -38,7 +38,7 @@ const persistConfig = {
     // "ui",
   ],
 
-  blacklist: [geoApi.reducerPath, authApi.reducerPath, usersApi],
+  blacklist: [geoApi.reducerPath, authApi.reducerPath, usersApi.reducerPath],
 };
 
 /* =====================================================
@@ -62,3 +62,5 @@ export const store = configureStore({
    PERSISTOR
 ===================================================== */
 export const persistor = persistStore(store);
+
+console.log("STORE authApi.reducerPath =", authApi.reducerPath);

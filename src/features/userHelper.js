@@ -26,3 +26,9 @@ export const userValidationSchema = object().shape({
 
   phoneNumber: string().trim().required("Phone number is required"),
 });
+
+export const userSigninValidationSchema = object().shape({
+  email: string().email("Invalid email address").required("Email is required"),
+
+  password: string().required("Password is required"),
+});

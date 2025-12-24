@@ -244,8 +244,8 @@ const Signup = () => {
                     />
                   </View>
                   <FormErrorText
-                    touched={touched.confirmPassword}
-                    error={errors.confirmPassword}
+                    touched={touched.phoneNumber}
+                    error={errors.phoneNumber}
                   />
                 </FormControlWrappper>
 

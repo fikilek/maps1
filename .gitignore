@@ -45,3 +45,6 @@ app-example
 # .env
 .env
 .env.*.local
+
+# firebase 
+/src/firebase

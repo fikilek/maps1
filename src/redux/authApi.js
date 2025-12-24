@@ -11,13 +11,13 @@ import {
   auth,
   db,
   doc,
+  getDoc,
   onAuthStateChanged,
-  onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
 } from "../firebase/index";
-import { clearAuthState, loadAuthState, saveAuthState } from "./authStorage";
+import { clearAuthState } from "./authStorage";
 
 /*
   Auth cache shape (ALWAYS consistent):
@@ -40,95 +40,70 @@ export const authApi = createApi({
        AUTH STATE (BOOTSTRAP + REALTIME LISTENERS)
        ===================================================== */
     getAuthState: builder.query({
-      queryFn: () => ({ data: null }),
+      // 🔒 NEVER remove this query from cache
+      keepUnusedDataFor: Infinity,
+      queryFn: () => ({
+        data: {
+          ready: true,
+          isAuthenticated: false,
+          auth: null,
+          profile: null,
+          claims: null,
+        },
+      }),
 
       async onCacheEntryAdded(_, { updateCachedData, cacheEntryRemoved }) {
-        let unsubscribeUserDoc = null;
-
-        /* -------------------------------------------------
-           1️⃣ HYDRATE FROM MMKV (FAST START)
-           ------------------------------------------------- */
-        const cached = loadAuthState();
-        if (cached) {
-          updateCachedData(() => ({
-            ...cached,
-            ready: false, // Firebase will confirm
-          }));
-        }
-
-        /* -------------------------------------------------
-           2️⃣ FIREBASE AUTH LISTENER
-           ------------------------------------------------- */
-        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-          // 🔴 LOGGED OUT
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+          // 🔐 AUTH STATE RESOLVED (no user)
           if (!user) {
-            clearAuthState();
-
-            if (unsubscribeUserDoc) {
-              unsubscribeUserDoc();
-              unsubscribeUserDoc = null;
-            }
-
             updateCachedData(() => ({
+              ready: true,
+              isAuthenticated: false,
               auth: null,
               profile: null,
-              claims: {},
-              isAuthenticated: false,
-              ready: true,
+              claims: null,
             }));
-
             return;
           }
 
-          // 🟢 LOGGED IN
-          const userRef = doc(db, "users", user.uid);
+          try {
+            // Load user profile
+            const userRef = doc(db, "users", user.uid);
+            const snap = await getDoc(userRef);
 
-          /* -------------------------------------------------
-             3️⃣ FIRESTORE REALTIME LISTENER
-             ------------------------------------------------- */
-          unsubscribeUserDoc = onSnapshot(userRef, async (snap) => {
-            try {
-              const idTokenResult = await auth.currentUser.getIdTokenResult(
-                false
-              );
+            // Load claims
+            const tokenResult = await user.getIdTokenResult(true);
 
-              const state = {
-                auth: {
-                  uid: user.uid,
-                  email: user.email,
-                },
-                profile: snap.exists() ? snap.data() : null,
-                claims: idTokenResult?.claims || {},
-                isAuthenticated: true,
-                ready: true,
-              };
+            updateCachedData(() => ({
+              ready: true,
+              isAuthenticated: true,
 
-              // Persist minimal safe state
-              saveAuthState(state);
+              auth: {
+                uid: user.uid,
+                email: user.email,
+              },
 
-              updateCachedData(() => state);
-            } catch (error) {
-              // Fail-safe: still authenticated
-              updateCachedData(() => ({
-                auth: {
-                  uid: user.uid,
-                  email: user.email,
-                },
-                profile: null,
-                claims: {},
-                isAuthenticated: true,
-                ready: true,
-              }));
-            }
-          });
+              profile: snap.exists() ? snap.data() : null,
+
+              claims: tokenResult.claims,
+            }));
+          } catch (error) {
+            // 🧯 Fail-safe: still mark auth as resolved
+            updateCachedData(() => ({
+              ready: true,
+              isAuthenticated: true,
+              auth: {
+                uid: user.uid,
+                email: user.email,
+              },
+              profile: null,
+              claims: null,
+            }));
+          }
         });
 
-        /* -------------------------------------------------
-           4️⃣ CLEANUP
-           ------------------------------------------------- */
         await cacheEntryRemoved;
-        unsubscribeAuth();
-        if (unsubscribeUserDoc) unsubscribeUserDoc();
+        unsubscribe();
       },
     }),
 

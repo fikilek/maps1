@@ -162,7 +162,6 @@ const CascadingSelect = ({
       style={{
         marginBottom: 12,
         opacity: enabled ? 1 : 0.5,
-        flexDirection: "row",
       }}
     >
       <Text style={{ marginBottom: 4 }}>{label}</Text>
@@ -183,27 +182,17 @@ const CascadingSelect = ({
      RENDER
   ========================= */
   return (
-    <View>
+    <View
+      style={{ flex: 1, flexDirection: "row", justifyContent: "space-around" }}
+    >
       {renderPicker("Country", countryId, setCountryId, countries, true)}
 
-      {renderPicker(
-        "Province",
-        provinceId,
-        setProvinceId,
-        provinces,
-        !!countryId
-      )}
+      {renderPicker("Prov", provinceId, setProvinceId, provinces, !!countryId)}
+
+      {renderPicker("Dm", districtId, setDistrictId, districts, !!provinceId)}
 
       {renderPicker(
-        "District Municipality",
-        districtId,
-        setDistrictId,
-        districts,
-        !!provinceId
-      )}
-
-      {renderPicker(
-        "Local Municipality",
+        "Lm",
         localMunicipalityId,
         setLocalMunicipalityId,
         localMunicipalities,
