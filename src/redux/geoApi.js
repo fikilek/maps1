@@ -1,8 +1,7 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { fsError, fsLog } from "./firestoreLogger";
-// import { fsLog, fsError } from "../utils/logger";
 
 /**
  * Geography API Slice
@@ -131,7 +130,7 @@ export const geoApi = createApi({
     }),
 
     /* =========================
-       LOCAL MUNICIPALITIES
+       LOCAL MUNICIPALITIES (BY DISTRICT)
     ========================= */
     getLocalMunicipalities: builder.query({
       queryFn: () => ({ data: [] }),
@@ -162,6 +161,53 @@ export const geoApi = createApi({
                 ...d.data(),
               }))
             );
+          },
+          (error) => fsError(scope, "snapshot error", error)
+        );
+
+        await cacheEntryRemoved;
+        fsLog(scope, "listener unsubscribed");
+        unsubscribe();
+      },
+    }),
+
+    /* =========================
+       LOCAL MUNICIPALITY (BY ID) 🔥 NEW
+       REQUIRED FOR MAPS + CASCADING SELECTOR
+    ========================= */
+    getLocalMunicipalityById: builder.query({
+      queryFn: () => ({ data: null }),
+
+      async onCacheEntryAdded(
+        localMunicipalityId,
+        { updateCachedData, cacheEntryRemoved }
+      ) {
+        console.log(
+          `getLocalMunicipalityById ----localMunicipalityId`,
+          localMunicipalityId
+        );
+        if (!localMunicipalityId) return;
+
+        const scope = `LM(id:${localMunicipalityId})`;
+        fsLog(scope, "listener created");
+
+        const unsubscribe = onSnapshot(
+          doc(db, "lms", localMunicipalityId),
+          (snap) => {
+            if (!snap.exists()) {
+              fsError(scope, "document does not exist");
+              updateCachedData(() => null);
+              return;
+            }
+
+            fsLog(scope, "snapshot", {
+              fromCache: snap.metadata.fromCache,
+            });
+
+            updateCachedData(() => ({
+              id: snap.id,
+              ...snap.data(),
+            }));
           },
           (error) => fsError(scope, "snapshot error", error)
         );
@@ -260,6 +306,7 @@ export const {
   useGetProvincesQuery,
   useGetDistrictsQuery,
   useGetLocalMunicipalitiesQuery,
+  useGetLocalMunicipalityByIdQuery, // 🔥 NEW
   useGetTownsQuery,
   useGetWardsQuery,
 } = geoApi;

@@ -4,19 +4,26 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  linkWithCredential,
+  onAuthStateChanged,
+  PhoneAuthProvider,
+  reauthenticateWithCredential,
+  sendEmailVerification,
   signInWithEmailAndPassword,
   signOut,
+  updateEmail,
+  updatePassword,
 } from "firebase/auth";
+
 import {
-  auth,
-  db,
   doc,
   getDoc,
-  onAuthStateChanged,
   serverTimestamp,
   setDoc,
   updateDoc,
-} from "../firebase/index";
+} from "firebase/firestore";
+import { auth, db } from "../firebase";
 import { clearAuthState } from "./authStorage";
 
 /*
@@ -151,7 +158,6 @@ export const authApi = createApi({
               status: "in_progress",
               steps: {
                 signupCompleted: true,
-                profileCompleted: true,
                 serviceProviderAssigned: false,
                 roleAssigned: false,
                 workbasesAssigned: false,
@@ -261,8 +267,11 @@ export const authApi = createApi({
     sendEmailVerification: builder.mutation({
       async queryFn() {
         try {
-          if (!auth.currentUser) throw new Error("No authenticated user");
-          await auth.currentUser.sendEmailVerification();
+          if (!auth.currentUser) {
+            throw new Error("No authenticated user");
+          }
+
+          await sendEmailVerification(auth.currentUser);
           return { data: true };
         } catch (error) {
           return { error };
@@ -270,19 +279,141 @@ export const authApi = createApi({
       },
     }),
 
+    /* =====================================================
+       SYNC EMAIL VERIFIED
+       ===================================================== */
     syncEmailVerified: builder.mutation({
       async queryFn({ uid }) {
         try {
           if (!auth.currentUser?.emailVerified) {
-            return { data: true };
+            // Email still not verified → nothing to sync
+            return { data: false };
           }
 
           const userRef = doc(db, "users", uid);
 
           await updateDoc(userRef, {
             "onboarding.steps.emailVerified": true,
+            "metadata.updatedAt": serverTimestamp(),
+            "metadata.updatedByUid": uid,
           });
 
+          return { data: true };
+        } catch (error) {
+          return { error };
+        }
+      },
+    }),
+
+    /* =====================================================
+       REAUTHENTICATE
+       ===================================================== */
+    reauthenticate: builder.mutation({
+      async queryFn({ password }) {
+        try {
+          const user = auth.currentUser;
+          if (!user?.email) {
+            throw new Error("No authenticated user");
+          }
+
+          const credential = EmailAuthProvider.credential(user.email, password);
+
+          await reauthenticateWithCredential(user, credential);
+          return { data: true };
+        } catch (error) {
+          return { error };
+        }
+      },
+    }),
+
+    /* =====================================================
+       UPDATE EMAIL VERIFIED
+       ===================================================== */
+    updateEmailVerified: builder.mutation({
+      async queryFn({ uid, email }) {
+        await updateDoc(doc(db, "users", uid), {
+          "identity.email": email,
+          "onboarding.steps.emailVerified": true,
+          "metadata.updatedAt": serverTimestamp(),
+        });
+        return { data: true };
+      },
+    }),
+
+    /* =====================================================
+       UPDATE EMAIL
+       ===================================================== */
+    updateEmail: builder.mutation({
+      async queryFn({ newEmail }) {
+        try {
+          if (!auth.currentUser) {
+            throw new Error("No authenticated user");
+          }
+
+          await updateEmail(auth.currentUser, newEmail);
+          await sendEmailVerification(auth.currentUser);
+
+          return { data: true };
+        } catch (error) {
+          return { error };
+        }
+      },
+    }),
+
+    /* =====================================================
+      SEND PHONE OTP
+      ===================================================== */
+    sendPhoneOtp: builder.mutation({
+      async queryFn({ phoneNumber, verifier }) {
+        try {
+          const provider = new PhoneAuthProvider(auth);
+          const verificationId = await provider.verifyPhoneNumber(
+            phoneNumber,
+            verifier
+          );
+          return { data: verificationId };
+        } catch (error) {
+          return { error };
+        }
+      },
+    }),
+
+    /* =====================================================
+      CONFIRM PHONE OTP
+      ===================================================== */
+    confirmPhoneOtp: builder.mutation({
+      async queryFn({ verificationId, code, uid, phoneNumber }) {
+        try {
+          const credential = PhoneAuthProvider.credential(verificationId, code);
+
+          // 🔑 Attach phone to existing user
+          await linkWithCredential(auth.currentUser, credential);
+
+          // 🔥 Update Firestore
+          await updateDoc(doc(db, "users", uid), {
+            "contact.phoneNumber": phoneNumber,
+            "onboarding.steps.phoneVerified": true,
+            "metadata.updatedAt": serverTimestamp(),
+          });
+
+          return { data: true };
+        } catch (error) {
+          return { error };
+        }
+      },
+    }),
+
+    /* =====================================================
+   UPDATE PASSWORD
+===================================================== */
+    updatePassword: builder.mutation({
+      async queryFn({ newPassword }) {
+        try {
+          if (!auth.currentUser) {
+            throw new Error("No authenticated user");
+          }
+
+          await updatePassword(auth.currentUser, newPassword);
           return { data: true };
         } catch (error) {
           return { error };
@@ -303,5 +434,9 @@ export const {
   useUpdateProfileMutation,
   useSelectActiveWorkbaseMutation,
   useSendEmailVerificationMutation,
-  useSyncEmailVerifiedMutation,
+  useReauthenticateMutation,
+  useUpdateEmailVerifiedMutation,
+  useSendPhoneOtpMutation,
+  useConfirmPhoneOtpMutation,
+  useUpdatePasswordMutation,
 } = authApi;
