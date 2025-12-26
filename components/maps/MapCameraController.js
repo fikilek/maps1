@@ -34,24 +34,3 @@ export default function MapCameraController({ mapRef, lm, town, ward }) {
 
   return null;
 }
-
-// // MapCameraController.js
-// import { useEffect } from "react";
-
-// export default function MapCameraController({ mapRef, lm }) {
-//   useEffect(() => {
-//     if (!mapRef?.current || !lm?.centroid) return;
-
-//     mapRef?.current?.animateToRegion(
-//       {
-//         latitude: lm?.centroid?.latitude,
-//         longitude: lm?.centroid?.longitude,
-//         latitudeDelta: 0.15,
-//         longitudeDelta: 0.15,
-//       },
-//       500
-//     );
-//   }, [lm, mapRef]);
-
-//   return null;
-// }
