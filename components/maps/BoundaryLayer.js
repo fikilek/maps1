@@ -25,8 +25,8 @@ export default function BoundaryLayer({ lm }) {
     <Polygon
       coordinates={coordinates}
       strokeColor="red"
-      strokeWidth={4}
-      fillColor="rgba(255,0,0,0.25)"
+      strokeWidth={1}
+      fillColor="rgba(255, 122, 122, 0.25)"
       tappable
     />
   );
