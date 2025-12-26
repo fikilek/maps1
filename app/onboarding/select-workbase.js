@@ -16,7 +16,7 @@ export default function SelectWorkbase() {
   const uid = authState?.auth?.uid;
 
   const [selectActiveWorkbase, { isLoading }] =
-    authApi.useSelectActiveWorkbaseMutation();
+    authApi.useSetActiveWorkbaseMutation();
 
   const handleContinue = async () => {
     if (!selected) return;

@@ -1,11 +1,38 @@
 // src/hooks/useActiveWorkbase.js
-import { useGetAuthStateQuery } from "../redux/authApi";
+import { useSelector } from "react-redux";
+import { authApi } from "../redux/authApi";
 
 export function useActiveWorkbase() {
-  const { data } = useGetAuthStateQuery();
+  console.log(" ");
+  console.log("useActiveWorkbase ----START START");
+  console.log(" ");
 
-  if (!data?.ready) return null;
-  if (!data.isAuthenticated) return null;
+  const authState = useSelector(
+    authApi.endpoints.getAuthState.select(undefined)
+  )?.data;
+  console.log("useActiveWorkbase ---authState", authState);
 
-  return data.profile?.access?.activeWorkbase?.id ?? null;
+  const { ready, isAuthenticated } = authState ?? {};
+  console.log("useActiveWorkbase ---ready", ready);
+  console.log("useActiveWorkbase ---isAuthenticated", isAuthenticated);
+
+  const { id } = authState?.profile?.access?.activeWorkbase ?? {};
+  console.log("useActiveWorkbase ---id", id);
+
+  if (!ready) return null;
+  if (!isAuthenticated) return null;
+
+  return id ?? null;
 }
+
+// // src/hooks/useActiveWorkbase.js
+// import { useGetAuthStateQuery } from "../redux/authApi";
+
+// export function useActiveWorkbase() {
+//   const { data } = useGetAuthStateQuery();
+
+//   if (!data?.ready) return null;
+//   if (!data.isAuthenticated) return null;
+
+//   return data.profile?.access?.activeWorkbase?.id ?? null;
+// }

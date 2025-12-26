@@ -1,30 +1,33 @@
 import { Polygon } from "react-native-maps";
 
-export default function BoundaryLayer({ lm, town, ward, erf }) {
-  const renderPolygon = (geo, color) => {
-    if (!geo?.geometry?.coordinates) return null;
+export default function BoundaryLayer({ lm }) {
+  console.log(``);
+  console.log(`BoundaryLayer ----RENDER RENDER`);
+  if (!lm?.geometry?.polygons?.length) return null;
+  console.log(
+    `BoundaryLayer ----lm?.geometry?.polygons?.length`,
+    lm?.geometry?.polygons?.length
+  );
 
-    const coords = geo.geometry.coordinates[0].map(([lng, lat]) => ({
-      latitude: lat,
-      longitude: lng,
-    }));
+  // 🔥 ANDROID FIX: use FIRST polygon + FIRST ring only
+  const ring = lm.geometry.polygons[0].rings[0];
+  // console.log(`BoundaryLayer ----ring`, ring);
 
-    return (
-      <Polygon
-        coordinates={coords}
-        strokeColor={color}
-        fillColor={`${color}33`}
-        strokeWidth={2}
-      />
-    );
-  };
+  const coordinates = ring.points.map((p) => ({
+    latitude: p.lat,
+    longitude: p.lng,
+  }));
+  // console.log(`BoundaryLayer ----coordinates`, coordinates);
+
+  console.log("Rendering polygon with points:", coordinates.length);
 
   return (
-    <>
-      {renderPolygon(lm, "#0033cc")}
-      {renderPolygon(town, "#009933")}
-      {renderPolygon(ward, "#ff9900")}
-      {renderPolygon(erf, "#cc0000")}
-    </>
+    <Polygon
+      coordinates={coordinates}
+      strokeColor="red"
+      strokeWidth={4}
+      fillColor="rgba(255,0,0,0.25)"
+      tappable
+    />
   );
 }

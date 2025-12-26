@@ -22,9 +22,10 @@ const GeoCascadingSelector = ({
   disabled = false,
 }) => {
   console.log(" ");
+  console.log("GeoCascadingSelector ----START START");
   console.log(" ");
-  console.log("GeoCascadingSelector ----START START");
-  console.log("GeoCascadingSelector ----START START");
+
+  console.log("GeoCascadingSelector ----activeWorkbaseId", activeWorkbaseId);
 
   /* =========================
   LOCKED LM (WORKBASE)

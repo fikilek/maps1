@@ -240,10 +240,16 @@ export const authApi = createApi({
     }),
 
     /* =====================================================
-       SELECT ACTIVE WORKBASE
+       SET ACTIVE WORKBASE
        ===================================================== */
-    selectActiveWorkbase: builder.mutation({
+    setActiveWorkbase: builder.mutation({
       async queryFn({ uid, workbase }) {
+        console.log(" ");
+        console.log("selectActiveWorkbase ----START START");
+        console.log(" ");
+
+        console.log("selectActiveWorkbase ----uid", uid);
+        console.log("selectActiveWorkbase ----workbase", workbase);
         try {
           const userRef = doc(db, "users", uid);
 
@@ -432,7 +438,7 @@ export const {
   useSigninMutation,
   useSignoutMutation,
   useUpdateProfileMutation,
-  useSelectActiveWorkbaseMutation,
+  useSetActiveWorkbaseMutation,
   useSendEmailVerificationMutation,
   useReauthenticateMutation,
   useUpdateEmailVerifiedMutation,
