@@ -4,8 +4,7 @@ import { ActivityIndicator, Text, View } from "react-native";
 
 import {
   useGetLocalMunicipalityByIdQuery,
-  useGetTownsQuery,
-  useGetWardsQuery,
+  useGetWardsByLocalMunicipalityQuery,
 } from "../../src/redux/geoApi";
 
 /**
@@ -25,7 +24,7 @@ const GeoCascadingSelector = ({
   console.log("GeoCascadingSelector ----START START");
   console.log(" ");
 
-  console.log("GeoCascadingSelector ----activeWorkbaseId", activeWorkbaseId);
+  // console.log("GeoCascadingSelector ----activeWorkbaseId", activeWorkbaseId);
 
   /* =========================
   LOCKED LM (WORKBASE)
@@ -33,41 +32,41 @@ const GeoCascadingSelector = ({
   const { data: lm } = useGetLocalMunicipalityByIdQuery(activeWorkbaseId, {
     skip: !activeWorkbaseId,
   });
-  console.log("GeoCascadingSelector ----lm", lm);
+  // console.log("GeoCascadingSelector ----lm", lm);
 
   /* =========================
      LOCAL SELECTION STATE
   ========================= */
-  const [townId, setTownId] = useState(null);
+  // const [townId, setTownId] = useState(null);
   const [wardId, setWardId] = useState(null);
 
   /* =========================
      RTK QUERY DATA
   ========================= */
-  const { data: towns = [] } = useGetTownsQuery(activeWorkbaseId, {
-    skip: !activeWorkbaseId,
-  });
+  // const { data: towns = [] } = useGetTownsQuery(activeWorkbaseId, {
+  //   skip: !activeWorkbaseId,
+  // });
 
-  const { data: wards = [] } = useGetWardsQuery(townId, {
-    skip: !townId,
+  const { data: wards = [] } = useGetWardsByLocalMunicipalityQuery(lm?.id, {
+    skip: !lm?.id,
   });
-
+  // console.log("GeoCascadingSelector ----wards", wards);
   /* =========================
      RESET LOGIC
   ========================= */
 
   // Change town → reset ward
-  useEffect(() => {
-    setWardId(null);
-  }, [townId]);
+  // useEffect(() => {
+  //   setWardId(null);
+  // }, [townId]);
 
   /* =========================
      DERIVED OBJECTS (STABLE)
   ========================= */
-  const selectedTown = useMemo(
-    () => towns.find((t) => t.id === townId) || null,
-    [towns, townId]
-  );
+  // const selectedTown = useMemo(
+  //   () => towns.find((t) => t.id === townId) || null,
+  //   [towns, townId]
+  // );
 
   const selectedWard = useMemo(
     () => wards.find((w) => w.id === wardId) || null,
@@ -82,17 +81,24 @@ const GeoCascadingSelector = ({
 
     onChange?.({
       lm,
-      town: selectedTown,
+      // town: selectedTown,
       ward: selectedWard,
     });
-  }, [lm, selectedTown, selectedWard]);
+  }, [lm, selectedWard]);
 
   /* =========================
      PICKER RENDER HELPER
   ========================= */
   const renderPicker = (label, value, onChange, items, enabled = true) => (
-    <View style={{ marginBottom: 12, opacity: enabled ? 1 : 0.5 }}>
+    <View
+      style={{
+        marginBottom: 12,
+        opacity: enabled ? 1 : 0.5,
+        backgroundColor: "#7cc780ff",
+      }}
+    >
       <Text style={{ marginBottom: 4 }}>{label}</Text>
+      <Text style={{ marginBottom: 4 }}>{value}</Text>
       <Picker
         selectedValue={value}
         enabled={enabled && !disabled}
@@ -100,11 +106,7 @@ const GeoCascadingSelector = ({
       >
         <Picker.Item label="Select…" value={null} />
         {items.map((item) => (
-          <Picker.Item
-            key={item.id}
-            label={item.name || item.wardNumber}
-            value={item.id}
-          />
+          <Picker.Item key={item?.id} label={item?.name} value={item?.id} />
         ))}
       </Picker>
     </View>
@@ -129,12 +131,14 @@ const GeoCascadingSelector = ({
         <Text>{lm.name}</Text>
       </View>
 
-      {/* TOWN SELECT */}
-      {renderPicker("Town", townId, setTownId, towns, towns.length > 0)}
+      {/* TOWN SELECT (DISABLED FOR NOW) */}
+      <View style={{ marginBottom: 16, opacity: 0.5 }}>
+        <Text style={{ fontWeight: "bold" }}>Town</Text>
+        <Text>Not configured</Text>
+      </View>
 
-      {/* WARD SELECT */}
-      {townId &&
-        renderPicker("Ward", wardId, setWardId, wards, wards.length > 0)}
+      {/* WARD SELECT (DIRECT FROM LM) */}
+      {renderPicker("Ward", wardId, setWardId, wards, wards.length > 0)}
     </View>
   );
 };

@@ -10,14 +10,14 @@ export function useActiveWorkbase() {
   const authState = useSelector(
     authApi.endpoints.getAuthState.select(undefined)
   )?.data;
-  console.log("useActiveWorkbase ---authState", authState);
+  // console.log("useActiveWorkbase ---authState", authState);
 
   const { ready, isAuthenticated } = authState ?? {};
-  console.log("useActiveWorkbase ---ready", ready);
-  console.log("useActiveWorkbase ---isAuthenticated", isAuthenticated);
+  // console.log("useActiveWorkbase ---ready", ready);
+  // console.log("useActiveWorkbase ---isAuthenticated", isAuthenticated);
 
   const { id } = authState?.profile?.access?.activeWorkbase ?? {};
-  console.log("useActiveWorkbase ---id", id);
+  // console.log("useActiveWorkbase ---id", id);
 
   if (!ready) return null;
   if (!isAuthenticated) return null;

@@ -1,5 +1,12 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import { db } from "../firebase";
 import { fsError, fsLog } from "./firestoreLogger";
 
@@ -10,6 +17,14 @@ import { fsError, fsLog } from "./firestoreLogger";
 export const geoApi = createApi({
   reducerPath: "geoApi",
   baseQuery: fakeBaseQuery(),
+  tagTypes: [
+    "Country",
+    "Province",
+    "District",
+    "LocalMunicipality",
+    "Town",
+    "Ward", // 🔥 ADD THIS
+  ],
   endpoints: (builder) => ({
     /* =========================
        COUNTRIES
@@ -295,6 +310,64 @@ export const geoApi = createApi({
         unsubscribe();
       },
     }),
+
+    /* =========================
+       GET WARDS BY LOCAL MUNICIPALITY
+    ========================= */
+    getWardsByLocalMunicipality: builder.query({
+      queryFn: async (
+        localMunicipalityId,
+        { signal, dispatch },
+        _extraOptions,
+        baseQuery
+      ) => {
+        if (!localMunicipalityId) {
+          return {
+            error: {
+              status: "BAD_REQUEST",
+              error: "localMunicipalityId is required",
+            },
+          };
+        }
+
+        return new Promise((resolve, reject) => {
+          const q = query(
+            collection(db, "wards"),
+            where("parents.localMunicipalityId", "==", localMunicipalityId),
+            orderBy("code", "asc")
+          );
+
+          const unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+              const wards = snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+
+              resolve({ data: wards });
+            },
+            (error) => {
+              console.error("Ward stream error", error);
+              reject({ error });
+            }
+          );
+
+          // 🔥 VERY IMPORTANT: cleanup on unsubscribe
+          signal.addEventListener("abort", () => {
+            unsubscribe();
+          });
+        });
+      },
+
+      providesTags: (result = []) =>
+        result.length
+          ? [
+              ...result.map(({ id }) => ({ type: "Ward", id })),
+              { type: "Ward", id: "LIST" },
+            ]
+          : [{ type: "Ward", id: "LIST" }],
+    }),
   }),
 });
 
@@ -309,4 +382,5 @@ export const {
   useGetLocalMunicipalityByIdQuery, // 🔥 NEW
   useGetTownsQuery,
   useGetWardsQuery,
+  useGetWardsByLocalMunicipalityQuery,
 } = geoApi;
