@@ -23,7 +23,8 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../firebase";
 import { clearAuthState } from "./authStorage";
 
 /*
@@ -170,78 +171,6 @@ export const authApi = createApi({
         }
       },
     }),
-    // signupGst: builder.mutation({
-    //   async queryFn({ email, password, name, surname, serviceProvider }) {
-    //     try {
-    //       const cred = await createUserWithEmailAndPassword(
-    //         auth,
-    //         email,
-    //         password
-    //       );
-
-    //       const uid = cred.user.uid;
-    //       const userRef = doc(db, "users", uid);
-
-    //       await setDoc(userRef, {
-    //         uid,
-
-    //         identity: {
-    //           email,
-    //           name,
-    //           surname,
-    //         },
-
-    //         contact: {
-    //           phoneNumber: null,
-    //         },
-
-    //         employment: {
-    //           role: "GST",
-    //           serviceProvider: {
-    //             id: serviceProvider.id,
-    //             name: serviceProvider.name,
-    //           },
-    //         },
-
-    //         access: {
-    //           workbases: [],
-    //           activeWorkbase: null,
-    //         },
-
-    //         onboarding: {
-    //           status: "AWAITING_SP_CONFIRMATION",
-    //           completedAt: null,
-    //           steps: {
-    //             signupCompleted: true,
-    //             spConfirmed: false,
-    //             workbasesAssigned: false,
-    //             activeWorkbaseSelected: false,
-    //             emailVerified: false,
-    //             phoneVerified: false,
-    //           },
-    //         },
-
-    //         status: {
-    //           isActive: true,
-    //           isSuspended: false,
-    //           suspendedReason: null,
-    //         },
-
-    //         metadata: {
-    //           createdAt: serverTimestamp(),
-    //           createdByUid: uid,
-    //           updatedAt: serverTimestamp(),
-    //           updatedByUid: uid,
-    //         },
-    //       });
-
-    //       return { data: true };
-    //     } catch (error) {
-    //       return { error };
-    //     }
-    //   },
-    // }),
-
     /* =====================================================
        SIGN IN
        ===================================================== */
@@ -480,6 +409,28 @@ export const authApi = createApi({
         }
       },
     }),
+
+    /* =====================================================
+       CREATE ADMIN (SPU ONLY)
+       ===================================================== */
+    createAdminUser: builder.mutation({
+      async queryFn({ email, password, displayName }) {
+        try {
+          const fn = httpsCallable(functions, "createAdminUser");
+
+          const res = await fn({
+            email,
+            password,
+            displayName,
+          });
+
+          return { data: res.data };
+        } catch (error) {
+          return { error };
+        }
+      },
+      invalidatesTags: ["Admin", "User"],
+    }),
   }),
 });
 
@@ -499,4 +450,5 @@ export const {
   useSendPhoneOtpMutation,
   useConfirmPhoneOtpMutation,
   useUpdatePasswordMutation,
+  useCreateAdminUserMutation,
 } = authApi;

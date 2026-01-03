@@ -17,6 +17,7 @@ import ServiceProviderSelect, {
   gstSignupInitialValues,
   gstSignupValidationSchema,
 } from "../../src/features/userHelper";
+import { auth } from "../../src/firebase";
 import { useSignupGstMutation } from "../../src/redux/authApi";
 
 // ⚠️ TEMP: replace with real SP query later
@@ -50,6 +51,13 @@ const Signup = () => {
       });
 
       if (result.data) {
+        await auth.currentUser.getIdToken(true); // 🔑 force refresh
+        const tokenResult = await auth.currentUser.getIdTokenResult();
+        console.log(`Signup ----handleSubmit ----tokenResult`, tokenResult);
+        console.log(
+          `Signup ----handleSubmit ----AUTH CLAIMS:tokenResult.claims`,
+          tokenResult.claims
+        );
         resetForm();
       } else {
         setIsRedirecting(false);

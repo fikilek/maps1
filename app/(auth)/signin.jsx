@@ -13,10 +13,11 @@ import FormErrorText from "../../components/forms/FormErrorText";
 import FormTitle from "../../components/forms/FormTitle";
 
 import { userSigninValidationSchema } from "../../src/features/userHelper";
+import { auth } from "../../src/firebase";
 import { useSigninMutation } from "../../src/redux/authApi";
 
 const signinInitialValues = {
-  email: "sveve@gmail.com",
+  email: "spu@smars.co.za",
   password: "fkpass123",
 };
 
@@ -28,16 +29,26 @@ const Signin = () => {
   const isLoading = isMutationLoading || isRedirecting;
 
   const handleSubmit = async (values, { resetForm }) => {
+    console.log(`Signin ----handleSubmit ----values`, values);
     try {
       setIsRedirecting(true); // Start the spinner
       const signinResult = await signin({
         email: values.email.toLowerCase().trim(),
         password: values.password,
       });
+      console.log(`Signin ----handleSubmit ----signinResult`, signinResult);
 
       if (signinResult.data) {
         // IMPORTANT: Do NOT set isRedirecting(false) here.
         // Let the AuthGate handle the transition while we keep spinning.
+        await auth.currentUser.getIdToken(true); // 🔑 force refresh
+        const tokenResult = await auth.currentUser.getIdTokenResult();
+        console.log(`Signin ----handleSubmit ----tokenResult`, tokenResult);
+        console.log(
+          `Signin ----handleSubmit ----AUTH CLAIMS:tokenResult.claims`,
+          tokenResult.claims
+        );
+
         resetForm();
       } else {
         setIsRedirecting(false); // Only stop spinning if it failed
