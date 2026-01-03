@@ -115,70 +115,52 @@ export const authApi = createApi({
     }),
 
     /* =====================================================
-       SIGN UP
-       ===================================================== */
-    signup: builder.mutation({
-      async queryFn({ email, password, name, surname, phoneNumber }) {
+        SIGN UP GST
+      ===================================================== */
+    /* =====================================================
+        SIGN UP GST (Refined for iREPS Logic)
+      ===================================================== */
+    /* =====================================================
+        SIGN UP GST (Locked to Guest Role)
+      ===================================================== */
+    signupGst: builder.mutation({
+      async queryFn({ email, password, name, surname, serviceProvider }) {
         try {
           const cred = await createUserWithEmailAndPassword(
             auth,
             email,
             password
           );
-
           const uid = cred.user.uid;
-          const userRef = doc(db, "users", uid);
 
-          await setDoc(userRef, {
+          await setDoc(doc(db, "users", uid), {
             uid,
-
-            identity: {
-              email,
-              name,
-              surname,
-            },
-
-            contact: {
-              phoneNumber,
-            },
-
+            identity: { email, name, surname },
             employment: {
-              role: "gst",
-              serviceProvider: null,
-              companyName: null,
-              supervisor: null,
+              // 🛡️ LOCKED: All public signups start as GST
+              role: "GST",
+              serviceProvider: {
+                id: serviceProvider.id,
+                name: serviceProvider.name,
+              },
             },
-
             access: {
               workbases: [],
               activeWorkbase: null,
             },
-
             onboarding: {
-              status: "in_progress",
+              // 🛑 LOCKED: Must wait for manual confirmation
+              status: "AWAITING_SP_CONFIRMATION",
               steps: {
                 signupCompleted: true,
-                serviceProviderAssigned: false,
-                roleAssigned: false,
+                spConfirmed: false,
                 workbasesAssigned: false,
                 activeWorkbaseSelected: false,
-                emailVerified: false,
-                phoneVerified: false,
               },
-              completedAt: null,
             },
-
-            status: {
-              isActive: true,
-              isSuspended: false,
-              suspendedReason: null,
-            },
-
             metadata: {
               createdAt: serverTimestamp(),
-              createdByUid: uid,
               updatedAt: serverTimestamp(),
-              updatedByUid: uid,
             },
           });
 
@@ -188,6 +170,77 @@ export const authApi = createApi({
         }
       },
     }),
+    // signupGst: builder.mutation({
+    //   async queryFn({ email, password, name, surname, serviceProvider }) {
+    //     try {
+    //       const cred = await createUserWithEmailAndPassword(
+    //         auth,
+    //         email,
+    //         password
+    //       );
+
+    //       const uid = cred.user.uid;
+    //       const userRef = doc(db, "users", uid);
+
+    //       await setDoc(userRef, {
+    //         uid,
+
+    //         identity: {
+    //           email,
+    //           name,
+    //           surname,
+    //         },
+
+    //         contact: {
+    //           phoneNumber: null,
+    //         },
+
+    //         employment: {
+    //           role: "GST",
+    //           serviceProvider: {
+    //             id: serviceProvider.id,
+    //             name: serviceProvider.name,
+    //           },
+    //         },
+
+    //         access: {
+    //           workbases: [],
+    //           activeWorkbase: null,
+    //         },
+
+    //         onboarding: {
+    //           status: "AWAITING_SP_CONFIRMATION",
+    //           completedAt: null,
+    //           steps: {
+    //             signupCompleted: true,
+    //             spConfirmed: false,
+    //             workbasesAssigned: false,
+    //             activeWorkbaseSelected: false,
+    //             emailVerified: false,
+    //             phoneVerified: false,
+    //           },
+    //         },
+
+    //         status: {
+    //           isActive: true,
+    //           isSuspended: false,
+    //           suspendedReason: null,
+    //         },
+
+    //         metadata: {
+    //           createdAt: serverTimestamp(),
+    //           createdByUid: uid,
+    //           updatedAt: serverTimestamp(),
+    //           updatedByUid: uid,
+    //         },
+    //       });
+
+    //       return { data: true };
+    //     } catch (error) {
+    //       return { error };
+    //     }
+    //   },
+    // }),
 
     /* =====================================================
        SIGN IN
@@ -256,6 +309,7 @@ export const authApi = createApi({
           await updateDoc(userRef, {
             "access.activeWorkbase": workbase,
             "onboarding.steps.activeWorkbaseSelected": true,
+            "onboarding.status": "ACTIVE_WORKBASE_SELECTED",
             "metadata.updatedAt": serverTimestamp(),
             "metadata.updatedByUid": uid,
           });
@@ -434,7 +488,7 @@ export const authApi = createApi({
    ===================================================== */
 export const {
   useGetAuthStateQuery,
-  useSignupMutation,
+  useSignupGstMutation,
   useSigninMutation,
   useSignoutMutation,
   useUpdateProfileMutation,

@@ -1,22 +1,17 @@
 import { useRouter } from "expo-router";
-import { Text, TouchableOpacity } from "react-native";
+import { Pressable, Text } from "react-native";
 
-const BtnRouting = (props) => {
-  const { destinationRoute, title, color = "indigo" } = props;
-  // console.log(`destinationRoute`, destinationRoute);
+export default function BtnRouting({ destinationRoute, title }) {
   const router = useRouter();
+
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={() => {
-        console.log(`Routing to: ${destinationRoute}`);
-        router.push(destinationRoute);
+        console.log("BtnRouting ----navigate on press", destinationRoute);
+        router.replace(destinationRoute);
       }}
     >
-      <Text style={{ fontSize: 13, fontWeight: "bold", color: color }}>
-        {title}
-      </Text>
-    </TouchableOpacity>
+      <Text style={{ color: "blue", fontWeight: "500" }}>{title}</Text>
+    </Pressable>
   );
-};
-
-export default BtnRouting;
+}

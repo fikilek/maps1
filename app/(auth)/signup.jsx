@@ -1,10 +1,4 @@
-import {
-  Ionicons,
-  MaterialCommunityIcons,
-  MaterialIcons,
-  Octicons,
-} from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Ionicons, MaterialIcons, Octicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Formik } from "formik";
 import { useState } from "react";
@@ -14,48 +8,62 @@ import BtnForm from "../../components/BtnForm";
 import BtnRouting from "../../components/BtnRouting";
 import FormContainer from "../../components/forms/FormContainer";
 import FormControlWrappper from "../../components/forms/FormControlWrappper";
+import FormErrorText from "../../components/forms/FormErrorText";
 import FormTitle from "../../components/forms/FormTitle";
 import KeyboardView from "../../components/KeyboardView";
 
-import FormErrorText from "../../components/forms/FormErrorText";
-import {
-  userNewFormData,
-  userValidationSchema,
+import { Image } from "expo-image";
+import ServiceProviderSelect, {
+  gstSignupInitialValues,
+  gstSignupValidationSchema,
 } from "../../src/features/userHelper";
-import { useSignupMutation } from "../../src/redux/authApi";
+import { useSignupGstMutation } from "../../src/redux/authApi";
+
+// ⚠️ TEMP: replace with real SP query later
+const serviceProviders = [
+  { id: "sp1", name: "Thabang" },
+  { id: "sp2", name: "Elsa" },
+  { id: "sp3", name: "Lefu Meters" },
+  { id: "sp4", name: "Thato" },
+  { id: "sp5", name: "Rste" },
+];
 
 const Signup = () => {
   const router = useRouter();
-  const [signup, { isLoading }] = useSignupMutation();
+  const [signupGst, { isLoading: isMutationLoading }] = useSignupGstMutation();
   const [showPassword, setShowPassword] = useState(false);
 
+  const [isRedirecting, setIsRedirecting] = useState(false); // New state
+  // Combine them for the UI
+  const isLoading = isMutationLoading || isRedirecting;
+
   const handleSubmit = async (values, { resetForm }) => {
-    console.log(`Signup ---handleSubmit ---values`, values);
+    console.log(`Signup ----handleSubmit ----values`, values);
     try {
-      const result = await signup({
+      setIsRedirecting(true); // Start the spinner
+      const result = await signupGst({
         email: values.email.toLowerCase().trim(),
         password: values.password,
         name: values.name.trim(),
         surname: values.surname.trim(),
-        phoneNumber: values.phoneNumber.trim(),
+        serviceProvider: values.serviceProvider,
       });
-      console.log(`Signup ---handleSubmit ---result`, result);
 
       if (result.data) {
         resetForm();
-        router.replace("/(app)");
       } else {
-        Alert.alert("Sign Up", "Sign up failed. Please try again.");
+        setIsRedirecting(false);
+        Alert.alert("Sign Up Failed", "Please try again.");
       }
-    } catch {
-      Alert.alert("Sign Up", "Unexpected error occurred.");
+    } catch (err) {
+      setIsRedirecting(false);
+      Alert.alert("Error", "Unexpected error occurred.");
     }
   };
 
   return (
     <KeyboardView>
       <FormContainer>
-        {/* Signup image */}
         <Image
           source={require("../../assets/images/register.png")}
           style={{ height: 150 }}
@@ -63,8 +71,8 @@ const Signup = () => {
         />
 
         <Formik
-          initialValues={userNewFormData}
-          validationSchema={userValidationSchema}
+          initialValues={gstSignupInitialValues}
+          validationSchema={gstSignupValidationSchema}
           onSubmit={handleSubmit}
         >
           {({
@@ -74,31 +82,24 @@ const Signup = () => {
             handleChange,
             handleBlur,
             handleSubmit,
+            setFieldValue,
             resetForm,
           }) => (
             <View style={{ margin: 10 }}>
               <FormTitle title="Signup" />
 
-              <View style={{ gap: 25, width: "100%" }}>
+              <View style={{ gap: 22 }}>
                 {/* Surname */}
                 <FormControlWrappper>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <Ionicons name="person-add" size={20} color="gray" />
-                    <TextInput
-                      placeholder="Surname"
-                      value={values.surname}
-                      onChangeText={handleChange("surname")}
-                      onBlur={handleBlur("surname")}
-                      editable={!isLoading}
-                      style={{ flex: 1 }}
-                    />
-                  </View>
+                  <Ionicons name="person-add" size={20} color="gray" />
+                  <TextInput
+                    placeholder="Surname"
+                    value={values.surname}
+                    onChangeText={handleChange("surname")}
+                    onBlur={handleBlur("surname")}
+                    editable={!isLoading}
+                    style={{ flex: 1 }}
+                  />
                   <FormErrorText
                     touched={touched.surname}
                     error={errors.surname}
@@ -107,80 +108,51 @@ const Signup = () => {
 
                 {/* Name */}
                 <FormControlWrappper>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <Ionicons
-                      name="person-add-outline"
-                      size={20}
-                      color="gray"
-                    />
-                    <TextInput
-                      placeholder="Name"
-                      value={values.name}
-                      onChangeText={handleChange("name")}
-                      onBlur={handleBlur("name")}
-                      editable={!isLoading}
-                      style={{ flex: 1 }}
-                    />
-                  </View>
+                  <Ionicons name="person-add-outline" size={20} color="gray" />
+                  <TextInput
+                    placeholder="Name"
+                    value={values?.name}
+                    onChangeText={handleChange("name")}
+                    onBlur={handleBlur("name")}
+                    editable={!isLoading}
+                    style={{ flex: 1 }}
+                  />
                   <FormErrorText touched={touched.name} error={errors.name} />
                 </FormControlWrappper>
 
                 {/* Email */}
                 <FormControlWrappper>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <Octicons name="mail" size={20} color="gray" />
-                    <TextInput
-                      placeholder="Email"
-                      value={values.email}
-                      onChangeText={handleChange("email")}
-                      onBlur={handleBlur("email")}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      editable={!isLoading}
-                      style={{ flex: 1 }}
-                    />
-                  </View>
+                  <Octicons name="mail" size={20} color="gray" />
+                  <TextInput
+                    placeholder="Email"
+                    value={values?.email}
+                    onChangeText={handleChange("email")}
+                    onBlur={handleBlur("email")}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    editable={!isLoading}
+                    style={{ flex: 1 }}
+                  />
                   <FormErrorText touched={touched.email} error={errors.email} />
                 </FormControlWrappper>
 
                 {/* Password */}
                 <FormControlWrappper>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <Octicons name="lock" size={20} color="gray" />
-                    <TextInput
-                      placeholder="Password"
-                      value={values.password}
-                      onChangeText={handleChange("password")}
-                      onBlur={handleBlur("password")}
-                      secureTextEntry={!showPassword}
-                      editable={!isLoading}
-                      style={{ flex: 1 }}
-                    />
-                    <Octicons
-                      name={showPassword ? "eye" : "eye-closed"}
-                      size={22}
-                      color="gray"
-                      onPress={() => setShowPassword((prev) => !prev)}
-                    />
-                  </View>
+                  <Octicons name="lock" size={20} color="gray" />
+                  <TextInput
+                    placeholder="Password"
+                    value={values?.password}
+                    onChangeText={handleChange("password")}
+                    onBlur={handleBlur("password")}
+                    secureTextEntry={!showPassword}
+                    editable={!isLoading}
+                    style={{ flex: 1 }}
+                  />
+                  <Octicons
+                    name={showPassword ? "eye" : "eye-closed"}
+                    size={22}
+                    onPress={() => setShowPassword((p) => !p)}
+                  />
                   <FormErrorText
                     touched={touched.password}
                     error={errors.password}
@@ -189,65 +161,39 @@ const Signup = () => {
 
                 {/* Confirm Password */}
                 <FormControlWrappper>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <MaterialIcons name="password" size={20} color="gray" />
-                    <TextInput
-                      placeholder="Confirm Password"
-                      value={values.confirmPassword}
-                      onChangeText={handleChange("confirmPassword")}
-                      onBlur={handleBlur("confirmPassword")}
-                      secureTextEntry={!showPassword}
-                      editable={!isLoading}
-                      style={{ flex: 1 }}
-                    />
-                    <Octicons
-                      name={showPassword ? "eye" : "eye-closed"}
-                      size={22}
-                      color="gray"
-                      onPress={() => setShowPassword((prev) => !prev)}
-                    />
-                  </View>
+                  <MaterialIcons name="password" size={20} color="gray" />
+                  <TextInput
+                    placeholder="Confirm Password"
+                    value={values?.confirmPassword}
+                    onChangeText={handleChange("confirmPassword")}
+                    onBlur={handleBlur("confirmPassword")}
+                    secureTextEntry={!showPassword}
+                    editable={!isLoading}
+                    style={{ flex: 1 }}
+                  />
+                  <Octicons
+                    name={showPassword ? "eye" : "eye-closed"}
+                    size={22}
+                    onPress={() => setShowPassword((p) => !p)}
+                  />
                   <FormErrorText
                     touched={touched.confirmPassword}
                     error={errors.confirmPassword}
                   />
                 </FormControlWrappper>
 
-                {/* Phone Number */}
-                <FormControlWrappper>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <MaterialCommunityIcons
-                      name="cellphone-basic"
-                      size={22}
-                      color="gray"
-                    />
-                    <TextInput
-                      placeholder="Phone Number"
-                      value={values.phoneNumber}
-                      onChangeText={handleChange("phoneNumber")}
-                      onBlur={handleBlur("phoneNumber")}
-                      keyboardType="phone-pad"
-                      editable={!isLoading}
-                      style={{ flex: 1 }}
-                    />
-                  </View>
-                  <FormErrorText
-                    touched={touched.phoneNumber}
-                    error={errors.phoneNumber}
-                  />
-                </FormControlWrappper>
+                {/* Service Provider Selector */}
+
+                <ServiceProviderSelect
+                  value={values.serviceProvider}
+                  options={serviceProviders} // from Firestore / RTK Query
+                  disabled={isLoading}
+                  onSelect={(sp) => setFieldValue("serviceProvider", sp)}
+                />
+                <FormErrorText
+                  touched={touched.serviceProvider}
+                  error={errors.serviceProvider}
+                />
 
                 {/* Buttons */}
                 <View
@@ -258,7 +204,7 @@ const Signup = () => {
                 >
                   <BtnForm title="Reset" handlePress={resetForm} />
                   {isLoading ? (
-                    <ActivityIndicator size="large" color="black" />
+                    <ActivityIndicator />
                   ) : (
                     <BtnForm title="Submit" handlePress={handleSubmit} />
                   )}
@@ -268,14 +214,11 @@ const Signup = () => {
                 <View
                   style={{
                     flexDirection: "row",
-                    gap: 4,
                     justifyContent: "center",
-                    marginTop: 10,
+                    gap: 5,
                   }}
                 >
-                  <Text style={{ fontSize: 12, fontWeight: "500" }}>
-                    Already have an account?
-                  </Text>
+                  <Text>Already have an account?</Text>
                   <BtnRouting destinationRoute="/signin" title="Signin" />
                 </View>
               </View>

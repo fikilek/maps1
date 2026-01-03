@@ -1,6 +1,5 @@
 import { Octicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
 import { Formik } from "formik";
 import { useState } from "react";
 import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
@@ -17,32 +16,36 @@ import { userSigninValidationSchema } from "../../src/features/userHelper";
 import { useSigninMutation } from "../../src/redux/authApi";
 
 const signinInitialValues = {
-  email: "fikile@gmail.com",
+  email: "sveve@gmail.com",
   password: "fkpass123",
 };
 
 const Signin = () => {
-  const router = useRouter();
-  const [signin, { isLoading }] = useSigninMutation();
+  const [signin, { isLoading: isMutationLoading }] = useSigninMutation();
   const [showPassword, setShowPassword] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false); // New state
+  // Combine them for the UI
+  const isLoading = isMutationLoading || isRedirecting;
 
   const handleSubmit = async (values, { resetForm }) => {
-    console.log(`Signin ---handleSubmit ---values`, values);
     try {
+      setIsRedirecting(true); // Start the spinner
       const signinResult = await signin({
         email: values.email.toLowerCase().trim(),
         password: values.password,
       });
-      console.log(`Signin ---handleSubmit ---signinResult`, signinResult);
 
       if (signinResult.data) {
+        // IMPORTANT: Do NOT set isRedirecting(false) here.
+        // Let the AuthGate handle the transition while we keep spinning.
         resetForm();
-        router.replace("/(app)");
       } else {
-        Alert.alert("Sign In", "Sign in failed. Please try again.");
+        setIsRedirecting(false); // Only stop spinning if it failed
+        Alert.alert("Sign In Failed");
       }
     } catch {
-      Alert.alert("Sign In", "Unexpected error occurred.");
+      setIsRedirecting(false);
+      Alert.alert("Error");
     }
   };
 

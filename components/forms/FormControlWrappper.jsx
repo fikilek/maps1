@@ -10,9 +10,9 @@ const FormControlWrappper = (props) => {
   return (
     <View
       style={{
-        // flexDirection: "row",
-        // justifyContent: "space-between",
-        // alignItems: "center",
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
         height: 40,
         paddingHorizontal: 20,
         backgroundColor: backgroundColor,
