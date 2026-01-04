@@ -3,10 +3,8 @@ import { authApi } from "../redux/authApi";
 export const useAuth = () => {
   const { data, isLoading, isError } =
     authApi.endpoints.getAuthState.useQueryState();
-  console.log(`useAuth ----data`, data);
 
   const role = data?.profile?.employment?.role || "GST";
-  console.log(`useAuth ----role`, role);
 
   return {
     user: data?.auth || null,

@@ -26,6 +26,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import { clearAuthState } from "./authStorage";
+import { geoApi } from "./geoApi";
 
 /*
   Auth cache shape (ALWAYS consistent):
@@ -42,7 +43,7 @@ import { clearAuthState } from "./authStorage";
 export const authApi = createApi({
   reducerPath: "authApi",
   baseQuery: fakeBaseQuery(),
-
+  tagTypes: ["Admin", "User"],
   endpoints: (builder) => ({
     /* =====================================================
        AUTH STATE (BOOTSTRAP + REALTIME LISTENERS)
@@ -188,11 +189,19 @@ export const authApi = createApi({
     /* =====================================================
        SIGN OUT
        ===================================================== */
+
     signout: builder.mutation({
-      async queryFn() {
+      async queryFn(_, { dispatch }) {
         try {
           await signOut(auth);
+
+          // 🔥 CLEAR ALL FIRESTORE LISTENERS
+          dispatch(authApi.util.resetApiState());
+          dispatch(geoApi.util.resetApiState());
+          // add other APIs here (astsApi, erfsApi, etc.)
+
           clearAuthState();
+
           return { data: true };
         } catch (error) {
           return { error };
@@ -222,26 +231,30 @@ export const authApi = createApi({
     }),
 
     /* =====================================================
-       SET ACTIVE WORKBASE
-       ===================================================== */
+   SET / SWITCH ACTIVE WORKBASE
+   ===================================================== */
     setActiveWorkbase: builder.mutation({
       async queryFn({ uid, workbase }) {
-        console.log(" ");
-        console.log("selectActiveWorkbase ----START START");
-        console.log(" ");
-
-        console.log("selectActiveWorkbase ----uid", uid);
-        console.log("selectActiveWorkbase ----workbase", workbase);
         try {
           const userRef = doc(db, "users", uid);
 
-          await updateDoc(userRef, {
+          // Read current onboarding status
+          const snap = await getDoc(userRef);
+          if (!snap.exists()) throw new Error("User not found");
+
+          const user = snap.data();
+          const updates = {
             "access.activeWorkbase": workbase,
-            "onboarding.steps.activeWorkbaseSelected": true,
-            "onboarding.status": "ACTIVE_WORKBASE_SELECTED",
             "metadata.updatedAt": serverTimestamp(),
             "metadata.updatedByUid": uid,
-          });
+          };
+
+          // 🔒 Only set onboarding COMPLETED if not already done
+          if (user.onboarding?.status !== "COMPLETED") {
+            updates["onboarding.status"] = "COMPLETED";
+          }
+
+          await updateDoc(userRef, updates);
 
           return { data: true };
         } catch (error) {
@@ -414,19 +427,25 @@ export const authApi = createApi({
        CREATE ADMIN (SPU ONLY)
        ===================================================== */
     createAdminUser: builder.mutation({
-      async queryFn({ email, password, displayName }) {
+      async queryFn({ email, name, surname }) {
         try {
           const fn = httpsCallable(functions, "createAdminUser");
 
           const res = await fn({
             email,
-            password,
-            displayName,
+            name,
+            surname,
           });
 
           return { data: res.data };
         } catch (error) {
-          return { error };
+          console.log(`createAdminUser ----error`, error);
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              message: error?.message || "Create admin failed",
+            },
+          };
         }
       },
       invalidatesTags: ["Admin", "User"],

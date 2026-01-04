@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, View } from "react-native";
-import GeoCascadingSelector from "../../components/maps/GeoCascadingSelector";
-import MapContainer from "../../components/maps/MapContainer";
-import { useActiveWorkbase } from "../hooks/useActiveWorkbase";
-import { useGetWardsByLocalMunicipalityQuery } from "../redux/geoApi";
+import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
+import MapContainer from "../../../components/maps/MapContainer";
+import { useActiveWorkbase } from "../../hooks/useActiveWorkbase";
+import { useGetWardsByLocalMunicipalityQuery } from "../../redux/geoApi";
 
 export default function MapsScreen() {
-  console.log("MapsScreen ----START");
+  console.log("MapsScreen ---- mounted");
 
   /* =========================
   ACTIVE WORKBASE (LM ID)
@@ -31,17 +31,7 @@ export default function MapsScreen() {
     }
   );
 
-  useEffect(() => {
-    console.log(` `);
-    console.log("MapsScreen ----selection UPDATED", selection);
-    console.log(` `);
-  }, [selection]);
-
   const onChange = (partialSelection) => {
-    console.log(` `);
-    console.log("MapsScreen ----selection", selection);
-    console.log(` `);
-
     setSelection((prev) => ({
       ...prev,
       ...partialSelection,
@@ -80,7 +70,6 @@ export default function MapsScreen() {
       {/* GEO SELECTOR PANEL */}
       <GeoCascadingSelector
         activeWorkbaseId={activeWorkbaseId}
-        // onChange={setSelection}
         onChange={onChange}
       />
     </View>

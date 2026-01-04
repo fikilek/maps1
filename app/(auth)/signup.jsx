@@ -39,7 +39,7 @@ const Signup = () => {
   const isLoading = isMutationLoading || isRedirecting;
 
   const handleSubmit = async (values, { resetForm }) => {
-    console.log(`Signup ----handleSubmit ----values`, values);
+    // console.log(`Signup ----handleSubmit ----values`, values);
     try {
       setIsRedirecting(true); // Start the spinner
       const result = await signupGst({
@@ -53,11 +53,11 @@ const Signup = () => {
       if (result.data) {
         await auth.currentUser.getIdToken(true); // 🔑 force refresh
         const tokenResult = await auth.currentUser.getIdTokenResult();
-        console.log(`Signup ----handleSubmit ----tokenResult`, tokenResult);
-        console.log(
-          `Signup ----handleSubmit ----AUTH CLAIMS:tokenResult.claims`,
-          tokenResult.claims
-        );
+        // console.log(`Signup ----handleSubmit ----tokenResult`, tokenResult);
+        // console.log(
+        //   `Signup ----handleSubmit ----AUTH CLAIMS:tokenResult.claims`,
+        //   tokenResult.claims
+        // );
         resetForm();
       } else {
         setIsRedirecting(false);

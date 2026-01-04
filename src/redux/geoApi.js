@@ -8,6 +8,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { authApi } from "./authApi";
 import { fsError, fsLog } from "./firestoreLogger";
 
 /**
@@ -281,8 +282,20 @@ export const geoApi = createApi({
     getWards: builder.query({
       queryFn: () => ({ data: [] }),
 
-      async onCacheEntryAdded(townId, { updateCachedData, cacheEntryRemoved }) {
+      async onCacheEntryAdded(
+        townId,
+        { updateCachedData, cacheEntryRemoved, getState }
+      ) {
         if (!townId) return;
+
+        // 🔒 AUTH GUARD (CRITICAL)
+        const state = getState();
+        const authState = authApi.endpoints.getAuthState.select()(state)?.data;
+
+        if (!authState?.isAuthenticated) {
+          fsLog("Wards", "listener blocked (not authenticated)");
+          return;
+        }
 
         const scope = `Wards(town:${townId})`;
         fsLog(scope, "listener created");
@@ -315,12 +328,7 @@ export const geoApi = createApi({
        GET WARDS BY LOCAL MUNICIPALITY
     ========================= */
     getWardsByLocalMunicipality: builder.query({
-      queryFn: async (
-        localMunicipalityId,
-        { signal, dispatch },
-        _extraOptions,
-        baseQuery
-      ) => {
+      queryFn: async (localMunicipalityId, { signal, getState }) => {
         if (!localMunicipalityId) {
           return {
             error: {
@@ -328,6 +336,14 @@ export const geoApi = createApi({
               error: "localMunicipalityId is required",
             },
           };
+        }
+
+        // 🔒 AUTH GUARD (CRITICAL)
+        const state = getState();
+        const authState = authApi.endpoints.getAuthState.select()(state)?.data;
+
+        if (!authState?.isAuthenticated) {
+          return { data: [] }; // ⛔ DO NOT START LISTENER
         }
 
         return new Promise((resolve, reject) => {
@@ -353,21 +369,75 @@ export const geoApi = createApi({
             }
           );
 
-          // 🔥 VERY IMPORTANT: cleanup on unsubscribe
           signal.addEventListener("abort", () => {
             unsubscribe();
           });
         });
       },
-
-      providesTags: (result = []) =>
-        result.length
-          ? [
-              ...result.map(({ id }) => ({ type: "Ward", id })),
-              { type: "Ward", id: "LIST" },
-            ]
-          : [{ type: "Ward", id: "LIST" }],
     }),
+
+    // getWardsByLocalMunicipality: builder.query({
+    //   queryFn: async (
+    //     localMunicipalityId,
+    //     { signal, dispatch },
+    //     _extraOptions,
+    //     baseQuery
+    //   ) => {
+    //     if (!localMunicipalityId) {
+    //       return {
+    //         error: {
+    //           status: "BAD_REQUEST",
+    //           error: "localMunicipalityId is required",
+    //         },
+    //       };
+    //     }
+
+    //     // 🔒 AUTH GUARD (CRITICAL)
+    //     const state = getState();
+    //     const authState = authApi.endpoints.getAuthState.select()(state)?.data;
+
+    //     if (!authState?.isAuthenticated) {
+    //       return { data: [] }; // ⛔ DO NOT START LISTENER
+    //     }
+
+    //     return new Promise((resolve, reject) => {
+    //       const q = query(
+    //         collection(db, "wards"),
+    //         where("parents.localMunicipalityId", "==", localMunicipalityId),
+    //         orderBy("code", "asc")
+    //       );
+
+    //       const unsubscribe = onSnapshot(
+    //         q,
+    //         (snapshot) => {
+    //           const wards = snapshot.docs.map((doc) => ({
+    //             id: doc.id,
+    //             ...doc.data(),
+    //           }));
+
+    //           resolve({ data: wards });
+    //         },
+    //         (error) => {
+    //           console.error("Ward stream error", error);
+    //           reject({ error });
+    //         }
+    //       );
+
+    //       // 🔥 VERY IMPORTANT: cleanup on unsubscribe
+    //       signal.addEventListener("abort", () => {
+    //         unsubscribe();
+    //       });
+    //     });
+    //   },
+
+    //   providesTags: (result = []) =>
+    //     result.length
+    //       ? [
+    //           ...result.map(({ id }) => ({ type: "Ward", id })),
+    //           { type: "Ward", id: "LIST" },
+    //         ]
+    //       : [{ type: "Ward", id: "LIST" }],
+    // }),
   }),
 });
 

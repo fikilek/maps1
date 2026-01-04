@@ -1,13 +1,15 @@
 import * as Yup from "yup";
 
 export const createAdminSchema = Yup.object().shape({
-  email: Yup.string().email("Invalid email").required("Email is required"),
+  email: Yup.string()
+    .email("Invalid email address")
+    .required("Email is required"),
 
-  displayName: Yup.string()
-    .min(2, "Too short")
-    .required("Display name is required"),
+  name: Yup.string()
+    .min(2, "First name must be at least 2 characters")
+    .required("First name is required"),
 
-  password: Yup.string()
-    .min(8, "Minimum 8 characters")
-    .required("Temporary password is required"),
+  surname: Yup.string()
+    .min(2, "Surname must be at least 2 characters")
+    .required("Surname is required"),
 });

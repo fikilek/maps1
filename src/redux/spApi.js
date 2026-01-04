@@ -21,27 +21,29 @@ export const spApi = createApi({
      * - Map (offices)
      */
     getServiceProviders: builder.query({
-      async queryFn(_, { signal }) {
-        return new Promise((resolve, reject) => {
-          const ref = collection(db, "serviceProviders");
+      queryFn: () => ({ data: [] }), // initial empty state
 
-          const unsubscribe = onSnapshot(
-            ref,
-            (snap) => {
-              const data = snap.docs.map((d) => ({
-                id: d.id,
-                ...d.data(),
-              }));
-              resolve({ data });
-            },
-            (error) => reject({ error })
+      async onCacheEntryAdded(
+        _,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved }
+      ) {
+        const ref = collection(db, "serviceProviders");
+
+        await cacheDataLoaded;
+
+        const unsubscribe = onSnapshot(ref, (snap) => {
+          updateCachedData(() =>
+            snap.docs.map((d) => ({
+              id: d.id,
+              ...d.data(),
+            }))
           );
-
-          signal.addEventListener("abort", () => {
-            unsubscribe();
-          });
         });
+
+        await cacheEntryRemoved;
+        unsubscribe();
       },
+
       providesTags: ["ServiceProvider"],
     }),
 

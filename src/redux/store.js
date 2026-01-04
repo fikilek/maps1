@@ -9,6 +9,7 @@ import { reduxStorage } from "./reduxStorage";
 
 // Example future slices (if/when you add them)
 import offlineReducer from "./offlineSlice";
+import { spApi } from "./spApi";
 // import uiReducer from "./uiSlice";
 
 /* =====================================================
@@ -19,6 +20,7 @@ const rootReducer = combineReducers({
   [geoApi.reducerPath]: geoApi.reducer,
   [authApi.reducerPath]: authApi.reducer,
   [usersApi.reducerPath]: usersApi.reducer,
+  [spApi.reducerPath]: spApi.reducer, // ✅ ADD THIS
   // App-level slices (example)
   offline: offlineReducer,
   // ui: uiReducer,
@@ -38,7 +40,12 @@ const persistConfig = {
     // "ui",
   ],
 
-  blacklist: [geoApi.reducerPath, authApi.reducerPath, usersApi.reducerPath],
+  blacklist: [
+    geoApi.reducerPath,
+    authApi.reducerPath,
+    usersApi.reducerPath,
+    spApi.reducerPath,
+  ],
 };
 
 /* =====================================================
@@ -55,7 +62,12 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: false, // required for redux-persist
-    }).concat(geoApi.middleware, authApi.middleware, usersApi.middleware),
+    }).concat(
+      geoApi.middleware,
+      authApi.middleware,
+      usersApi.middleware,
+      spApi.middleware
+    ),
 });
 
 /* =====================================================

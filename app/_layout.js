@@ -29,16 +29,12 @@ function AuthGate() {
     if (!isLayoutReady || isLoading) return;
 
     const rootSegment = segments[0];
-    console.log(`AuthGate ----rootSegment`, rootSegment);
 
     const isAtWelcome = segments.length === 0; // The '/' route (index.js)
-    console.log(`AuthGate ----isAtWelcome`, isAtWelcome);
 
     const inAuthGroup = rootSegment === "(auth)";
-    console.log(`AuthGate ----inAuthGroup`, inAuthGroup);
 
     const inOnboardingGroup = rootSegment === "onboarding";
-    console.log(`AuthGate ----inOnboardingGroup`, inOnboardingGroup);
 
     // 1. If user is NOT logged in
     if (!user) {
@@ -82,7 +78,7 @@ function AuthGate() {
 
       {/* Overlay covers everything while loading or navigating */}
       {(!isLayoutReady || isLoading) && (
-        <View style={styles.loadingOverlay}>
+        <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color="#2196F3" />
           <Text style={styles.loadingText}>Synchronizing iREPS Data...</Text>
         </View>

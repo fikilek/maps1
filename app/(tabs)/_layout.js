@@ -1,24 +1,27 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import AppHeader from "../../components/AppHeader";
+import { useAuth } from "../../src/hooks/useAuth";
 
 export default function TabsLayout() {
+  const { profile } = useAuth();
+
+  const titles = {
+    maps: "Maps",
+    erfs: "ERFs",
+    trns: "Transactions",
+    asts: "Assets",
+    dashboard: "Dashboard",
+    admin: "Admin",
+  };
+
   return (
     <Tabs
-      screenOptions={{
-        header: ({ route }) => {
-          const titles = {
-            maps: "Maps",
-            erfs: "ERFs",
-            trns: "Transactions",
-            asts: "Assets",
-            dashboard: "Dashboard",
-            admin: "Admin",
-          };
-
-          return <AppHeader title={titles[route.name]} />;
-        },
-      }}
+      screenOptions={({ route }) => ({
+        header: () => (
+          <AppHeader title={titles[route.name]} user={{ profile }} />
+        ),
+      })}
     >
       <Tabs.Screen name="index" options={{ href: null }} />
 

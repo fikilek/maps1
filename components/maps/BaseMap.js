@@ -13,7 +13,7 @@ export default function BaseMap({ mapRef, children }) {
         longitudeDelta: 0.6,
       }}
     >
-      {children} {/* ⬅️ THIS IS CRITICAL */}
+      {children}
     </MapView>
   );
 }
