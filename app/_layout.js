@@ -10,9 +10,10 @@ import AuthBootstrap from "../src/navigation/AuthBootstrap";
 import { store } from "../src/redux/store";
 
 function AuthGate() {
-  const { user, status, isLoading } = useAuth();
+  console.log(`AuthGate ----mounted`);
   console.log(`AuthGate ----user`, user);
-  console.log(`AuthGate ----status`, status);
+
+  const { user, status, isLoading } = useAuth();
 
   const segments = useSegments();
   const router = useRouter();

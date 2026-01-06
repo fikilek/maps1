@@ -4,39 +4,26 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const { isSPU } = useAuth();
+  const { isSPU, isADM, isMNG } = useAuth();
+
+  const canViewUsers = isSPU || isADM || isMNG;
 
   return (
     <View style={styles.container}>
       {/* Service Providers */}
-      <Section title="Service Providers">
-        <Card
-          title="Service Providers"
-          subtitle="View & manage contractors"
-          onPress={() => router.push("/(tabs)/admin/service-providers")}
-        />
-
-        {isSPU && (
-          <Card
-            title="Register Contractor"
-            subtitle="Create a Main Contractor (MNC)"
-            onPress={() =>
-              router.push("/(tabs)/admin/service-providers/create")
-            }
-          />
-        )}
-      </Section>
+      <Card
+        title="Service Providers"
+        subtitle="View & manage contractors"
+        onPress={() => router.push("/(tabs)/admin/service-providers")}
+      />
 
       {/* Users */}
-
-      {isSPU && (
-        <Section title="Users">
-          <Card
-            title="Create Admin"
-            subtitle="Add a system administrator"
-            onPress={() => router.push("/(tabs)/admin/(spu)/create-admin")}
-          />
-        </Section>
+      {canViewUsers && (
+        <Card
+          title="Users"
+          subtitle="View platform users"
+          onPress={() => router.push("/(tabs)/admin/users")}
+        />
       )}
     </View>
   );
@@ -67,11 +54,6 @@ function Card({ title, subtitle, onPress }) {
 const styles = StyleSheet.create({
   container: {
     padding: 16,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 16,
   },
   section: {
     marginBottom: 24,

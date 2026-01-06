@@ -1,76 +1,62 @@
 import { useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
 import MapContainer from "../../../components/maps/MapContainer";
-import { useActiveWorkbase } from "../../hooks/useActiveWorkbase";
-import { useGetWardsByLocalMunicipalityQuery } from "../../redux/geoApi";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  useGetLocalMunicipalityByIdQuery,
+  useGetWardsByLocalMunicipalityQuery,
+} from "../../redux/geoApi";
 
 export default function MapsScreen() {
-  console.log("MapsScreen ---- mounted");
+  const {
+    activeWorkbase,
+    activeWorkbaseId,
+    isLoading: authLoading,
+  } = useAuth();
 
-  /* =========================
-  ACTIVE WORKBASE (LM ID)
-  ========================= */
-  const activeWorkbaseId = useActiveWorkbase();
-  // console.log("MapsScreen ----activeWorkbaseId", activeWorkbaseId);
+  const [selection, setSelection] = useState({ lm: null, ward: null });
 
-  /* =========================
-     GEO SELECTION STATE
-  ========================= */
-  const [selection, setSelection] = useState({
-    lm: null,
-    // town: null,
-    ward: null,
-    erf: null,
-  });
-
-  const { data: wards = [] } = useGetWardsByLocalMunicipalityQuery(
+  // 1. Fetch the FULL LM document (This includes the geometry points)
+  const { data: lmDetails } = useGetLocalMunicipalityByIdQuery(
     activeWorkbaseId,
     {
       skip: !activeWorkbaseId,
     }
   );
 
-  const onChange = (partialSelection) => {
-    setSelection((prev) => ({
-      ...prev,
-      ...partialSelection,
-    }));
-  };
+  // 2. Fetch the Wards
+  const { data: wards = [] } = useGetWardsByLocalMunicipalityQuery(
+    activeWorkbaseId,
+    { skip: !activeWorkbaseId }
+  );
 
-  /* =========================
-     HARD GUARD
-  ========================= */
-  if (!activeWorkbaseId) {
+  // Determine which LM object to use:
+  // Priority: 1. Manual selection, 2. Full DB details (with geometry), 3. Auth fallback
+  const displayLm = selection.lm || lmDetails || activeWorkbase;
+
+  if (authLoading && !activeWorkbaseId) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <ActivityIndicator size="large" />
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" color="#2196F3" />
+        <Text style={{ marginTop: 10 }}>Accessing Workbase...</Text>
       </View>
     );
   }
 
-  /* =========================
-     RENDER
-  ========================= */
   return (
     <View style={{ flex: 1 }}>
-      {/* MAP */}
       <MapContainer
-        lm={selection.lm}
+        // Passing displayLm ensures that as soon as lmDetails loads,
+        // the geometry is passed down to the BoundaryLayer
+        lm={displayLm}
         ward={selection.ward}
-        wards={wards} // ✅ PASS DATA
+        wards={wards}
       />
 
-      {/* GEO SELECTOR PANEL */}
       <GeoCascadingSelector
-        activeWorkbaseId={activeWorkbaseId}
-        onChange={onChange}
+        activeWorkbase={activeWorkbase}
+        onChange={setSelection}
       />
     </View>
   );

@@ -14,86 +14,119 @@ import {
 } from "../../src/redux/geoApi";
 
 const GeoCascadingSelector = ({
-  activeWorkbaseId,
+  activeWorkbase,
   onChange,
   disabled = false,
 }) => {
-  /* =========================
-     DATA
-  ========================= */
-  const { data: lm } = useGetLocalMunicipalityByIdQuery(activeWorkbaseId, {
-    skip: !activeWorkbaseId,
-  });
+  const activeWorkbaseId = activeWorkbase?.id;
 
-  const { data: wards = [], isLoading } = useGetWardsByLocalMunicipalityQuery(
-    lm?.id,
-    {
-      skip: !lm?.id,
-    }
-  );
+  // 1. Fetch Geometry/Details
+  const { data: lmDetails, isLoading: lmLoading } =
+    useGetLocalMunicipalityByIdQuery(activeWorkbaseId, {
+      skip: !activeWorkbaseId,
+    });
 
-  /* =========================
-     LOCAL UI STATE
-  ========================= */
+  // 2. Fetch Wards
+  const { data: wards = [], isLoading: wardsLoading } =
+    useGetWardsByLocalMunicipalityQuery(activeWorkbaseId, {
+      skip: !activeWorkbaseId,
+    });
+
   const [wardId, setWardId] = useState(null);
   const [wardDialogOpen, setWardDialogOpen] = useState(false);
+
+  // Reset ward if municipality changes
+  useEffect(() => {
+    if (activeWorkbaseId) setWardId(null);
+  }, [activeWorkbaseId]);
 
   const selectedWard = useMemo(
     () => wards.find((w) => w.id === wardId) || null,
     [wards, wardId]
   );
 
-  /* =========================
-     EMIT CHANGE (CONTRACT)
-  ========================= */
+  // Emit changes to parent
   useEffect(() => {
-    if (!lm) return;
-
-    onChange?.({
-      lm,
-      ward: selectedWard,
-    });
-  }, [lm, selectedWard]);
-
-  /* =========================
-     RENDER GUARDS
-  ========================= */
-  if (!lm) {
-    return (
-      <View style={{ padding: 16 }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
+    if (activeWorkbase || lmDetails) {
+      onChange?.({
+        lm: lmDetails || activeWorkbase,
+        ward: selectedWard,
+      });
+    }
+  }, [lmDetails, activeWorkbase, selectedWard]);
 
   /* =========================
-     RENDER
+      RENDER
   ========================= */
   return (
-    <View style={{ padding: 12 }}>
-      {/* WORKBASE (LOCKED) */}
-      <List.Section>
-        <List.Subheader>Workbase</List.Subheader>
-        <List.Item
-          title={lm.name}
-          left={(props) => <List.Icon {...props} icon="map" />}
-        />
-      </List.Section>
+    <View style={{ padding: 12, backgroundColor: "rgba(255,255,255,0.9)" }}>
+      {/* MUNICIPALITY SECTION */}
+      {/* MUNICIPALITY SECTION */}
+      <List.Item
+        title={activeWorkbase?.name || "Initializing..."}
+        description={
+          lmLoading
+            ? "Loading map boundaries..."
+            : "Tap to zoom to Municipality"
+        }
+        onPress={() => {
+          // 1. Clear the local ward selection
+          setWardId(null);
+          // 2. The useEffect in this component will automatically
+          //    emit the lmDetails to the parent, triggering the zoom.
+        }}
+        left={(props) => (
+          <List.Icon {...props} icon="office-building" color="#4CAF50" />
+        )}
+        right={() => (
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            {lmLoading ? (
+              <ActivityIndicator size="small" />
+            ) : (
+              <List.Icon icon="magnify-plus" color="#4CAF50" />
+            )}
+          </View>
+        )}
+        style={{
+          backgroundColor: "#fff",
+          borderRadius: 8,
+          elevation: 2,
+        }}
+      />
 
-      {/* WARD SELECT */}
-      <List.Section>
-        <List.Subheader>Ward</List.Subheader>
-
-        <List.Item
-          title={selectedWard?.name ?? "Select ward"}
-          description={
-            selectedWard ? `Code: ${selectedWard.code}` : "No ward selected"
-          }
-          onPress={() => !disabled && setWardDialogOpen(true)}
-          left={(props) => <List.Icon {...props} icon="map-marker" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-        />
-      </List.Section>
+      {/* WARD SECTION */}
+      <List.Item
+        title={selectedWard ? `Ward ${selectedWard.code}` : "Select Ward"}
+        description={
+          !activeWorkbaseId
+            ? "Waiting for workbase..."
+            : wardsLoading
+            ? "Fetching wards..."
+            : selectedWard?.name || `${wards.length} wards available`
+        }
+        onPress={() => !disabled && activeWorkbaseId && setWardDialogOpen(true)}
+        left={(props) => (
+          <List.Icon
+            {...props}
+            icon="map-marker-radius"
+            color={selectedWard ? "#2196F3" : "#9e9e9e"}
+          />
+        )}
+        right={(props) => (
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            {wardsLoading && (
+              <ActivityIndicator size="small" style={{ marginRight: 8 }} />
+            )}
+            <List.Icon {...props} icon="chevron-down" />
+          </View>
+        )}
+        style={{
+          marginTop: 8,
+          backgroundColor: "#fff",
+          borderRadius: 8,
+          elevation: 2,
+        }}
+      />
 
       {/* WARD DIALOG */}
       <Portal>
@@ -102,38 +135,31 @@ const GeoCascadingSelector = ({
           onDismiss={() => setWardDialogOpen(false)}
         >
           <Dialog.Title>Select Ward</Dialog.Title>
-
-          <Dialog.Content>
-            {isLoading ? (
-              <ActivityIndicator />
-            ) : (
-              <FlatList
-                data={wards}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <List.Item
-                    title={item.name}
-                    description={`Ward ${item.code}`}
-                    onPress={() => {
-                      setWardId(item.id);
-                      setWardDialogOpen(false);
-                    }}
-                    left={(props) => (
-                      <List.Icon
-                        {...props}
-                        icon={
-                          item.id === wardId
-                            ? "check-circle"
-                            : "checkbox-blank-circle-outline"
-                        }
-                      />
-                    )}
-                  />
-                )}
-              />
-            )}
+          <Dialog.Content style={{ maxHeight: 400 }}>
+            <FlatList
+              data={wards}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <List.Item
+                  title={`Ward ${item.code}`}
+                  description={item.name}
+                  onPress={() => {
+                    setWardId(item.id);
+                    setWardDialogOpen(false);
+                  }}
+                  left={(props) => (
+                    <List.Icon
+                      {...props}
+                      icon={
+                        item.id === wardId ? "check-circle" : "circle-outline"
+                      }
+                      color={item.id === wardId ? "#2196F3" : "#ccc"}
+                    />
+                  )}
+                />
+              )}
+            />
           </Dialog.Content>
-
           <Dialog.Actions>
             <Button onPress={() => setWardDialogOpen(false)}>Close</Button>
           </Dialog.Actions>

@@ -3,13 +3,14 @@ import { persistReducer, persistStore } from "redux-persist";
 
 import { authApi } from "./authApi";
 import { geoApi } from "./geoApi";
-import { usersApi } from "./usersSlice";
 
 import { reduxStorage } from "./reduxStorage";
 
 // Example future slices (if/when you add them)
+import { erfsApi } from "./erfsApi";
 import offlineReducer from "./offlineSlice";
 import { spApi } from "./spApi";
+import { usersApi } from "./usersApi";
 // import uiReducer from "./uiSlice";
 
 /* =====================================================
@@ -21,6 +22,7 @@ const rootReducer = combineReducers({
   [authApi.reducerPath]: authApi.reducer,
   [usersApi.reducerPath]: usersApi.reducer,
   [spApi.reducerPath]: spApi.reducer, // ✅ ADD THIS
+  [erfsApi.reducerPath]: erfsApi.reducer,
   // App-level slices (example)
   offline: offlineReducer,
   // ui: uiReducer,
@@ -35,16 +37,14 @@ const persistConfig = {
   storage: reduxStorage,
 
   // 👇 Persist ONLY non-RTK Query slices
-  whitelist: [
-    "offline",
-    // "ui",
-  ],
+  whitelist: ["offline", geoApi],
 
   blacklist: [
-    geoApi.reducerPath,
+    // geoApi.reducerPath,
     authApi.reducerPath,
     usersApi.reducerPath,
     spApi.reducerPath,
+    erfsApi.reducerPath,
   ],
 };
 
@@ -66,7 +66,8 @@ export const store = configureStore({
       geoApi.middleware,
       authApi.middleware,
       usersApi.middleware,
-      spApi.middleware
+      spApi.middleware,
+      erfsApi.middleware
     ),
 });
 

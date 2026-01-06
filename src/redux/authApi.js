@@ -26,7 +26,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import { clearAuthState } from "./authStorage";
-import { geoApi } from "./geoApi";
+// import { geoApi } from "./geoApi";
 
 /*
   Auth cache shape (ALWAYS consistent):
@@ -115,13 +115,6 @@ export const authApi = createApi({
         unsubscribe();
       },
     }),
-
-    /* =====================================================
-        SIGN UP GST
-      ===================================================== */
-    /* =====================================================
-        SIGN UP GST (Refined for iREPS Logic)
-      ===================================================== */
     /* =====================================================
         SIGN UP GST (Locked to Guest Role)
       ===================================================== */
@@ -197,7 +190,7 @@ export const authApi = createApi({
 
           // 🔥 CLEAR ALL FIRESTORE LISTENERS
           dispatch(authApi.util.resetApiState());
-          dispatch(geoApi.util.resetApiState());
+          // dispatch(geoApi.util.resetApiState());
           // add other APIs here (astsApi, erfsApi, etc.)
 
           clearAuthState();

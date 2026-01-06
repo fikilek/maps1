@@ -62,8 +62,6 @@ export default function CreateAdminScreen() {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Create Admin User</Text>
-
         <Formik
           initialValues={adminInitValues}
           validationSchema={createAdminSchema}

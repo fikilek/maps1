@@ -1,69 +1,40 @@
-// components/maps/MapCameraController.js
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 export default function MapCameraController({ mapRef, lm, ward }) {
-  const didFitLmRef = useRef(false);
-  const lastWardIdRef = useRef(null);
-
-  /* =========================
-     FIT LOCAL MUNICIPALITY
-  ========================= */
   useEffect(() => {
-    if (!mapRef?.current) return;
-    if (!lm?.bbox) return;
-    if (didFitLmRef.current) return;
+    if (!mapRef.current) return;
 
-    const [minLng, minLat, maxLng, maxLat] = lm.bbox;
+    // 1. ZOOM TO WARD (High Priority)
+    if (ward?.geometry?.polygons?.[0]?.rings?.[0]?.points) {
+      const points = ward.geometry.polygons[0].rings[0].points.map((p) => ({
+        latitude: p.lat,
+        longitude: p.lng,
+      }));
 
-    mapRef.current.fitToCoordinates(
-      [
-        { latitude: minLat, longitude: minLng },
-        { latitude: maxLat, longitude: maxLng },
-      ],
-      {
-        edgePadding: {
-          top: 60,
-          right: 40,
-          bottom: 60,
-          left: 40,
-        },
+      mapRef.current.fitToCoordinates(points, {
+        edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
         animated: true,
-      }
-    );
+      });
+    }
 
-    didFitLmRef.current = true;
-  }, [lm, mapRef]);
+    // 2. ZOOM TO LM (When LM is selected or Ward is cleared)
+    else if (lm?.bbox && Array.isArray(lm.bbox)) {
+      const [minLng, minLat, maxLng, maxLat] = lm.bbox;
 
-  /* =========================
-     FIT SELECTED WARD
-  ========================= */
-  useEffect(() => {
-    if (!mapRef?.current) return;
-    if (!ward?.bbox) return;
+      // Providing all 4 corners of the box makes the zoom calculation 100% reliable
+      const boxCorners = [
+        { latitude: minLat, longitude: minLng }, // Southwest
+        { latitude: minLat, longitude: maxLng }, // Southeast
+        { latitude: maxLat, longitude: maxLng }, // Northeast
+        { latitude: maxLat, longitude: minLng }, // Northwest
+      ];
 
-    // prevent re-zooming same ward
-    if (lastWardIdRef.current === ward.id) return;
-
-    const { minLat, minLng, maxLat, maxLng } = ward.bbox;
-
-    mapRef.current.fitToCoordinates(
-      [
-        { latitude: minLat, longitude: minLng },
-        { latitude: maxLat, longitude: maxLng },
-      ],
-      {
-        edgePadding: {
-          top: 80,
-          right: 60,
-          bottom: 80,
-          left: 60,
-        },
+      mapRef.current.fitToCoordinates(boxCorners, {
+        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
         animated: true,
-      }
-    );
-
-    lastWardIdRef.current = ward.id;
-  }, [ward, mapRef]);
+      });
+    }
+  }, [lm, ward, mapRef]);
 
   return null;
 }

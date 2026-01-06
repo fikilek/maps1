@@ -2,6 +2,8 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
   doc,
+  getDoc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -18,6 +20,8 @@ import { fsError, fsLog } from "./firestoreLogger";
 export const geoApi = createApi({
   reducerPath: "geoApi",
   baseQuery: fakeBaseQuery(),
+  // 🔥 Keep data in cache for 24 hours (86400 seconds)
+  keepUnusedDataFor: 86400,
   tagTypes: [
     "Country",
     "Province",
@@ -161,10 +165,7 @@ export const geoApi = createApi({
         fsLog(scope, "listener created");
 
         const unsubscribe = onSnapshot(
-          query(
-            collection(db, "localMunicipalities"),
-            where("districtId", "==", districtId)
-          ),
+          query(collection(db, "lms"), where("districtId", "==", districtId)),
           (snap) => {
             fsLog(scope, "snapshot", {
               size: snap.size,
@@ -192,47 +193,63 @@ export const geoApi = createApi({
        REQUIRED FOR MAPS + CASCADING SELECTOR
     ========================= */
     getLocalMunicipalityById: builder.query({
-      queryFn: () => ({ data: null }),
+      async queryFn(lmId) {
+        if (!lmId) return { data: null };
+        try {
+          // Pointing to your 'localMunicipalities' collection
+          const docRef = doc(db, "lms", lmId);
+          const snap = await getDoc(docRef);
+          if (!snap.exists()) return { error: "Municipality not found" };
 
-      async onCacheEntryAdded(
-        localMunicipalityId,
-        { updateCachedData, cacheEntryRemoved }
-      ) {
-        console.log(
-          `getLocalMunicipalityById ----localMunicipalityId`,
-          localMunicipalityId
-        );
-        if (!localMunicipalityId) return;
-
-        const scope = `LM(id:${localMunicipalityId})`;
-        fsLog(scope, "listener created");
-
-        const unsubscribe = onSnapshot(
-          doc(db, "lms", localMunicipalityId),
-          (snap) => {
-            if (!snap.exists()) {
-              fsError(scope, "document does not exist");
-              updateCachedData(() => null);
-              return;
-            }
-
-            fsLog(scope, "snapshot", {
-              fromCache: snap.metadata.fromCache,
-            });
-
-            updateCachedData(() => ({
-              id: snap.id,
-              ...snap.data(),
-            }));
-          },
-          (error) => fsError(scope, "snapshot error", error)
-        );
-
-        await cacheEntryRemoved;
-        fsLog(scope, "listener unsubscribed");
-        unsubscribe();
+          return { data: { id: snap.id, ...snap.data() } };
+        } catch (error) {
+          console.log(`getLocalMunicipalityById ----error`, error);
+          return { error };
+        }
       },
     }),
+    // getLocalMunicipalityById: builder.query({
+    //   queryFn: () => ({ data: null }),
+
+    //   async onCacheEntryAdded(
+    //     localMunicipalityId,
+    //     { updateCachedData, cacheEntryRemoved }
+    //   ) {
+    //     console.log(
+    //       `getLocalMunicipalityById ----localMunicipalityId`,
+    //       localMunicipalityId
+    //     );
+    //     if (!localMunicipalityId) return;
+
+    //     const scope = `LM(id:${localMunicipalityId})`;
+    //     fsLog(scope, "listener created");
+
+    //     const unsubscribe = onSnapshot(
+    //       doc(db, "lms", localMunicipalityId),
+    //       (snap) => {
+    //         if (!snap.exists()) {
+    //           fsError(scope, "document does not exist");
+    //           updateCachedData(() => null);
+    //           return;
+    //         }
+
+    //         fsLog(scope, "snapshot", {
+    //           fromCache: snap.metadata.fromCache,
+    //         });
+
+    //         updateCachedData(() => ({
+    //           id: snap.id,
+    //           ...snap.data(),
+    //         }));
+    //       },
+    //       (error) => fsError(scope, "snapshot error", error)
+    //     );
+
+    //     await cacheEntryRemoved;
+    //     fsLog(scope, "listener unsubscribed");
+    //     unsubscribe();
+    //   },
+    // }),
 
     /* =========================
        TOWNS
@@ -328,116 +345,22 @@ export const geoApi = createApi({
        GET WARDS BY LOCAL MUNICIPALITY
     ========================= */
     getWardsByLocalMunicipality: builder.query({
-      queryFn: async (localMunicipalityId, { signal, getState }) => {
-        if (!localMunicipalityId) {
-          return {
-            error: {
-              status: "BAD_REQUEST",
-              error: "localMunicipalityId is required",
-            },
-          };
-        }
-
-        // 🔒 AUTH GUARD (CRITICAL)
-        const state = getState();
-        const authState = authApi.endpoints.getAuthState.select()(state)?.data;
-
-        if (!authState?.isAuthenticated) {
-          return { data: [] }; // ⛔ DO NOT START LISTENER
-        }
-
-        return new Promise((resolve, reject) => {
+      async queryFn(lmPcode) {
+        if (!lmPcode) return { data: [] };
+        try {
           const q = query(
             collection(db, "wards"),
-            where("parents.localMunicipalityId", "==", localMunicipalityId),
+            where("parents.localMunicipalityId", "==", lmPcode),
             orderBy("code", "asc")
           );
-
-          const unsubscribe = onSnapshot(
-            q,
-            (snapshot) => {
-              const wards = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-              }));
-
-              resolve({ data: wards });
-            },
-            (error) => {
-              console.error("Ward stream error", error);
-              reject({ error });
-            }
-          );
-
-          signal.addEventListener("abort", () => {
-            unsubscribe();
-          });
-        });
+          const snap = await getDocs(q);
+          const wards = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          return { data: wards };
+        } catch (error) {
+          return { error };
+        }
       },
     }),
-
-    // getWardsByLocalMunicipality: builder.query({
-    //   queryFn: async (
-    //     localMunicipalityId,
-    //     { signal, dispatch },
-    //     _extraOptions,
-    //     baseQuery
-    //   ) => {
-    //     if (!localMunicipalityId) {
-    //       return {
-    //         error: {
-    //           status: "BAD_REQUEST",
-    //           error: "localMunicipalityId is required",
-    //         },
-    //       };
-    //     }
-
-    //     // 🔒 AUTH GUARD (CRITICAL)
-    //     const state = getState();
-    //     const authState = authApi.endpoints.getAuthState.select()(state)?.data;
-
-    //     if (!authState?.isAuthenticated) {
-    //       return { data: [] }; // ⛔ DO NOT START LISTENER
-    //     }
-
-    //     return new Promise((resolve, reject) => {
-    //       const q = query(
-    //         collection(db, "wards"),
-    //         where("parents.localMunicipalityId", "==", localMunicipalityId),
-    //         orderBy("code", "asc")
-    //       );
-
-    //       const unsubscribe = onSnapshot(
-    //         q,
-    //         (snapshot) => {
-    //           const wards = snapshot.docs.map((doc) => ({
-    //             id: doc.id,
-    //             ...doc.data(),
-    //           }));
-
-    //           resolve({ data: wards });
-    //         },
-    //         (error) => {
-    //           console.error("Ward stream error", error);
-    //           reject({ error });
-    //         }
-    //       );
-
-    //       // 🔥 VERY IMPORTANT: cleanup on unsubscribe
-    //       signal.addEventListener("abort", () => {
-    //         unsubscribe();
-    //       });
-    //     });
-    //   },
-
-    //   providesTags: (result = []) =>
-    //     result.length
-    //       ? [
-    //           ...result.map(({ id }) => ({ type: "Ward", id })),
-    //           { type: "Ward", id: "LIST" },
-    //         ]
-    //       : [{ type: "Ward", id: "LIST" }],
-    // }),
   }),
 });
 
