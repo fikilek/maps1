@@ -1,161 +1,196 @@
-import { useEffect, useMemo, useState } from "react";
+// components/maps/GeoCascadingSelector.js
+import { useMemo, useState } from "react";
 import { FlatList, View } from "react-native";
 import {
   ActivityIndicator,
   Button,
   Dialog,
+  IconButton,
   List,
   Portal,
+  TextInput,
 } from "react-native-paper";
 
-import {
-  useGetLocalMunicipalityByIdQuery,
-  useGetWardsByLocalMunicipalityQuery,
-} from "../../src/redux/geoApi";
-
-const GeoCascadingSelector = ({
-  activeWorkbase,
-  onChange,
-  disabled = false,
-}) => {
-  const activeWorkbaseId = activeWorkbase?.id;
-
-  // 1. Fetch Geometry/Details
-  const { data: lmDetails, isLoading: lmLoading } =
-    useGetLocalMunicipalityByIdQuery(activeWorkbaseId, {
-      skip: !activeWorkbaseId,
-    });
-
-  // 2. Fetch Wards
-  const { data: wards = [], isLoading: wardsLoading } =
-    useGetWardsByLocalMunicipalityQuery(activeWorkbaseId, {
-      skip: !activeWorkbaseId,
-    });
-
-  const [wardId, setWardId] = useState(null);
+export default function GeoCascadingSelector({
+  lm,
+  wards,
+  erfs,
+  wardsLoading,
+  erfsLoading,
+  selectedWardId,
+  selectedErfId,
+  onSelectWard,
+  onSelectErf,
+  onSelectMunicipality,
+  onRefreshCamera = () => {},
+}) {
   const [wardDialogOpen, setWardDialogOpen] = useState(false);
-
-  // Reset ward if municipality changes
-  useEffect(() => {
-    if (activeWorkbaseId) setWardId(null);
-  }, [activeWorkbaseId]);
+  const [erfDialogOpen, setErfDialogOpen] = useState(false);
+  const [erfSearch, setErfSearch] = useState("");
 
   const selectedWard = useMemo(
-    () => wards.find((w) => w.id === wardId) || null,
-    [wards, wardId]
+    () => wards.find((w) => w.id === selectedWardId) || null,
+    [wards, selectedWardId]
   );
 
-  // Emit changes to parent
-  useEffect(() => {
-    if (activeWorkbase || lmDetails) {
-      onChange?.({
-        lm: lmDetails || activeWorkbase,
-        ward: selectedWard,
-      });
-    }
-  }, [lmDetails, activeWorkbase, selectedWard]);
+  const selectedErf = useMemo(
+    () => erfs.find((e) => e.id === selectedErfId) || null,
+    [erfs, selectedErfId]
+  );
 
-  /* =========================
-      RENDER
-  ========================= */
+  const filteredErfs = useMemo(() => {
+    if (!erfSearch.trim()) return erfs;
+    const q = erfSearch.toLowerCase();
+    return erfs.filter((e) => (e.erfId || e.id).toLowerCase().includes(q));
+  }, [erfs, erfSearch]);
+
+  // Shared Blue Style
+  const activeStyle = { color: "#2563eb", fontWeight: "bold" };
+
   return (
-    <View style={{ padding: 12, backgroundColor: "rgba(255,255,255,0.9)" }}>
-      {/* MUNICIPALITY SECTION */}
-      {/* MUNICIPALITY SECTION */}
+    <View style={{ padding: 12, backgroundColor: "rgba(255,255,255,0.95)" }}>
+      {/* LM - Municipality is always "active" context */}
       <List.Item
-        title={activeWorkbase?.name || "Initializing..."}
-        description={
-          lmLoading
-            ? "Loading map boundaries..."
-            : "Tap to zoom to Municipality"
-        }
-        onPress={() => {
-          // 1. Clear the local ward selection
-          setWardId(null);
-          // 2. The useEffect in this component will automatically
-          //    emit the lmDetails to the parent, triggering the zoom.
-        }}
-        left={(props) => (
-          <List.Icon {...props} icon="office-building" color="#4CAF50" />
+        title={lm?.name || "Local Municipality"}
+        titleStyle={activeStyle}
+        description="Active Municipality"
+        left={(p) => (
+          <List.Icon {...p} icon="office-building" color="#2563eb" />
         )}
-        right={() => (
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            {lmLoading ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <List.Icon icon="magnify-plus" color="#4CAF50" />
-            )}
-          </View>
-        )}
-        style={{
-          backgroundColor: "#fff",
-          borderRadius: 8,
-          elevation: 2,
-        }}
+        onPress={() => onSelectMunicipality()}
       />
-
-      {/* WARD SECTION */}
-      <List.Item
-        title={selectedWard ? `Ward ${selectedWard.code}` : "Select Ward"}
-        description={
-          !activeWorkbaseId
-            ? "Waiting for workbase..."
-            : wardsLoading
-            ? "Fetching wards..."
-            : selectedWard?.name || `${wards.length} wards available`
-        }
-        onPress={() => !disabled && activeWorkbaseId && setWardDialogOpen(true)}
-        left={(props) => (
-          <List.Icon
-            {...props}
-            icon="map-marker-radius"
-            color={selectedWard ? "#2196F3" : "#9e9e9e"}
-          />
-        )}
-        right={(props) => (
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            {wardsLoading && (
-              <ActivityIndicator size="small" style={{ marginRight: 8 }} />
-            )}
-            <List.Icon {...props} icon="chevron-down" />
-          </View>
-        )}
-        style={{
-          marginTop: 8,
-          backgroundColor: "#fff",
-          borderRadius: 8,
-          elevation: 2,
-        }}
-      />
-
-      {/* WARD DIALOG */}
+      {/* WARD */}
+      // Inside GeoCascadingSelector.js
+      {/* WARD */}
+      <View style={{ position: "relative" }}>
+        <List.Item
+          title={selectedWard ? `Ward ${selectedWard.code}` : "Select Ward"}
+          titleStyle={selectedWard ? activeStyle : {}}
+          description={
+            wardsLoading ? "Loading wards…" : `${wards.length} wards`
+          }
+          onPress={() => setWardDialogOpen(true)}
+          left={(p) => (
+            <List.Icon
+              {...p}
+              icon="map-marker-radius"
+              color={selectedWard ? "#2563eb" : p.color}
+            />
+          )}
+          right={(p) => (
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              {selectedWard && !wardsLoading && (
+                <View style={{ flexDirection: "row", marginRight: 8 }}>
+                  {/* 1. Zoom specifically to the selected Ward */}
+                  <IconButton
+                    icon="target"
+                    iconColor="#2563eb"
+                    size={24}
+                    onPress={(e) => {
+                      if (e && e.stopPropagation) e.stopPropagation();
+                      // To force a zoom to the WARD specifically, we need to clear the ERF first
+                      // OR ensure the Camera Controller prioritizes this request.
+                      onSelectErf(null);
+                      onRefreshCamera();
+                    }}
+                  />
+                  {/* 2. Dismiss Ward and go back to LM */}
+                  <IconButton
+                    icon="close-circle-outline"
+                    iconColor="#dc2626"
+                    size={24}
+                    onPress={(e) => {
+                      if (e && e.stopPropagation) e.stopPropagation();
+                      onSelectErf(null); // Clear child first
+                      onSelectWard(null); // Clear ward to fall back to LM
+                      onRefreshCamera();
+                    }}
+                  />
+                </View>
+              )}
+              {wardsLoading ? (
+                <ActivityIndicator />
+              ) : (
+                <List.Icon {...p} icon="chevron-down" />
+              )}
+            </View>
+          )}
+        />
+      </View>
+      {/* ERF */}
+      <View style={{ position: "relative" }}>
+        <List.Item
+          title={
+            selectedErf ? `ERF ${selectedErf?.sg?.parcelNo}` : "Select ERF"
+          }
+          titleStyle={selectedErf ? activeStyle : {}}
+          description={
+            !selectedWard
+              ? "Select ward first"
+              : erfsLoading
+              ? "Loading ERFs…"
+              : `${erfs.length} ERFs`
+          }
+          onPress={() => erfs.length && setErfDialogOpen(true)}
+          left={(p) => (
+            <List.Icon
+              {...p}
+              icon="home-map-marker"
+              color={selectedErf ? "#2563eb" : p.color}
+            />
+          )}
+          right={(p) => (
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              {selectedErf && !erfsLoading && (
+                <View style={{ flexDirection: "row", marginRight: 8 }}>
+                  <IconButton
+                    icon="target-variant"
+                    iconColor="#2563eb"
+                    size={24}
+                    onPress={(e) => {
+                      if (e && e.stopPropagation) e.stopPropagation();
+                      onRefreshCamera();
+                    }}
+                  />
+                  <IconButton
+                    icon="close-circle-outline"
+                    iconColor="#dc2626"
+                    size={24}
+                    onPress={(e) => {
+                      if (e && e.stopPropagation) e.stopPropagation();
+                      onSelectErf(null);
+                    }}
+                  />
+                </View>
+              )}
+              {erfsLoading ? (
+                <ActivityIndicator />
+              ) : (
+                <List.Icon {...p} icon="chevron-down" />
+              )}
+            </View>
+          )}
+        />
+      </View>
       <Portal>
+        {/* WARD DIALOG */}
         <Dialog
           visible={wardDialogOpen}
           onDismiss={() => setWardDialogOpen(false)}
         >
           <Dialog.Title>Select Ward</Dialog.Title>
-          <Dialog.Content style={{ maxHeight: 400 }}>
+          <Dialog.Content>
             <FlatList
               data={wards}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(i) => i.id}
+              style={{ maxHeight: 400 }}
               renderItem={({ item }) => (
                 <List.Item
                   title={`Ward ${item.code}`}
-                  description={item.name}
                   onPress={() => {
-                    setWardId(item.id);
+                    onSelectWard(item.id);
                     setWardDialogOpen(false);
                   }}
-                  left={(props) => (
-                    <List.Icon
-                      {...props}
-                      icon={
-                        item.id === wardId ? "check-circle" : "circle-outline"
-                      }
-                      color={item.id === wardId ? "#2196F3" : "#ccc"}
-                    />
-                  )}
                 />
               )}
             />
@@ -164,9 +199,40 @@ const GeoCascadingSelector = ({
             <Button onPress={() => setWardDialogOpen(false)}>Close</Button>
           </Dialog.Actions>
         </Dialog>
+
+        {/* ERF DIALOG */}
+        <Dialog
+          visible={erfDialogOpen}
+          onDismiss={() => setErfDialogOpen(false)}
+        >
+          <Dialog.Title>Select ERF</Dialog.Title>
+          <Dialog.Content style={{ height: 400 }}>
+            <TextInput
+              mode="outlined"
+              placeholder="Search ERF…"
+              value={erfSearch}
+              onChangeText={setErfSearch}
+              style={{ marginBottom: 10 }}
+            />
+            <FlatList
+              data={filteredErfs}
+              keyExtractor={(i) => i.id}
+              renderItem={({ item }) => (
+                <List.Item
+                  title={item?.sg?.parcelNo}
+                  onPress={() => {
+                    onSelectErf(item.id);
+                    setErfDialogOpen(false);
+                  }}
+                />
+              )}
+            />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setErfDialogOpen(false)}>Close</Button>
+          </Dialog.Actions>
+        </Dialog>
       </Portal>
     </View>
   );
-};
-
-export default GeoCascadingSelector;
+}

@@ -1,9 +1,10 @@
 import MapView from "react-native-maps";
 
-export default function BaseMap({ mapRef, children }) {
+export default function BaseMap({ mapRef, children, onRegionChangeComplete }) {
   return (
     <MapView
       ref={mapRef}
+      onRegionChangeComplete={onRegionChangeComplete}
       style={{ flex: 1 }}
       provider="google"
       initialRegion={{

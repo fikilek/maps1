@@ -1,8 +1,12 @@
-import { useState } from "react";
+// src/features/maps/MapsScreen.js
+import { useMemo, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
+
 import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
 import MapContainer from "../../../components/maps/MapContainer";
 import { useAuth } from "../../hooks/useAuth";
+
+import { useGetErfsByWardQuery } from "../../redux/erfsApi";
 import {
   useGetLocalMunicipalityByIdQuery,
   useGetWardsByLocalMunicipalityQuery,
@@ -15,31 +19,68 @@ export default function MapsScreen() {
     isLoading: authLoading,
   } = useAuth();
 
-  const [selection, setSelection] = useState({ lm: null, ward: null });
+  /* -------------------------
+     SELECTION STATE (AUTHORITATIVE)
+  -------------------------- */
+  const [wardId, setWardId] = useState(null);
+  const [erfId, setErfId] = useState(null);
+  const [cameraRequestId, setCameraRequestId] = useState(0);
 
-  // 1. Fetch the FULL LM document (This includes the geometry points)
+  /* -------------------------
+     GEO DATA
+  -------------------------- */
   const { data: lmDetails } = useGetLocalMunicipalityByIdQuery(
-    activeWorkbaseId,
-    {
-      skip: !activeWorkbaseId,
-    }
-  );
-
-  // 2. Fetch the Wards
-  const { data: wards = [] } = useGetWardsByLocalMunicipalityQuery(
     activeWorkbaseId,
     { skip: !activeWorkbaseId }
   );
+  // console.log(`MapsScreen ---lmDetails`, lmDetails);
 
-  // Determine which LM object to use:
-  // Priority: 1. Manual selection, 2. Full DB details (with geometry), 3. Auth fallback
-  const displayLm = selection.lm || lmDetails || activeWorkbase;
+  const { data: wards = [], isLoading: wardsLoading } =
+    useGetWardsByLocalMunicipalityQuery(activeWorkbaseId, {
+      skip: !activeWorkbaseId,
+    });
+  // console.log(`MapsScreen ---wards?.length`, wards?.length);
+
+  const selectedWard = useMemo(
+    () => wards.find((w) => w.id === wardId) || null,
+    [wards, wardId]
+  );
+  // console.log(`MapsScreen ---selectedWard`, selectedWard);
+
+  const wardPcode = selectedWard?.id ?? null;
+  // console.log(`MapsScreen ---wardPcode`, wardPcode);
+
+  /* -------------------------
+  ERFS (FETCHED ONCE HERE)
+  -------------------------- */
+  const { data: erfs = [], isLoading: erfsLoading } = useGetErfsByWardQuery(
+    wardPcode ? { wardPcode } : undefined,
+    {
+      skip: !wardPcode,
+    }
+  );
+  // console.log(`MapsScreen ---erfs`, erfs);
+
+  const safeErfs = useMemo(() => {
+    if (!wardPcode) return [];
+    return erfs;
+  }, [wardPcode, erfs]);
+  // console.log(`MapsScreen ---safeErfs`, safeErfs);
+
+  const selectedErf = useMemo(() => {
+    if (!erfId) return null;
+    return safeErfs.find((e) => e.id === erfId) || null;
+  }, [erfId, safeErfs]);
+  // console.log(`MapsScreen ---selectedErf`, selectedErf);
+
+  const displayLm = lmDetails || activeWorkbase;
+  // console.log(`MapsScreen ---displayLm`, displayLm);
 
   if (authLoading && !activeWorkbaseId) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" color="#2196F3" />
-        <Text style={{ marginTop: 10 }}>Accessing Workbase...</Text>
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator size="large" />
+        <Text style={{ marginTop: 8 }}>Accessing workbase…</Text>
       </View>
     );
   }
@@ -47,16 +88,37 @@ export default function MapsScreen() {
   return (
     <View style={{ flex: 1 }}>
       <MapContainer
-        // Passing displayLm ensures that as soon as lmDetails loads,
-        // the geometry is passed down to the BoundaryLayer
         lm={displayLm}
-        ward={selection.ward}
+        selectedWard={selectedWard}
         wards={wards}
+        erfs={safeErfs}
+        selectedErf={selectedErf}
+        cameraRequestId={cameraRequestId}
       />
 
       <GeoCascadingSelector
-        activeWorkbase={activeWorkbase}
-        onChange={setSelection}
+        lm={displayLm}
+        wards={wards}
+        erfs={safeErfs}
+        erfsLoading={erfsLoading}
+        wardsLoading={wardsLoading}
+        selectedWardId={wardId}
+        selectedErfId={erfId}
+        onSelectWard={(id) => {
+          setWardId(id);
+          setErfId(null);
+          setCameraRequestId(Date.now());
+        }}
+        onSelectErf={(id) => {
+          setErfId(id);
+          setCameraRequestId(Date.now());
+        }}
+        onSelectMunicipality={() => {
+          setWardId(null); // Clear ward
+          setErfId(null); // Clear erf
+          setCameraRequestId(Date.now()); // 🔥 Trigger the camera!
+        }}
+        onRefreshCamera={() => setCameraRequestId(Date.now())}
       />
     </View>
   );

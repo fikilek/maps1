@@ -10,6 +10,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { transformGeoData } from "../utils/geo/parseGeometry";
 import { authApi } from "./authApi";
 import { fsError, fsLog } from "./firestoreLogger";
 
@@ -195,19 +196,40 @@ export const geoApi = createApi({
     getLocalMunicipalityById: builder.query({
       async queryFn(lmId) {
         if (!lmId) return { data: null };
+
         try {
-          // Pointing to your 'localMunicipalities' collection
           const docRef = doc(db, "lms", lmId);
           const snap = await getDoc(docRef);
-          if (!snap.exists()) return { error: "Municipality not found" };
 
-          return { data: { id: snap.id, ...snap.data() } };
+          if (!snap.exists()) {
+            return { error: "Municipality not found" };
+          }
+
+          // 🔥 THIS IS THE FIX
+          return { data: transformGeoData(snap) };
         } catch (error) {
-          console.log(`getLocalMunicipalityById ----error`, error);
+          console.error("getLocalMunicipalityById error", error);
           return { error };
         }
       },
     }),
+
+    // getLocalMunicipalityById: builder.query({
+    //   async queryFn(lmId) {
+    //     if (!lmId) return { data: null };
+    //     try {
+    //       // Pointing to your 'localMunicipalities' collection
+    //       const docRef = doc(db, "lms", lmId);
+    //       const snap = await getDoc(docRef);
+    //       if (!snap.exists()) return { error: "Municipality not found" };
+
+    //       return { data: { id: snap.id, ...snap.data() } };
+    //     } catch (error) {
+    //       console.log(`getLocalMunicipalityById ----error`, error);
+    //       return { error };
+    //     }
+    //   },
+    // }),
     // getLocalMunicipalityById: builder.query({
     //   queryFn: () => ({ data: null }),
 
@@ -325,12 +347,7 @@ export const geoApi = createApi({
               fromCache: snap.metadata.fromCache,
             });
 
-            updateCachedData(() =>
-              snap.docs.map((d) => ({
-                id: d.id,
-                ...d.data(),
-              }))
-            );
+            updateCachedData(() => snap.docs.map((d) => transformGeoData(d)));
           },
           (error) => fsError(scope, "snapshot error", error)
         );
@@ -346,6 +363,7 @@ export const geoApi = createApi({
     ========================= */
     getWardsByLocalMunicipality: builder.query({
       async queryFn(lmPcode) {
+        // console.log(`getWardsByLocalMunicipality ----lmPcode`, lmPcode);
         if (!lmPcode) return { data: [] };
         try {
           const q = query(
@@ -354,7 +372,8 @@ export const geoApi = createApi({
             orderBy("code", "asc")
           );
           const snap = await getDocs(q);
-          const wards = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          const wards = snap.docs.map((d) => transformGeoData(d));
+          // console.log(`getWardsByLocalMunicipality ----wards`, wards);
           return { data: wards };
         } catch (error) {
           return { error };

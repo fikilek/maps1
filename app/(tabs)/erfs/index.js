@@ -1,3 +1,4 @@
+import { useRouter } from "expo-router";
 import { memo, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +15,7 @@ import { useGetErfsByLmPcodeQuery } from "../../../src/redux/erfsApi";
 // --- MEMOIZED RENDER ITEM ---
 // Fixed the 'missing display name' warning by using a named function
 const ErfItem = memo(function ErfItem({ item }) {
+  const router = useRouter();
   return (
     <TouchableOpacity activeOpacity={0.7}>
       <View style={styles.itemContainer}>
@@ -27,10 +29,34 @@ const ErfItem = memo(function ErfItem({ item }) {
             </Text>
           </View>
         </View>
-        <Text style={styles.idText}>{item.erfId}</Text>
-        <Text style={styles.subText}>
-          LM: {item.admin?.localMunicipality?.name}
-        </Text>
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <View>
+            <Text style={styles.idText}>{item.erfId}</Text>
+            <Text style={styles.subText}>
+              LM: {item.admin?.localMunicipality?.name}
+            </Text>
+          </View>
+          <View>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={"onPress"}
+              onLongPress={() =>
+                router.push({
+                  pathname: "/maps",
+                  params: { erfId: item.erfId },
+                })
+              }
+            >
+              <Text>Erf Detail</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -111,47 +137,6 @@ export default function ErfsScreen() {
         filteredCount={filteredErfs?.length}
         totalCount={erfs?.length}
       />
-
-      {/* <View style={styles.header}>
-        <TextInput
-          placeholder="Search by Erf or Parcel No..."
-          value={search}
-          onChangeText={setSearch}
-          style={styles.searchInput}
-          clearButtonMode="while-editing"
-        />
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.wardScroll}
-          contentContainerStyle={styles.wardScrollContent}
-        >
-          {availableWards.map((ward) => (
-            <TouchableOpacity
-              key={ward}
-              onPress={() => setSelectedWard(ward)}
-              style={[
-                styles.wardPill,
-                selectedWard === ward && styles.wardPillActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.wardPillText,
-                  selectedWard === ward && styles.wardPillTextActive,
-                ]}
-              >
-                {ward === "ALL" ? "All Wards" : `Ward ${ward.slice(-2)}`}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        <Text style={styles.counter}>
-          Showing {filteredErfs.length} of {erfs.length} Erfs
-        </Text>
-      </View> */}
 
       {/* --- LIST SECTION --- */}
       <FlatList
