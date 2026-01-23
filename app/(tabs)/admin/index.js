@@ -1,33 +1,48 @@
 import { useAuth } from "@/src/hooks/useAuth";
 import { useRouter } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 export default function AdminDashboard() {
   const router = useRouter();
   const { isSPU, isADM, isMNG } = useAuth();
 
   const canViewUsers = isSPU || isADM || isMNG;
+  // 🎯 Only Superusers and Managers should modify the "Laws of the Form"
+  const canManageSettings = isSPU || isMNG;
 
   return (
-    <View style={styles.container}>
-      {/* Service Providers */}
-      <Card
-        title="Service Providers"
-        subtitle="View & manage contractors"
-        onPress={() => router.push("/(tabs)/admin/service-providers")}
-      />
-
-      {/* Users */}
-      {canViewUsers && (
+    <ScrollView style={styles.container}>
+      <Section title="Operational Management">
         <Card
-          title="Users"
-          subtitle="View platform users"
-          onPress={() => router.push("/(tabs)/admin/users")}
+          title="Service Providers"
+          subtitle="View & manage contractors"
+          onPress={() => router.push("/(tabs)/admin/service-providers")}
         />
+
+        {canViewUsers && (
+          <Card
+            title="Users"
+            subtitle="View platform users"
+            onPress={() => router.push("/(tabs)/admin/users")}
+          />
+        )}
+      </Section>
+
+      {/* 🛠️ New Configuration Section */}
+      {canManageSettings && (
+        <Section title="System Configuration">
+          <Card
+            title="Dropdown Settings"
+            subtitle="Manage meter types, anomalies & manufacturers"
+            onPress={() => router.push("/(tabs)/admin/settings")}
+          />
+        </Section>
       )}
-    </View>
+    </ScrollView>
   );
 }
+
+// ... Card and Section components and styles stay the same
 
 /* ---------------- UI Helpers ---------------- */
 

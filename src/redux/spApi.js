@@ -16,7 +16,7 @@ export const spApi = createApi({
     /**
      * Stream ALL Service Providers
      * Used by:
-     * - FlatList
+     * - FlashList
      * - Dashboards
      * - Map (offices)
      */

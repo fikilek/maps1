@@ -5,13 +5,24 @@ import { PaperProvider } from "react-native-paper";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Provider } from "react-redux";
 
+import { GeoProvider } from "../src/context/GeoContext";
+import { WarehouseProvider } from "../src/context/WarehouseContext";
 import { useAuth } from "../src/hooks/useAuth";
 import AuthBootstrap from "../src/navigation/AuthBootstrap";
 import { store } from "../src/redux/store";
 
 function AuthGate() {
-  // console.log(`AuthGate ----mounted`);
+  console.log(`AuthGate ----mounted`);
   // console.log(`AuthGate ----user`, user);
+
+  // Temporary cleanup
+  // Use the v4 standard you correctly identified
+  // useEffect(() => {
+  //   // 🎯 Run once at startup to evict the ghost
+  //   // uiKV.delete("geo_session");
+  //   deleteMMKV("geo_session");
+  //   console.log("🧹 Boot-time cleanup: uiKV trespasser removed.");
+  // }, []);
 
   const { user, status, isLoading } = useAuth();
 
@@ -91,14 +102,18 @@ function AuthGate() {
 export default function RootLayout() {
   return (
     <Provider store={store}>
-      <PaperProvider>
-        <SafeAreaProvider>
-          <SafeAreaView style={{ flex: 1 }}>
-            <AuthBootstrap />
-            <AuthGate />
-          </SafeAreaView>
-        </SafeAreaProvider>
-      </PaperProvider>
+      <GeoProvider>
+        <WarehouseProvider>
+          <PaperProvider>
+            <SafeAreaProvider>
+              <SafeAreaView style={{ flex: 1 }}>
+                <AuthBootstrap />
+                <AuthGate />
+              </SafeAreaView>
+            </SafeAreaProvider>
+          </PaperProvider>
+        </WarehouseProvider>
+      </GeoProvider>
     </Provider>
   );
 }

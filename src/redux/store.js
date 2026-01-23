@@ -8,8 +8,12 @@ import { reduxStorage } from "./reduxStorage";
 
 // Example future slices (if/when you add them)
 import { erfsApi } from "./erfsApi";
+import { metersApi } from "./metersApi";
 import offlineReducer from "./offlineSlice";
+import { premisesApi } from "./premisesApi";
+import { settingsApi } from "./settingsApi";
 import { spApi } from "./spApi";
+import { trnsApi } from "./trnsApi";
 import { usersApi } from "./usersApi";
 // import uiReducer from "./uiSlice";
 
@@ -23,6 +27,10 @@ const rootReducer = combineReducers({
   [usersApi.reducerPath]: usersApi.reducer,
   [spApi.reducerPath]: spApi.reducer, // ✅ ADD THIS
   [erfsApi.reducerPath]: erfsApi.reducer,
+  [premisesApi.reducerPath]: premisesApi.reducer,
+  [trnsApi.reducerPath]: trnsApi.reducer,
+  [settingsApi.reducerPath]: settingsApi.reducer,
+  [metersApi.reducerPath]: metersApi.reducer,
   // App-level slices (example)
   offline: offlineReducer,
   // ui: uiReducer,
@@ -45,6 +53,10 @@ const persistConfig = {
     usersApi.reducerPath,
     spApi.reducerPath,
     erfsApi.reducerPath,
+    premisesApi.reducerPath,
+    trnsApi.reducerPath,
+    settingsApi.reducerPath,
+    metersApi.reducerPath,
   ],
 };
 
@@ -67,7 +79,11 @@ export const store = configureStore({
       authApi.middleware,
       usersApi.middleware,
       spApi.middleware,
-      erfsApi.middleware
+      erfsApi.middleware,
+      premisesApi.middleware,
+      trnsApi.middleware,
+      settingsApi.middleware,
+      metersApi.middleware,
     ),
 });
 

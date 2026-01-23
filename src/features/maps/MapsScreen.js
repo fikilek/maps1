@@ -1,125 +1,187 @@
-// src/features/maps/MapsScreen.js
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
 
-import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
-import MapContainer from "../../../components/maps/MapContainer";
-import { useAuth } from "../../hooks/useAuth";
-
-import { useGetErfsByWardQuery } from "../../redux/erfsApi";
+import { useGeo } from "../../context/GeoContext";
 import {
   useGetLocalMunicipalityByIdQuery,
   useGetWardsByLocalMunicipalityQuery,
 } from "../../redux/geoApi";
 
-export default function MapsScreen() {
-  const {
-    activeWorkbase,
-    activeWorkbaseId,
-    isLoading: authLoading,
-  } = useAuth();
+// 1. Using the standard hook exactly like we did before
+import { useGetErfsByLmPcodeQuery } from "../../redux/erfsApi";
+import { erfMemory } from "../../storage/erfMemory";
 
-  /* -------------------------
-     SELECTION STATE (AUTHORITATIVE)
-  -------------------------- */
-  const [wardId, setWardId] = useState(null);
-  const [erfId, setErfId] = useState(null);
+import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
+import MapContainer from "../../../components/maps/MapContainer";
+import { geoMemory } from "../../storage/geoMemory";
+
+export default function MapsScreen() {
+  const { geoState, updateGeo } = useGeo();
+
+  const activeWorkbaseId = geoState?.lmId || "";
+  const activeWardId = geoState?.wardId || "";
+  const activeErfId = geoState?.id || "";
+
+  const [allErfs, setAllErfs] = useState(null);
+
+  // 🏛️ 1. OFFLINE-FIRST WARDS (The GeoMemory Bridge)
+  const wardsFromMMKV = useMemo(() => {
+    return activeWorkbaseId ? geoMemory.getWards(activeWorkbaseId) : [];
+  }, [activeWorkbaseId]);
+
+  const { data: apiWards = [], isLoading: wardsLoading } =
+    useGetWardsByLocalMunicipalityQuery(activeWorkbaseId, {
+      skip: !activeWorkbaseId || wardsFromMMKV.length > 0,
+    });
+
+  const finalWards = wardsFromMMKV.length > 0 ? wardsFromMMKV : apiWards;
+
+  // 🏛️ 2. ERF WAREHOUSE CHECK
+  useEffect(() => {
+    if (activeWorkbaseId) {
+      const data = erfMemory.getErfsMetaList(activeWorkbaseId);
+      setAllErfs(data || []);
+    }
+  }, [activeWorkbaseId]);
+
+  const { data: cloudData, isSuccess } = useGetErfsByLmPcodeQuery(
+    { lmPcode: activeWorkbaseId },
+    { skip: !activeWorkbaseId || allErfs === null || allErfs.length > 0 },
+  );
+
+  useEffect(() => {
+    if (isSuccess && cloudData) setAllErfs(cloudData);
+  }, [isSuccess, cloudData]);
+
+  // 🏛️ 3. THE UNIVERSAL BRIDGE (Matches ErfsScreen Exactly)
+  const safeErfs = useMemo(() => {
+    if (!activeWardId || !allErfs) return [];
+
+    const source = allErfs.length > 0 ? allErfs : cloudData || [];
+
+    return source.reduce((acc, erf) => {
+      // Logic borrowed from your ESN screen for 100% parity
+      const isMMKV = !!(erf.id && erf.erfNo);
+      const isFirestore = !!(erf.erfId && erf.sg);
+
+      if (isMMKV || isFirestore) {
+        const id = isMMKV ? erf.id : erf.erfId;
+        const pcode = isMMKV ? erf.wardPcode : erf.admin?.ward?.pcode;
+
+        // ONLY pass erfs for the selected ward to the map
+        if (pcode === activeWardId) {
+          const parcel = erf.sg?.parcelNo;
+          const portion = erf.sg?.portion;
+          const displayNo = isMMKV
+            ? erf.erfNo
+            : portion > 0
+              ? `${parcel}/${portion}`
+              : `${parcel}`;
+
+          acc.push({
+            ...erf,
+            id: id,
+            erfNo: displayNo,
+            wardPcode: pcode,
+            lmName: isMMKV ? erf.lmName : erf.admin?.localMunicipality?.name,
+          });
+        }
+      }
+      return acc;
+    }, []);
+  }, [allErfs, cloudData, activeWardId]);
+
+  // 🏛️ 4. SELECTION FINDERS
+  const selectedWard = useMemo(
+    () => finalWards.find((w) => w.id === activeWardId) || null,
+    [finalWards, activeWardId],
+  );
+
+  const selectedErf = useMemo(
+    () => safeErfs.find((e) => e.id === activeErfId) || null,
+    [safeErfs, activeErfId],
+  );
+
+  // 🏛️ 1. LM FINDER (Warehouse First)
+  // 🏛️ The Warehouse provides the DATA for that selection
+  const lmFromMMKV = useMemo(() => {
+    return activeWorkbaseId
+      ? geoMemory.getMunicipality(activeWorkbaseId)
+      : null;
+  }, [activeWorkbaseId]);
+
+  const { data: apiLmDetails } = useGetLocalMunicipalityByIdQuery(
+    activeWorkbaseId,
+    { skip: !activeWorkbaseId || !!lmFromMMKV },
+  );
+
+  // Auto-stock the shelf if it's a new LM the user hasn't visited before
+  useEffect(() => {
+    if (apiLmDetails) {
+      geoMemory.saveMunicipality(apiLmDetails);
+    }
+  }, [apiLmDetails]);
+
+  const finalLmDetails = lmFromMMKV || apiLmDetails;
+
   const [cameraRequestId, setCameraRequestId] = useState(0);
 
-  /* -------------------------
-     GEO DATA
-  -------------------------- */
-  const { data: lmDetails } = useGetLocalMunicipalityByIdQuery(
-    activeWorkbaseId,
-    { skip: !activeWorkbaseId }
-  );
-  // console.log(`MapsScreen ---lmDetails`, lmDetails);
-
-  const { data: wards = [], isLoading: wardsLoading } =
-    useGetWardsByLocalMunicipalityQuery(activeWorkbaseId, {
-      skip: !activeWorkbaseId,
-    });
-  // console.log(`MapsScreen ---wards?.length`, wards?.length);
-
-  const selectedWard = useMemo(
-    () => wards.find((w) => w.id === wardId) || null,
-    [wards, wardId]
-  );
-  // console.log(`MapsScreen ---selectedWard`, selectedWard);
-
-  const wardPcode = selectedWard?.id ?? null;
-  // console.log(`MapsScreen ---wardPcode`, wardPcode);
-
-  /* -------------------------
-  ERFS (FETCHED ONCE HERE)
-  -------------------------- */
-  const { data: erfs = [], isLoading: erfsLoading } = useGetErfsByWardQuery(
-    wardPcode ? { wardPcode } : undefined,
-    {
-      skip: !wardPcode,
+  // TEST CODE TO SEE INSIDE GEOMEMORY - DO NOT REMOVE
+  useEffect(() => {
+    if (activeWorkbaseId) {
+      const storedWards = geoMemory.getWards(activeWorkbaseId);
+      if (storedWards) {
+        console.log(
+          `✅ WAREHOUSE FOUND: ${storedWards.length} wards stored for ${activeWorkbaseId}`,
+        );
+        console.log(`📦 SAMPLE WARD:`, JSON.stringify(storedWards[0], null, 2));
+      } else {
+        console.warn(
+          `❌ WAREHOUSE EMPTY: No wards found in MMKV for ${activeWorkbaseId}. That's why it's spinning!`,
+        );
+      }
     }
-  );
-  // console.log(`MapsScreen ---erfs`, erfs);
+  }, [activeWorkbaseId]);
 
-  const safeErfs = useMemo(() => {
-    if (!wardPcode) return [];
-    return erfs;
-  }, [wardPcode, erfs]);
-  // console.log(`MapsScreen ---safeErfs`, safeErfs);
-
-  const selectedErf = useMemo(() => {
-    if (!erfId) return null;
-    return safeErfs.find((e) => e.id === erfId) || null;
-  }, [erfId, safeErfs]);
-  // console.log(`MapsScreen ---selectedErf`, selectedErf);
-
-  const displayLm = lmDetails || activeWorkbase;
-  // console.log(`MapsScreen ---displayLm`, displayLm);
-
-  if (authLoading && !activeWorkbaseId) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 8 }}>Accessing workbase…</Text>
-      </View>
-    );
-  }
+  // TEST CODE - DO NOT REMOVE
+  useEffect(() => {
+    if (activeWorkbaseId) {
+      console.log(`🔍 Checking Warehouse for LM: ${activeWorkbaseId}`);
+      const storedWards = geoMemory.getWards(activeWorkbaseId);
+      if (storedWards && storedWards.length > 0) {
+        console.log(`✅ WAREHOUSE VALID: Found ${storedWards.length} wards.`);
+      } else {
+        console.warn(
+          `❌ WAREHOUSE EMPTY: Still nothing on shelf ${activeWorkbaseId}`,
+        );
+      }
+    }
+  }, [activeWorkbaseId]);
 
   return (
     <View style={{ flex: 1 }}>
+      {/* <Button
+        mode="contained"
+        buttonColor="#dc2626"
+        icon="trash-can"
+        onPress={handleNuclearReset}
+        style={{ margin: 10 }}
+      >
+        Nuclear Reset (Wipe MMKV)
+      </Button> */}
+
       <MapContainer
-        lm={displayLm}
+        lm={finalLmDetails}
         selectedWard={selectedWard}
-        wards={wards}
+        wards={finalWards}
         erfs={safeErfs}
         selectedErf={selectedErf}
         cameraRequestId={cameraRequestId}
       />
-
       <GeoCascadingSelector
-        lm={displayLm}
-        wards={wards}
-        erfs={safeErfs}
-        erfsLoading={erfsLoading}
-        wardsLoading={wardsLoading}
-        selectedWardId={wardId}
-        selectedErfId={erfId}
-        onSelectWard={(id) => {
-          setWardId(id);
-          setErfId(null);
-          setCameraRequestId(Date.now());
-        }}
-        onSelectErf={(id) => {
-          setErfId(id);
-          setCameraRequestId(Date.now());
-        }}
-        onSelectMunicipality={() => {
-          setWardId(null); // Clear ward
-          setErfId(null); // Clear erf
-          setCameraRequestId(Date.now()); // 🔥 Trigger the camera!
-        }}
         onRefreshCamera={() => setCameraRequestId(Date.now())}
       />
+      {/* <ErfDebugInspector /> */}
     </View>
   );
 }

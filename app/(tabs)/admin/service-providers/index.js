@@ -1,7 +1,8 @@
 import { useAuth } from "@/src/hooks/useAuth";
 import { useGetServiceProvidersQuery } from "@/src/redux/spApi";
+import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { Button } from "react-native-paper";
 
 export default function ServiceProvidersListScreen() {
@@ -44,7 +45,7 @@ export default function ServiceProvidersListScreen() {
         <Text style={styles.info}>No Service Providers yet.</Text>
       )}
 
-      <FlatList
+      <FlashList
         data={realSPs}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (

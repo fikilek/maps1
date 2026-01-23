@@ -124,7 +124,7 @@ export const authApi = createApi({
           const cred = await createUserWithEmailAndPassword(
             auth,
             email,
-            password
+            password,
           );
           const uid = cred.user.uid;
 
@@ -171,9 +171,16 @@ export const authApi = createApi({
     signin: builder.mutation({
       async queryFn({ email, password }) {
         try {
-          await signInWithEmailAndPassword(auth, email, password);
+          const signinResult = await signInWithEmailAndPassword(
+            auth,
+            email,
+            password,
+          );
+          // console.log(`signin ----signinResult`, signinResult);
+
           return { data: true };
         } catch (error) {
+          console.log(`signin ----signn error`);
           return { error };
         }
       },
@@ -364,7 +371,7 @@ export const authApi = createApi({
           const provider = new PhoneAuthProvider(auth);
           const verificationId = await provider.verifyPhoneNumber(
             phoneNumber,
-            verifier
+            verifier,
           );
           return { data: verificationId };
         } catch (error) {

@@ -54,10 +54,10 @@ export const geoApi = createApi({
               snap.docs.map((d) => ({
                 id: d.id,
                 ...d.data(),
-              }))
+              })),
             );
           },
-          (error) => fsError(scope, "snapshot error", error)
+          (error) => fsError(scope, "snapshot error", error),
         );
 
         await cacheEntryRemoved;
@@ -74,7 +74,7 @@ export const geoApi = createApi({
 
       async onCacheEntryAdded(
         countryId,
-        { updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved },
       ) {
         if (!countryId) return;
 
@@ -84,7 +84,7 @@ export const geoApi = createApi({
         const unsubscribe = onSnapshot(
           query(
             collection(db, "provinces"),
-            where("countryId", "==", countryId)
+            where("countryId", "==", countryId),
           ),
           (snap) => {
             fsLog(scope, "snapshot", {
@@ -96,10 +96,10 @@ export const geoApi = createApi({
               snap.docs.map((d) => ({
                 id: d.id,
                 ...d.data(),
-              }))
+              })),
             );
           },
-          (error) => fsError(scope, "snapshot error", error)
+          (error) => fsError(scope, "snapshot error", error),
         );
 
         await cacheEntryRemoved;
@@ -116,7 +116,7 @@ export const geoApi = createApi({
 
       async onCacheEntryAdded(
         provinceId,
-        { updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved },
       ) {
         if (!provinceId) return;
 
@@ -126,7 +126,7 @@ export const geoApi = createApi({
         const unsubscribe = onSnapshot(
           query(
             collection(db, "districtMunicipalities"),
-            where("provinceId", "==", provinceId)
+            where("provinceId", "==", provinceId),
           ),
           (snap) => {
             fsLog(scope, "snapshot", {
@@ -138,10 +138,10 @@ export const geoApi = createApi({
               snap.docs.map((d) => ({
                 id: d.id,
                 ...d.data(),
-              }))
+              })),
             );
           },
-          (error) => fsError(scope, "snapshot error", error)
+          (error) => fsError(scope, "snapshot error", error),
         );
 
         await cacheEntryRemoved;
@@ -158,7 +158,7 @@ export const geoApi = createApi({
 
       async onCacheEntryAdded(
         districtId,
-        { updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved },
       ) {
         if (!districtId) return;
 
@@ -177,10 +177,10 @@ export const geoApi = createApi({
               snap.docs.map((d) => ({
                 id: d.id,
                 ...d.data(),
-              }))
+              })),
             );
           },
-          (error) => fsError(scope, "snapshot error", error)
+          (error) => fsError(scope, "snapshot error", error),
         );
 
         await cacheEntryRemoved;
@@ -213,66 +213,6 @@ export const geoApi = createApi({
         }
       },
     }),
-
-    // getLocalMunicipalityById: builder.query({
-    //   async queryFn(lmId) {
-    //     if (!lmId) return { data: null };
-    //     try {
-    //       // Pointing to your 'localMunicipalities' collection
-    //       const docRef = doc(db, "lms", lmId);
-    //       const snap = await getDoc(docRef);
-    //       if (!snap.exists()) return { error: "Municipality not found" };
-
-    //       return { data: { id: snap.id, ...snap.data() } };
-    //     } catch (error) {
-    //       console.log(`getLocalMunicipalityById ----error`, error);
-    //       return { error };
-    //     }
-    //   },
-    // }),
-    // getLocalMunicipalityById: builder.query({
-    //   queryFn: () => ({ data: null }),
-
-    //   async onCacheEntryAdded(
-    //     localMunicipalityId,
-    //     { updateCachedData, cacheEntryRemoved }
-    //   ) {
-    //     console.log(
-    //       `getLocalMunicipalityById ----localMunicipalityId`,
-    //       localMunicipalityId
-    //     );
-    //     if (!localMunicipalityId) return;
-
-    //     const scope = `LM(id:${localMunicipalityId})`;
-    //     fsLog(scope, "listener created");
-
-    //     const unsubscribe = onSnapshot(
-    //       doc(db, "lms", localMunicipalityId),
-    //       (snap) => {
-    //         if (!snap.exists()) {
-    //           fsError(scope, "document does not exist");
-    //           updateCachedData(() => null);
-    //           return;
-    //         }
-
-    //         fsLog(scope, "snapshot", {
-    //           fromCache: snap.metadata.fromCache,
-    //         });
-
-    //         updateCachedData(() => ({
-    //           id: snap.id,
-    //           ...snap.data(),
-    //         }));
-    //       },
-    //       (error) => fsError(scope, "snapshot error", error)
-    //     );
-
-    //     await cacheEntryRemoved;
-    //     fsLog(scope, "listener unsubscribed");
-    //     unsubscribe();
-    //   },
-    // }),
-
     /* =========================
        TOWNS
     ========================= */
@@ -281,7 +221,7 @@ export const geoApi = createApi({
 
       async onCacheEntryAdded(
         localMunicipalityId,
-        { updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved },
       ) {
         if (!localMunicipalityId) return;
 
@@ -291,7 +231,7 @@ export const geoApi = createApi({
         const unsubscribe = onSnapshot(
           query(
             collection(db, "towns"),
-            where("localMunicipalityId", "==", localMunicipalityId)
+            where("localMunicipalityId", "==", localMunicipalityId),
           ),
           (snap) => {
             fsLog(scope, "snapshot", {
@@ -303,10 +243,10 @@ export const geoApi = createApi({
               snap.docs.map((d) => ({
                 id: d.id,
                 ...d.data(),
-              }))
+              })),
             );
           },
-          (error) => fsError(scope, "snapshot error", error)
+          (error) => fsError(scope, "snapshot error", error),
         );
 
         await cacheEntryRemoved;
@@ -323,7 +263,7 @@ export const geoApi = createApi({
 
       async onCacheEntryAdded(
         townId,
-        { updateCachedData, cacheEntryRemoved, getState }
+        { updateCachedData, cacheEntryRemoved, getState },
       ) {
         if (!townId) return;
 
@@ -349,7 +289,7 @@ export const geoApi = createApi({
 
             updateCachedData(() => snap.docs.map((d) => transformGeoData(d)));
           },
-          (error) => fsError(scope, "snapshot error", error)
+          (error) => fsError(scope, "snapshot error", error),
         );
 
         await cacheEntryRemoved;
@@ -364,17 +304,42 @@ export const geoApi = createApi({
     getWardsByLocalMunicipality: builder.query({
       async queryFn(lmPcode) {
         // console.log(`getWardsByLocalMunicipality ----lmPcode`, lmPcode);
-        if (!lmPcode) return { data: [] };
+        if (!lmPcode) return { data: null };
         try {
           const q = query(
             collection(db, "wards"),
             where("parents.localMunicipalityId", "==", lmPcode),
-            orderBy("code", "asc")
+            orderBy("code", "asc"),
           );
           const snap = await getDocs(q);
           const wards = snap.docs.map((d) => transformGeoData(d));
           // console.log(`getWardsByLocalMunicipality ----wards`, wards);
           return { data: wards };
+        } catch (error) {
+          return { error };
+        }
+      },
+    }),
+    /* =========================
+       GET WARDS BY LOCAL MUNICIPALITY
+    ========================= */
+    getWardByName: builder.query({
+      async queryFn(name) {
+        // console.log(`getWardsByLocalMunicipality ----lmPcode`, lmPcode);
+        if (!name) return { data: null };
+        try {
+          const q = query(collection(db, "wards"), where("name", "==", name));
+          const snap = await getDocs(q);
+
+          if (snap.docs.length > 0) {
+            // Access the first document if it exists
+            const doc = snap.docs[0];
+            console.log("Found ward document ID:", doc.id);
+            return { data: doc };
+          } else {
+            console.log("No matching document found!");
+            return { data: null };
+          }
         } catch (error) {
           return { error };
         }
@@ -395,4 +360,5 @@ export const {
   useGetTownsQuery,
   useGetWardsQuery,
   useGetWardsByLocalMunicipalityQuery,
+  useGetWardByNameQuery,
 } = geoApi;

@@ -1,5 +1,11 @@
-import MapsScreen from "../../../src/features/maps/MapsScreen";
+import { Text, View } from "react-native";
 
-export default function MapsEntry() {
-  return <MapsScreen />;
+export default function Page() {
+  return (
+    <View>
+      {/* return <MapsScreen /> */}
+      <Text>MapsScreen</Text>
+      {/* <ArchitectureTest /> */}
+    </View>
+  );
 }

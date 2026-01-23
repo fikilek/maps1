@@ -1,5 +1,6 @@
 // app/onboarding/select-workbase.js
-import { FlatList, StyleSheet, View } from "react-native";
+import { FlashList } from "@shopify/flash-list";
+import { StyleSheet, View } from "react-native";
 import { ActivityIndicator, List, Text, Title } from "react-native-paper";
 import { authApi, useSetActiveWorkbaseMutation } from "../../src/redux/authApi";
 import { geoMemory } from "../../src/redux/mmkv";
@@ -31,7 +32,7 @@ export default function SelectWorkbase() {
       {isLoading ? (
         <ActivityIndicator style={{ marginTop: 20 }} />
       ) : (
-        <FlatList
+        <FlashList
           data={authState?.profile?.access?.workbases || []}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (

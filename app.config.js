@@ -28,17 +28,18 @@ export default {
         },
       },
       permissions: [
-        "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA", // 🎯 ADD THIS for the Barcode Scanner!
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
       ],
-    },
-    web: {
-      output: "static",
-      favicon: "./assets/images/favicon.png",
     },
     plugins: [
       "expo-router",
+      "expo-camera",
       [
         "expo-splash-screen",
         {
@@ -59,10 +60,19 @@ export default {
             "Allow maps1 to access your location",
         },
       ],
+      [
+        "expo-image-picker",
+        {
+          photosPermission:
+            "The app accesses your photos to let you share them with your friends.",
+          cameraPermission:
+            "Allow $(PRODUCT_NAME) to open the camera to take photos of meters.",
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,
-      reactCompiler: true,
+      reactCompiler: false,
     },
     extra: {
       googleMapsApiKey: "AIzaSyAxgD1BOhVPXgDAYCK_ZG8Gj6CZPRgiHiw",

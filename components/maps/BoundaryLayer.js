@@ -1,6 +1,11 @@
-import React, { useMemo } from "react";
+// components/maps/BoundaryLayer.js
+import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Marker, Polygon } from "react-native-maps";
+import { useSelector } from "react-redux";
+import { useGeo } from "../../src/context/GeoContext";
+import { geoApi } from "../../src/redux/geoApi";
+import { erfMemory } from "../../src/storage/erfMemory";
 
 const LM_STROKE_COLOR = "#2563eb";
 const WARD_STROKE_COLOR = "#16a34a";
@@ -51,17 +56,63 @@ const isPointInRegion = (point, region, bufferFactor = 0.1) => {
 };
 
 const BoundaryLayer = ({
-  lm,
   wards = [],
-  selectedWard,
-  selectedErf,
   allErfs = [],
   currentRegion,
   currentZoom,
 }) => {
-  const lmCoords = useMemo(() => extractCoords(lm), [lm]);
-  const erfCoords = useMemo(() => extractCoords(selectedErf), [selectedErf]);
+  const { geoState } = useGeo();
 
+  const {
+    lmId,
+    wardId: selectedWardId,
+    id: selectedErfId,
+    selectedErf,
+  } = geoState;
+  // console.log(`BoundaryLayer ----selectedErf`, selectedErf);
+
+  // NEIGHBOUHG
+  // 1. Identify which IDs are on screen (Using Meta centroids)
+  const visibleNeighborIds = useMemo(() => {
+    // Gate: Only show neighbor shapes when zoomed in deep (Street Level)
+    if (currentZoom < 16 || allErfs.length === 0 || !currentRegion) return [];
+
+    return allErfs
+      .filter(
+        (erf) =>
+          erf.id !== selectedErfId &&
+          isPointInRegion(erf.centroid, currentRegion, 0.4) // 0.4 buffer for smooth edges
+      )
+      .map((erf) => erf.id);
+  }, [allErfs, currentRegion, currentZoom, selectedErfId]);
+
+  // 2. HYDRATION: State to hold the heavy geometries
+  const [neighborShapes, setNeighborShapes] = useState([]);
+
+  useEffect(() => {
+    // If we move out or have no IDs, clear the shapes
+    if (visibleNeighborIds.length === 0) {
+      setNeighborShapes([]);
+      return;
+    }
+
+    // Go to geoKV to get the "Heavy" shapes for only these specific neighbors
+    const shapes = visibleNeighborIds
+      .map((id) => erfMemory.getErfGeo(id)) // Fetching from the warehouse
+      .filter(Boolean); // Ensure no nulls if some geo is missing
+
+    setNeighborShapes(shapes);
+  }, [visibleNeighborIds]); // Fires only when the map stops and IDs change
+
+  // 🏛️ FETCH LM GEOMETRY ON DEMAND (Just like MCC)
+  const lmDetails = useSelector(
+    (state) =>
+      geoApi.endpoints.getLocalMunicipalityById.select(lmId)(state)?.data
+  );
+
+  const lmCoords = useMemo(() => extractCoords(lmDetails), [lmDetails]);
+
+  // FETCH WARD GEOMETRY
   const wardCoordsMap = useMemo(() => {
     const map = new Map();
     wards.forEach((w) => {
@@ -71,44 +122,45 @@ const BoundaryLayer = ({
     return map;
   }, [wards]);
 
-  // LAYER 1: Visible Boundaries (Medium buffer for neighborhood context)
-  const visiblePolygons = useMemo(() => {
-    if (currentZoom < 15) return [];
-    return allErfs.filter(
-      (erf) =>
-        erf.id !== selectedErf?.id &&
-        isPointInRegion(erf.centroid, currentRegion, 0.5)
-    );
-  }, [allErfs, currentRegion, currentZoom, selectedErf?.id]);
+  // 🏛️ FETCH SELECTED ERF GEOMETRY ON DEMAND
+  const selectedErfData = useMemo(() => {
+    if (!selectedErfId) return null;
+    // Get geometry/centroid from MMKV Warehouse
+    return erfMemory.getErfGeo(selectedErfId);
+  }, [selectedErfId]);
+  // console.log(`BoundaryLayer ----selectedErfData`, selectedErfData);
 
-  // LAYER 2: Visible Labels (Tight buffer for performance)
-  const visibleLabels = useMemo(() => {
-    if (currentZoom < 17) return [];
-    return allErfs.filter(
-      (erf) =>
-        erf.id !== selectedErf?.id &&
-        isPointInRegion(erf.centroid, currentRegion, 0.05)
-    );
-  }, [allErfs, currentRegion, currentZoom, selectedErf?.id]);
+  const erfCoords = useMemo(() => {
+    if (!selectedErfData) return null;
+
+    // 🛡️ CHECK 1: If the warehouse already gave us the boundary array
+    if (selectedErfData.boundary && Array.isArray(selectedErfData.boundary)) {
+      // console.log("✅ Using pre-formatted boundary from Warehouse");
+      return selectedErfData.boundary;
+    }
+
+    // 🛡️ CHECK 2: Fallback to the old extractor if it's raw GeoJSON
+    return extractCoords(selectedErfData);
+  }, [selectedErfData]);
 
   return (
     <>
-      {/* 1. MUNICIPALITY & WARDS */}
+      {/* 0. LOCAL MUNICIPALITY BOUNDARY (The "Home Base") */}
       {lmCoords && (
         <Polygon
-          key={`lm-${lm.id}`}
+          key={`lm-${lmId}`}
           coordinates={lmCoords}
           strokeColor={LM_STROKE_COLOR}
           strokeWidth={2}
-          fillColor="rgba(37,99,235,0.02)"
-          zIndex={1}
+          fillColor="transparent"
+          zIndex={1} // Lowest layer
         />
       )}
-
+      {/* 1. WARDS */}
       {wards.map((ward) => {
         const coords = wardCoordsMap.get(ward.id);
         if (!coords) return null;
-        const isSelected = selectedWard?.id === ward.id;
+        const isSelected = selectedWardId === ward.id;
         return (
           <Polygon
             key={`ward-${ward.id}`}
@@ -123,77 +175,82 @@ const BoundaryLayer = ({
         );
       })}
 
-      {/* 2. NEIGHBORHOOD BOUNDARIES (Vector-based, fast) */}
-      {visiblePolygons.map((erf) => (
+      {/* 4. SELECTED ERF HIGHLIGHT & LABEL */}
+      {erfCoords && (
+        <>
+          {/* The Bold Blue Boundary */}
+          <Polygon
+            key={`selected-poly-${selectedErfId}`}
+            coordinates={erfCoords}
+            strokeColor={ERF_STROKE_COLOR}
+            strokeWidth={3}
+            fillColor="rgba(0, 174, 255, 0.3)"
+            zIndex={100}
+          />
+
+          {/* The Label and the Blue Dot */}
+          {selectedErfData?.centroid && (
+            <Marker
+              key={`selected-marker-${selectedErfId}`}
+              coordinate={{
+                latitude: selectedErfData.centroid.lat,
+                longitude: selectedErfData.centroid.lng,
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              zIndex={1000}
+            >
+              <View style={styles.selectedMarkerContainer}>
+                <View style={styles.labelBubble}>
+                  <Text style={styles.labelText}>{selectedErf?.erfNo}</Text>
+                </View>
+                <View style={styles.blueDot} />
+              </View>
+            </Marker>
+          )}
+        </>
+      )}
+
+      {/* 2. NEIGHBORHOOD BOUNDARIES (The Hydrated Shapes) */}
+      {neighborShapes.map((geo) => (
         <Polygon
-          key={`poly-${erf.id}`}
-          coordinates={extractCoords(erf)}
-          strokeColor="rgba(188, 46, 46, 0.7)"
-          strokeWidth={0.5}
+          key={`neighbor-${geo.id}`}
+          coordinates={geo.boundary} // Use the boundary we fetched in useEffect
+          strokeColor="rgba(39, 67, 195, 0.5)" // Subtle blue
+          strokeWidth={0.8}
           fillColor="transparent"
           zIndex={10}
         />
       ))}
 
-      {/* 3. NEIGHBORHOOD LABELS (Heavy, strictly filtered) */}
-      {visibleLabels.map((erf) => (
-        <Marker
-          key={`label-${erf.id}`}
-          coordinate={{
-            latitude: erf.centroid.lat,
-            longitude: erf.centroid.lng,
-          }}
-          // Re-enable tracking ONLY if list is small enough to avoid lag
-          tracksViewChanges={visibleLabels.length < 60}
-          anchor={{ x: 0.5, y: 0.5 }}
-          pointerEvents="none"
-          zIndex={20}
-        >
-          <View style={styles.miniLabelContainer}>
-            <Text style={styles.miniLabelText}>{erf.sg?.parcelNo}</Text>
-          </View>
-        </Marker>
-      ))}
-
-      {/* 4. SELECTED ERF (Highest Priority) */}
-      {erfCoords && (
-        <Polygon
-          key={`selected-poly-${selectedErf.id}`}
-          coordinates={erfCoords}
-          strokeColor={ERF_STROKE_COLOR}
-          strokeWidth={3}
-          fillColor="rgba(0, 174, 255, 0.3)"
-          zIndex={100}
-        />
-      )}
-
-      {/* 4. SELECTED ERF (Highest Priority) */}
-      {selectedErf?.centroid && (
-        <Marker
-          key={`selected-marker-${selectedErf.id}`}
-          coordinate={{
-            latitude: selectedErf.centroid.lat,
-            longitude: selectedErf.centroid.lng,
-          }}
-          // Center the dot exactly on the centroid
-          anchor={{ x: 0.5, y: 0.5 }}
-          zIndex={1000} // Ensure it is above EVERYTHING
-          tracksViewChanges={true} // Keep true for the selected one so it's always crisp
-        >
-          <View style={styles.selectedMarkerContainer}>
-            <View style={styles.labelBubble}>
-              <Text style={styles.labelText}>
-                {selectedErf?.sg?.parcelNo || "SELECTED"}
-              </Text>
-            </View>
-            <View style={styles.blueDot} />
-          </View>
-        </Marker>
-      )}
+      {/* 3. NEIGHBORHOOD LABELS (The Proven Logic) */}
+      {currentZoom >= 17.2 && // 🛡️ High-detail gate: Hide when zooming out
+        allErfs
+          .filter(
+            (erf) =>
+              visibleNeighborIds.includes(erf.id) && erf.id !== selectedErfId
+          )
+          .map((erf) => (
+            <Marker
+              key={`label-${erf.id}`}
+              coordinate={{
+                latitude: erf.centroid.lat,
+                longitude: erf.centroid.lng,
+              }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              // 🎯 PIN THE CENTER
+              // ⚡ Optimization: once they are positioned, don't keep re-calculating
+              tracksViewChanges={true}
+              pointerEvents="none"
+              zIndex={50} // Higher than Polygons (10)
+            >
+              <View style={styles.miniLabelContainer}>
+                <Text style={styles.miniLabelText}>{erf.erfNo}</Text>
+              </View>
+            </Marker>
+          ))}
     </>
   );
 };
-
 const styles = StyleSheet.create({
   selectedMarkerContainer: { alignItems: "center", justifyContent: "center" },
   labelBubble: {

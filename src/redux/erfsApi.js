@@ -1,9 +1,9 @@
-import NetInfo from "@react-native-community/netinfo";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   where,
@@ -12,6 +12,30 @@ import {
 import { db } from "../firebase";
 import { erfMemory } from "../storage/erfMemory";
 import { transformGeoData } from "../utils/geo/parseGeometry";
+
+const workoutSovereignErf = (id) => {
+  if (!id) return { erfNo: "N/A" };
+
+  // 🏛️ Following your exact formula:
+  // Next 8 Digits (Start at index 8, length 8)
+  const erfBlock = id.substring(13, 20).replace(/^0+/, "");
+  const erfMain = parseInt(erfBlock, 8);
+
+  // Final 5 Digits (Start at index 16, length 5)
+  const portionBlock = id.substring(21, 26).replace(/^0+/, "");
+  const portion = parseInt(portionBlock, 6);
+
+  // 🏛️ Constructing the Identity
+  // If portion is 0, it's just the Erf. If portion > 0, it's Erf/Portion
+  const erfNo =
+    Number(portionBlock) === 0 ? `${erfBlock}` : `${erfBlock}/${portionBlock}`;
+
+  return {
+    erfNo,
+    parcelNo: erfMain,
+    portion: portion,
+  };
+};
 
 export const erfsApi = createApi({
   reducerPath: "erfsApi",
@@ -32,7 +56,7 @@ export const erfsApi = createApi({
             collection(db, "ireps_erfs"),
             where("admin.localMunicipality.pcode", "==", lmPcode),
             where("admin.ward.pcode", "==", wardPcode),
-            orderBy("erfId")
+            orderBy("erfId"),
           );
 
           // One-time fetch (no persistent stream)
@@ -57,123 +81,90 @@ export const erfsApi = createApi({
     }),
 
     // -----------------------------------
-    // FETCH: ERFs by Local Municipality (Use with caution - can be large!)
+    // FETCH: ERFs by Local Municipality PCODE
     // -----------------------------------
     getErfsByLmPcode: builder.query({
       async queryFn({ lmPcode }) {
-        console.log("getErfsByLmPcode ----mounted");
+        // We return an empty structure initially; onCacheEntryAdded fills the "shelves"
+        return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
+      },
+
+      async onCacheEntryAdded(
+        { lmPcode },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        if (!lmPcode) return;
+
         try {
-          if (!lmPcode) return { data: [] };
+          await cacheDataLoaded;
+
+          console.log(`📡 [STREAM]: Opening Erf Pipe for LM: ${lmPcode}`);
 
           const q = query(
             collection(db, "ireps_erfs"),
             where("admin.localMunicipality.pcode", "==", lmPcode),
             orderBy("erfId"),
-            limit(100)
+            limit(50),
           );
 
-          const snapshot = await getDocs(q);
-          const erfs = snapshot.docs.map((d) => transformGeoData(d));
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            // 1. Prepare the fresh data from the snapshot
+            const metaEntries = [];
+            const geoEntries = {};
+            const wardSet = new Set();
 
-          return { data: erfs };
+            snapshot.docs.forEach((doc) => {
+              const erf = transformGeoData(doc);
+
+              // Construct the lightweight Meta object
+              const meta = {
+                id: erf.erfId,
+                admin: erf?.admin,
+                erf: erf.erf,
+                erfNo: workoutSovereignErf(erf.erfId)?.erfNo,
+                premises: erf.premises || [], // 🎯 THIS is what the Cloud Function updates!
+              };
+
+              metaEntries.push(meta);
+
+              // Construct the heavy Geo object
+              geoEntries[erf.erfId] = {
+                centroid: erf.centroid,
+                bbox: erf.bbox,
+                geometry: erf.geometry,
+              };
+
+              if (erf.admin?.ward?.name) wardSet.add(erf.admin.ward.name);
+            });
+
+            // 2. 💉 UPDATE RAM (Redux State)
+            updateCachedData((draft) => {
+              draft.metaEntries = metaEntries;
+              draft.geoEntries = geoEntries;
+              draft.wards = ["ALL", ...Array.from(wardSet)].sort();
+            });
+
+            // 3. 📦 VAULT TO DISK (MMKV)
+            // Since we are inside the stream, this happens AUTOMATICALLY
+            // whenever a premise is added and the Cloud Function finishes!
+            erfMemory.saveErfsMetaList(lmPcode, metaEntries);
+            erfMemory.saveErfsGeoList(lmPcode, geoEntries);
+
+            console.log(
+              `✅ [VAULT SYNC]: ${metaEntries.length} Erfs secured to MMKV.`,
+            );
+          });
         } catch (error) {
-          console.error("❌ getErfsByLmPcode failed", error);
-          return { error };
+          console.error("❌ [STREAM ERROR]:", error);
         }
+
+        // Clean up the listener when the user leaves the map/municipality
+        await cacheEntryRemoved;
+        unsubscribe();
       },
-      providesTags: [{ type: "ERF", id: "LIST" }],
-      // Keep wards for 48 hours because they almost never change
-      keepUnusedDataFor: 172800,
     }),
-
-    // -----------------------------------
-    // FETCH: ERFs by Ward ONLY (PRIMARY, SAFE)
-    // -----------------------------------
-
-    getErfsByWard: builder.query({
-      async queryFn({ wardPcode }) {
-        if (!wardPcode) return { data: [] };
-
-        // 1️⃣ MMKV FIRST (instant, offline-safe)
-        const cached = erfMemory.getByWard(wardPcode);
-        if (cached?.erfs?.length) {
-          console.log("📦 ERFs from erfsKV", wardPcode);
-          return { data: cached.erfs };
-        }
-
-        // 2️⃣ Network check
-        const net = await NetInfo.fetch();
-        if (!net.isConnected) {
-          console.log("📴 Offline, no ERF cache", wardPcode);
-          return { data: [] };
-        }
-
-        // 3️⃣ Firestore fetch
-        try {
-          console.log("🌐 ERFs from Firestore", wardPcode);
-
-          const q = query(
-            collection(db, "ireps_erfs"),
-            where("admin.ward.pcode", "==", wardPcode),
-            orderBy("erfId")
-          );
-
-          const snap = await getDocs(q);
-          const erfs = snap.docs.map(transformGeoData);
-
-          // 4️⃣ Persist to erfsKV
-          erfMemory.setByWard(wardPcode, erfs);
-
-          return { data: erfs };
-        } catch (error) {
-          console.error("❌ getErfsByWard failed", error);
-          return { error };
-        }
-      },
-
-      keepUnusedDataFor: 86400,
-    }),
-
-    // getErfsByWard: builder.query({
-    //   async queryFn({ wardPcode }) {
-    //     console.log("getErfsByWard ----mounted");
-    //     console.log("getErfsByWard ----wardPcode", wardPcode);
-
-    //     try {
-    //       if (!wardPcode) return { data: [] };
-
-    //       const q = query(
-    //         collection(db, "ireps_erfs"),
-    //         where("admin.ward.pcode", "==", wardPcode),
-    //         orderBy("erfId")
-    //       );
-
-    //       const snapshot = await getDocs(q);
-    //       const erfs = snapshot.docs.map((d) => transformGeoData(d));
-
-    //       return { data: erfs };
-    //     } catch (error) {
-    //       console.error("❌ getErfsByWard failed", error);
-    //       return { error };
-    //     }
-    //   },
-
-    //   providesTags: (result) =>
-    //     result
-    //       ? [
-    //           ...result.map(({ id }) => ({ type: "ERF", id })),
-    //           { type: "ERF", id: "LIST" },
-    //         ]
-    //       : [{ type: "ERF", id: "LIST" }],
-
-    //   // ERFs may change (status, services), but geometry is stable
-    //   keepUnusedDataFor: 3600,
-    // }),
   }),
 });
 
-export const {
-  useGetErfsByLmPcodeQuery,
-  useGetErfsByLmAndWardQuery,
-  useGetErfsByWardQuery,
-} = erfsApi;
+export const { useGetErfsByLmPcodeQuery, useGetErfsByLmAndWardQuery } = erfsApi;

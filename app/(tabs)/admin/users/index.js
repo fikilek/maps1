@@ -2,7 +2,6 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
   // Button,
-  FlatList,
   Pressable,
   StyleSheet,
   // Text,
@@ -10,6 +9,7 @@ import {
 } from "react-native";
 import { Button, List, Modal, Portal, Text } from "react-native-paper";
 
+import { FlashList } from "@shopify/flash-list";
 import { useAuth } from "../../../../src/hooks/useAuth";
 import { useGetUsersQuery } from "../../../../src/redux/usersApi";
 
@@ -81,7 +81,7 @@ export default function UsersListScreen() {
         </View>
       </View>
 
-      <FlatList
+      <FlashList
         data={filteredUsers}
         keyExtractor={(item) => item.auth.uid}
         renderItem={({ item }) => (

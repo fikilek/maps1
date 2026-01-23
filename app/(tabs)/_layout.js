@@ -13,6 +13,7 @@ export default function TabsLayout() {
     asts: "Assets",
     dashboard: "Dashboard",
     admin: "Admin",
+    premises: "Premises",
   };
 
   return (
@@ -26,12 +27,12 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" options={{ href: null }} />
 
       <Tabs.Screen
-        name="maps"
+        name="erfs"
         options={{
-          title: "Maps",
+          title: "ERFs",
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
-              name="map-outline"
+              name="map-marker-radius-outline"
               color={color}
               size={size}
             />
@@ -40,12 +41,12 @@ export default function TabsLayout() {
       />
 
       <Tabs.Screen
-        name="erfs"
+        name="premises"
         options={{
-          title: "ERFs",
+          title: "Premises",
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
-              name="map-marker-radius-outline"
+              name="office-building-marker-outline"
               color={color}
               size={size}
             />
@@ -73,6 +74,20 @@ export default function TabsLayout() {
           title: "ASTs",
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="counter" color={color} size={size} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="maps"
+        options={{
+          title: "Maps",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="map-outline"
+              color={color}
+              size={size}
+            />
           ),
         }}
       />
@@ -107,24 +122,3 @@ export default function TabsLayout() {
     </Tabs>
   );
 }
-
-// import { Tabs } from "expo-router";
-
-// export default function TabsLayout() {
-//   return (
-//     <Tabs>
-//       <Tabs.Screen name="maps" />
-//       <Tabs.Screen name="erfs" />
-//       <Tabs.Screen name="trns" />
-//       <Tabs.Screen name="asts" />
-//       <Tabs.Screen name="dashboard" />
-//       <Tabs.Screen name="admin" />
-//       <Tabs.Screen
-//         name="index"
-//         options={{
-//           href: null, // 👈 hides it completely
-//         }}
-//       />
-//     </Tabs>
-//   );
-// }

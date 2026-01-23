@@ -1,5 +1,6 @@
+import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
-import { FlatList, StyleSheet, View } from "react-native";
+import { StyleSheet, TouchableOpacity, View } from "react-native";
 import {
   Button,
   Dialog,
@@ -8,6 +9,7 @@ import {
   RadioButton,
   Searchbar,
   Surface,
+  Text,
 } from "react-native-paper";
 
 const ErfFilterHeader = ({
@@ -16,26 +18,50 @@ const ErfFilterHeader = ({
   selectedWard,
   setSelectedWard,
   availableWards,
+  filteredCount,
+  totalCount,
 }) => {
   const [visible, setVisible] = useState(false);
+  // console.log(`ErfFilterHeader ----availableWards`, availableWards);
+  console.log(`ErfFilterHeader ----selectedWard`, selectedWard);
 
   const showDialog = () => setVisible(true);
   const hideDialog = () => setVisible(false);
 
   // Helper for the button label
-  const wardLabel =
-    selectedWard === "ALL" ? "All Wards" : `Ward ${selectedWard.slice(-2)}`;
+  // const wardLabel = selectedWard === "ALL" ? "All Wards" : selectedWard;
 
   return (
     <Surface style={styles.header} elevation={2}>
       {/* --- UNIFORM ROW --- */}
       <View style={styles.row}>
         <Searchbar
-          placeholder="Search Erf..."
+          placeholder="Search"
           onChangeText={setSearch}
           value={search}
           style={styles.searchBar}
+          placeholderTextColor="#888" // Custom placeholder color
         />
+        <View style={styles.statsBar}>
+          <View>
+            <Text style={styles.statsText}>
+              {selectedWard} Erfs
+              <Text style={styles.boldText}>{filteredCount}</Text>
+            </Text>
+            <Text style={styles.statsText}>
+              LM Erfs: <Text style={styles.boldText}>{totalCount}</Text>
+            </Text>
+          </View>
+
+          {search !== "" && (
+            <TouchableOpacity
+              onPress={() => setSearch("")}
+              style={styles.clearBtn}
+            >
+              <Text style={styles.clearSearchText}>Clear Search</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         <Button
           mode="outlined"
@@ -45,18 +71,25 @@ const ErfFilterHeader = ({
           contentStyle={styles.buttonContent}
           labelStyle={styles.buttonLabel}
         >
-          {wardLabel}
+          {selectedWard}
         </Button>
       </View>
 
       {/* --- WARD SELECTION MODAL --- */}
+      {/* --- WARD SELECTION MODAL --- */}
       <Portal>
         <Dialog visible={visible} onDismiss={hideDialog} style={styles.dialog}>
           <Dialog.Title>Select Ward</Dialog.Title>
-          <Dialog.ScrollArea style={styles.scrollArea}>
-            <FlatList
+
+          {/* 1. Add paddingHorizontal: 0 and a fixed height or flex to ScrollArea */}
+          <Dialog.ScrollArea
+            style={[styles.scrollArea, { paddingHorizontal: 0, height: 300 }]}
+          >
+            <FlashList
               data={availableWards}
               keyExtractor={(item) => item}
+              // 2. FlashList MUST have an estimatedItemSize for the first render
+              estimatedItemSize={60}
               renderItem={({ item }) => (
                 <List.Item
                   title={
@@ -80,6 +113,7 @@ const ErfFilterHeader = ({
               )}
             />
           </Dialog.ScrollArea>
+
           <Dialog.Actions>
             <Button onPress={hideDialog}>Cancel</Button>
           </Dialog.Actions>
@@ -88,6 +122,8 @@ const ErfFilterHeader = ({
     </Surface>
   );
 };
+
+export default ErfFilterHeader;
 
 const styles = StyleSheet.create({
   header: {
@@ -125,6 +161,14 @@ const styles = StyleSheet.create({
   dialog: {
     borderRadius: 12,
   },
+  statsText: {
+    color: "#939393ff",
+  },
+  subStatsText: {
+    color: "#939393ff",
+  },
+  boldText: {
+    color: "#413694ff",
+    fontWeight: "900",
+  },
 });
-
-export default ErfFilterHeader;

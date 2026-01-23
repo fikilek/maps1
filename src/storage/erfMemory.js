@@ -1,98 +1,82 @@
 import { erfsKV } from "../redux/mmkv";
 
-// Helper for legacy keys
-const erfKeyForWard = (wardPcode) => `erfs_ward_${wardPcode}`;
-
 export const erfMemory = {
-  // --- NEW: LM-WIDE SPLIT STORAGE (The Future) ---
-
-  saveLmInventory: (lmPcode, erfs) => {
-    if (!erfs || !Array.isArray(erfs)) return;
-    const metaList = [];
-
-    erfs.forEach((erf) => {
-      // 1. Meta (FlatList)
-      // metaList.push({
-      //   id: erf.id,
-      //   erfId: erf.erfId,
-      //   erfNo: erf.sg?.parcelNo || "N/A",
-      //   wardPcode: erf.admin?.ward?.pcode,
-      //   centroid: erf.geometry?.centroid,
-      // });
-      metaList.push({
-        id: erf.id,
-        erfId: erf.erfId,
-        erfNo: erf.sg?.parcelNo || "N/A",
-        wardPcode: erf.admin?.ward?.pcode,
-        lmName: erf.admin?.localMunicipality?.name, // 👈 Add this line!
-        centroid: erf.geometry?.centroid,
-      });
-
-      // 2. Geo (Map - Heavy)
-      if (erf.geometry) {
-        const geoData = {
-          boundary: erf.geometry.boundary,
-          centroid: erf.geometry.centroid,
-          erfNo: erf.sg?.parcelNo,
-          erfId: erf.erfId,
-        };
-        erfsKV.set(`geo_${erf.erfId}`, JSON.stringify(geoData));
-      }
-    });
-
-    erfsKV.set(`meta_${lmPcode}`, JSON.stringify(metaList));
-
-    const registry = erfMemory.getRegistry();
-    registry.lms = registry.lms || {};
-    registry.lms[lmPcode] = {
-      count: erfs.length,
-      lastSync: new Date().toISOString(),
-    };
-    erfsKV.set("registry", JSON.stringify(registry));
-  },
-
-  getLmMetaList: (lmPcode) => {
-    const data = erfsKV.getString(`meta_${lmPcode}`);
-    return data ? JSON.parse(data) : [];
-  },
-
-  getErfGeo: (erfId) => {
-    const data = erfsKV.getString(`geo_${erfId}`);
-    return data ? JSON.parse(data) : null;
-  },
-
-  // --- LEGACY: WARD-BASED STORAGE (Keep until Map refactor) ---
-
-  getByWard(wardPcode) {
-    if (!wardPcode) return null;
-    const raw = erfsKV.getString(erfKeyForWard(wardPcode));
-    if (!raw) return null;
+  saveErfsMetaList: (lmPcode, metaEntries) => {
+    // 🛡️ The "Annoying Error" Fix: Silent return if empty
+    if (!metaEntries || metaEntries.length === 0) {
+      console.log("ℹ️ [STORAGE]: Erfs Meta List empty. Skipping vault.");
+      return;
+    }
     try {
-      return JSON.parse(raw);
-    } catch {
-      console.warn("❌ Failed to parse ERF cache", wardPcode);
-      return null;
+      console.log(` `);
+      console.log(
+        `saveErfsMetaList ----metaEntries?.length`,
+        metaEntries?.length,
+      );
+      const storageKey = `meta_${lmPcode}`;
+      erfsKV.set(storageKey, JSON.stringify(metaEntries));
+
+      // Update Registry for tracking
+      const registry = erfMemory.getRegistry();
+      registry.lms = registry.lms || {};
+      registry.lms[lmPcode] = {
+        count: metaEntries.length,
+        lastSync: new Date().toISOString(),
+      };
+      erfsKV.set("registry", JSON.stringify(registry));
+
+      console.log(
+        `✅ [DISK]: Saved ErfsMetaList for ${lmPcode} (${metaEntries.length} items).`,
+      );
+    } catch (e) {
+      console.error("❌ [VAULT]: SaveErfsMetaList Failed", e);
     }
   },
 
-  setByWard(wardPcode, erfs) {
-    if (!wardPcode || !Array.isArray(erfs)) return;
-    erfsKV.set(
-      erfKeyForWard(wardPcode),
-      JSON.stringify({
-        wardPcode,
-        updatedAt: new Date().toISOString(),
-        erfs,
-      })
-    );
+  getErfsMetaList: (lmPcode) => {
+    try {
+      const storageKey = `meta_${lmPcode}`;
+      const data = erfsKV.getString(storageKey);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      console.error("❌ [VAULT]: GetErfsMetaList Failed", e);
+      return [];
+    }
   },
 
-  // --- REGISTRY & UTILS ---
+  saveErfsGeoList: (lmPcode, geoEntries) => {
+    // geoEntries is an object { erfId: { geometry } }
+    if (!geoEntries || Object.keys(geoEntries).length === 0) return;
+
+    try {
+      const ids = Object.keys(geoEntries);
+      ids.forEach((id) => {
+        // Individual keys per Erf shape for high performance
+        erfsKV.set(`geo_${id}`, JSON.stringify(geoEntries[id]));
+      });
+      console.log(`⚙️ [SHREDDER]: Saved ErfsGeoList for ${ids.length} Erfs.`);
+    } catch (error) {
+      console.error("❌ [VAULT]: SaveErfsGeoList Failed", error);
+    }
+  },
+
+  getErfsGeoList: (erfId) => {
+    try {
+      const data = erfsKV.getString(`geo_${erfId}`);
+      return data ? JSON.parse(data) : null;
+    } catch (e) {
+      console.error("❌ [VAULT]: GetErfsGeoList Failed", e);
+      return null;
+    }
+  },
 
   getRegistry: () => {
     const data = erfsKV.getString("registry");
     return data ? JSON.parse(data) : { lms: {} };
   },
 
-  clearAll: () => erfsKV.clearAll(),
+  clearAll: () => {
+    erfsKV.clearAll();
+    console.log("☢️ [STORAGE CLEARED]: MMKV erfKV wiped clean.");
+  },
 };
