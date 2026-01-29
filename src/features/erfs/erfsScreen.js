@@ -1,15 +1,52 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 // 🏛️ SOVEREIGN CONTEXTS ONLY
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import { HandleNuclearReset } from "../../test/mmkvNuclearReset";
 import StealthAuditor from "../../test/premisesDiagnosis";
 import ErfFilterHeader from "./erfFilterHeader";
+
+// function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
+//   const premiseCount = `${item?.totals?.premises ?? item?.premises?.length ?? 0}`;
+//   const summaryIcon = `${item?.summaryIcon || "home-city-outline"}`;
+
+//   return (
+//     <View style={[styles?.itemWrapper, isActive && styles?.activeItemWrapper]}>
+//       <View style={styles?.itemContainer}>
+//         <TouchableOpacity
+//           style={styles?.infoSection}
+//           onPress={() => onSelect(item?.id)}
+//           activeOpacity={0.7}
+//         >
+//           <View style={styles?.row}>
+//             <Text style={[styles?.parcelText, isActive && styles?.activeText]}>
+//               {/* 🛡️ FORCE STRING */}
+//               {`ERF ${item?.erfNo || "N/A"}`}
+//             </Text>
+//           </View>
+
+//           {/* 🎯 THE CRASH ZONE: Force Ward name to string */}
+//           <Text style={styles?.wardText}>
+//             {`${item?.admin?.ward?.name || item?.ward || "Unknown Ward"}`}
+//           </Text>
+
+//           {/* 🛡️ FORCE STRING */}
+//           <Text style={styles?.idText}>{`${item?.id || "N/Av"}`}</Text>
+//         </TouchableOpacity>
+
+//         {/* ... rest of the component ... */}
+//         <View style={styles.dashboardCol}>
+//           <Text style={styles.bigCountText}>{premiseCount}</Text>
+//         </View>
+//       </View>
+//     </View>
+//   );
+// }
 
 function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
   // 🎯 Extract just what we need.
@@ -31,7 +68,7 @@ function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
               ERF {item?.erfNo || "N/A"}
             </Text>
           </View>
-          <Text style={styles?.wardText}>{item?.admin?.ward?.name}</Text>
+          {/* <Text style={styles?.wardText}>{item?.admin?.ward?.name}</Text> */}
           <Text style={styles?.idText}>{item?.id || "N/Av"}</Text>
         </TouchableOpacity>
 
@@ -77,111 +114,6 @@ function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
   );
 }
 
-// const ErfItem = memo(
-//   function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
-//     // 🎯 Warehouse already shredded this: totals { premises, water, elec }
-//     const {
-//       totals = { premises: item?.premises?.length, water: 0, elec: 0 },
-//       summaryIcon = "home",
-//     } = item;
-//     // console.log(`erfNo`, item?.id);
-
-//     return (
-//       <View
-//         style={[styles?.itemWrapper, isActive && styles?.activeItemWrapper]}
-//       >
-//         <View style={styles?.itemContainer}>
-//           {/* 🎯 PILLAR 1: SELECTION & INFO (LEFT) */}
-//           <TouchableOpacity
-//             style={styles?.infoSection}
-//             onPress={() => onSelect(item?.id)}
-//             activeOpacity={0.7}
-//           >
-//             <View style={styles?.row}>
-//               <Text
-//                 style={[styles?.parcelText, isActive && styles?.activeText]}
-//               >
-//                 ERF {item?.erfNo || "N/A"}
-//               </Text>
-//             </View>
-//             <Text style={styles?.wardText}>{item?.admin?.ward?.name}</Text>
-//             <Text style={styles?.idText}>{item?.id || "N/Av"}</Text>
-//           </TouchableOpacity>
-
-//           {/* 🎯 PILLAR 2: PREMISE DASHBOARD (CENTER) */}
-//           <TouchableOpacity
-//             style={styles.premiseSection}
-//             onPress={() => onErfDetailPress(item)}
-//           >
-//             {/* 🏛️ ROW 1: OCCUPANCY & TYPE */}
-//             <View style={styles.dashboardRow}>
-//               <View style={styles.dashboardCol}>
-//                 <Text style={styles.bigCountText}>{totals?.premises || 0}</Text>
-//               </View>
-//               <View style={styles.dashboardCol}>
-//                 <MaterialCommunityIcons
-//                   name={summaryIcon}
-//                   size={18}
-//                   color="#455a64"
-//                 />
-//               </View>
-//             </View>
-
-//             {/* 🏛️ ROW 2: SERVICE INFRASTRUCTURE */}
-//             <View style={styles.dashboardRow}>
-//               <View style={styles.dashboardCol}>
-//                 <View style={styles.serviceItem}>
-//                   <MaterialCommunityIcons
-//                     name="flash"
-//                     size={14}
-//                     color="#FBC02D"
-//                   />
-//                   <Text style={styles.serviceCount}>{totals?.elec || 0}</Text>
-//                 </View>
-//               </View>
-//               <View style={styles.dashboardCol}>
-//                 <View style={styles.serviceItem}>
-//                   <MaterialCommunityIcons
-//                     name="water"
-//                     size={14}
-//                     color="#1976D2"
-//                   />
-//                   <Text style={styles.serviceCount}>{totals?.water || 0}</Text>
-//                 </View>
-//               </View>
-//             </View>
-//           </TouchableOpacity>
-
-//           {/* 🎯 PILLAR 3: MAP TRANSITION (RIGHT) */}
-//           <TouchableOpacity
-//             style={styles?.actionSection}
-//             onPress={() => onMapPress(item?.id)}
-//           >
-//             <View
-//               style={[styles?.iconCircle, isActive && styles?.activeIconCircle]}
-//             >
-//               <MaterialCommunityIcons
-//                 name="map-search"
-//                 size={24}
-//                 color={isActive ? "#4CAF50" : "#00BFFF"}
-//               />
-//             </View>
-//             <Text
-//               style={[styles?.mapLinkText, isActive && { color: "#4CAF50" }]}
-//             >
-//               {isActive ? "GO TO" : "MAP"}
-//             </Text>
-//           </TouchableOpacity>
-//         </View>
-//       </View>
-//     );
-//   },
-//   (prev, next) =>
-//     prev?.isActive === next?.isActive &&
-//     prev?.item?.id === next?.item?.id &&
-//     prev?.item?.updatedAt === next?.item?.updatedAt,
-// );
-
 export default function ErfsScreen() {
   // console.log(``);
   // console.log(`ErfsScreen ----mounting `);
@@ -189,10 +121,11 @@ export default function ErfsScreen() {
   const router = useRouter();
 
   // 🏛️ Now these will work because of the 'export' fix!
-  const { geoState, updateGeo } = useGeo();
+  const { geoState, setGeoState } = useGeo();
   // console.log(`ErfsScreen ----geoState?.selectedWard`, geoState?.selectedWard);
 
   const { all, filtered, loading } = useWarehouse();
+  // console.log(`ErfsScreen ----filtered`, filtered);
 
   const erfs = filtered.erfs;
   const wards = filtered.wards;
@@ -217,13 +150,18 @@ export default function ErfsScreen() {
       </View>
 
       <ErfFilterHeader
-        // 🎯 Note: Since Warehouse doesn't have 'filters' yet,
-        // we use geoState or local state for now
         search={""}
         setSearch={() => {}}
+        // 🛡️ Pass the object as is
         selectedWard={geoState.selectedWard}
-        setSelectedWard={(wardName) => updateGeo({ selectedWard: wardName })}
-        availableWards={all?.wards} // Will come from 'wards' in Warehouse
+        // 🎯 THE FIX: Rename the argument to 'ward' to reflect reality
+        // and ensure we are passing the whole object to the state
+        setSelectedWard={(ward) => {
+          console.log("📡 [GOC]: Updating Ward to:", ward?.name || ward);
+          // setGeoState({ selectedWard: ward });
+          setGeoState((prev) => ({ ...prev, selectedWard: ward }));
+        }}
+        availableWards={all?.wards}
         filteredCount={erfs?.length || 0}
         totalCount={erfs?.length || 0}
       />
@@ -239,25 +177,26 @@ export default function ErfsScreen() {
             item={item}
             isActive={item?.id === geoState?.selectedErf?.id}
             onSelect={() => {
-              // 🎯 THE TOGGLE LOGIC:
               const isAlreadySelected = geoState?.selectedErf?.id === item.id;
 
               if (isAlreadySelected) {
-                // If tapping the same one, clear it (deselect)
-                updateGeo({ selectedErf: null });
+                // 🛡️ FIX: Spread the previous state to keep LM/Ward!
+                setGeoState((prev) => ({ ...prev, selectedErf: null }));
                 console.log("📴 [DESELECTED]: Filter cleared.");
               } else {
-                // Otherwise, select it
-                updateGeo({ selectedErf: item });
+                // 🛡️ FIX: Spread the previous state!
+                setGeoState((prev) => ({ ...prev, selectedErf: item }));
                 console.log(`🎯 [SELECTED]: Erf ${item.erfNo}`);
               }
             }}
             onMapPress={() => {
-              updateGeo({ selectedErf: item });
+              // 🛡️ FIX: Spread the previous state!
+              setGeoState((prev) => ({ ...prev, selectedErf: item }));
               router.push("/(tabs)/maps");
             }}
             onErfDetailPress={(item) => {
-              updateGeo({ selectedErf: item });
+              // 🛡️ FIX: Spread the previous state!
+              setGeoState((prev) => ({ ...prev, selectedErf: item }));
               router.push(`/erfs/${item.id}`);
             }}
           />
@@ -274,14 +213,26 @@ export default function ErfsScreen() {
           <ErfItem
             item={item}
             isActive={item?.id === geoState?.selectedErf?.id}
-            onSelect={() => updateGeo({ selectedErf: item })}
+            onSelect={() => {
+              // 🎯 THE TOGGLE LOGIC:
+              const isAlreadySelected = geoState?.selectedErf?.id === item.id;
+
+              if (isAlreadySelected) {
+                // If tapping the same one, clear it (deselect)
+                setGeoState({ selectedErf: null });
+                console.log("📴 [DESELECTED]: Filter cleared.");
+              } else {
+                // Otherwise, select it
+                setGeoState({ selectedErf: item });
+                console.log(`🎯 [SELECTED]: Erf ${item.erfNo}`);
+              }
+            }}
             onMapPress={() => {
-              updateGeo({ selectedErf: item });
+              setGeoState({ selectedErf: item });
               router.push("/(tabs)/maps");
             }}
             onErfDetailPress={(item) => {
-              // Use the dynamic route we just created
-              updateGeo({ selectedErf: item });
+              setGeoState({ selectedErf: item });
               router.push(`/erfs/${item.id}`);
             }}
           />

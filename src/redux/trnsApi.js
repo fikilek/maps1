@@ -16,10 +16,10 @@ export const trnsApi = createApi({
   endpoints: (builder) => ({
     // 🎯 THE MUTATION: All uploads go through here
 
-    // trnsApi.js
     addTrn: builder.mutation({
       async queryFn(payload) {
         try {
+          // 🚀 1. Hits Firestore "trns" collection
           const docRef = await addDoc(collection(db, "trns"), payload);
           return { data: { id: docRef.id, ...payload } };
         } catch (error) {
@@ -32,26 +32,28 @@ export const trnsApi = createApi({
         try {
           await queryFulfilled;
 
-          // 🎯 THE FIX: Use the 'util' from premisesApi inside the function
-          // to avoid circular dependency at the top of the file
+          // 🏗️ 2. DESTRICTURING THE 3-SECTION PAYLOAD
+          // We reach into Section 1 (accessData) for the goodies
+          const { accessData } = payload;
+          const { premise, metadata, trnType } = accessData;
+
           const { premisesApi } = await import("./premisesApi");
 
-          if (payload.trnType === "METER_DISCOVERY") {
+          if (trnType === "METER_DISCOVERY") {
             dispatch(
               premisesApi.util.updateQueryData(
                 "getPremisesByLmPcode",
-                { lmPcode: payload.metadata.lmPcode },
+                { lmPcode: metadata.lmPcode },
                 (draft) => {
-                  // Find the specific premise in the RAM cache
-                  const p = draft.find(
-                    (item) => item.id === payload.premise.id,
-                  );
+                  const p = draft.find((item) => item.id === premise.id);
                   if (p) {
-                    p.occupancy = {
-                      status: payload.premise.status,
-                      adverseCondition: payload.data.adverseCondition || false,
-                    };
-                    p.metadata = payload.metadata; // Standard 2026-01-21
+                    // Update the local RAM so the UI looks fresh immediately
+                    p.metadata = metadata;
+
+                    // Optional: Update occupancy status in cache for the demo?
+                    if (accessData.access.hasAccess === "no") {
+                      p.occupancy = { status: "NO_ACCESS" };
+                    }
                   }
                 },
               ),
@@ -74,36 +76,30 @@ export const trnsApi = createApi({
     //   },
     //   invalidatesTags: ["Trns"],
 
-    //   // 🎯 THE MAGIC: Update the Premise when a Transaction is born
     //   async onQueryStarted(payload, { dispatch, queryFulfilled }) {
-    //     console.log(`addTrn --onQueryStarted --payload`, payload);
-    //     console.log(
-    //       `addTrn --onQueryStarted --payload.metadata.lmPcode`,
-    //       payload.metadata.lmPcode,
-    //     );
-
     //     try {
-    //       const { data: createdTrn } = await queryFulfilled;
+    //       await queryFulfilled;
 
-    //       // Only update premise if the transaction is a METER_DISCOVERY
+    //       // 🎯 THE FIX: Use the 'util' from premisesApi inside the function
+    //       // to avoid circular dependency at the top of the file
+    //       const { premisesApi } = await import("./premisesApi");
+
     //       if (payload.trnType === "METER_DISCOVERY") {
     //         dispatch(
     //           premisesApi.util.updateQueryData(
-    //             "getPremises", // Use the actual name of your premises query
+    //             "getPremisesByLmPcode",
     //             { lmPcode: payload.metadata.lmPcode },
     //             (draft) => {
-    //               console.log(`addTrn --onQueryStarted --draft`, draft);
-
-    //               const premiseIndex = draft.findIndex(
-    //                 (p) => p.id === payload.premise.id,
+    //               // Find the specific premise in the RAM cache
+    //               const p = draft.find(
+    //                 (item) => item.id === payload.premise.id,
     //               );
-    //               if (premiseIndex !== -1) {
-    //                 // Apply updates to the draft
-    //                 draft[premiseIndex].occupancy = {
-    //                   status: payload.premise.status,
-    //                   adverseCondition: payload.data.adverseCondition || false,
-    //                 };
-    //                 draft[premiseIndex].metadata = payload.metadata;
+    //               if (p) {
+    //                 // p.occupancy = {
+    //                 //   status: payload.premise.status,
+    //                 //   adverseCondition: payload.data.adverseCondition || false,
+    //                 // };
+    //                 p.metadata = payload.metadata; // Standard 2026-01-21
     //               }
     //             },
     //           ),
@@ -115,8 +111,7 @@ export const trnsApi = createApi({
     //   },
     // }),
 
-    // 🎯 THE STREAM: Real-time sync
-    getTrns: builder.query({
+    getTrnsByLmPcode: builder.query({
       async queryFn() {
         return { data: [] };
       },
@@ -125,14 +120,15 @@ export const trnsApi = createApi({
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
+        console.log(`getTrnsByLmPcode ----arg`, arg);
         try {
           await cacheDataLoaded;
+
           const q = query(
             collection(db, "trns"),
-            where("metadata.lmPcode", "==", arg.lmPcode),
-            orderBy("metadata.updated.at", "desc"),
+            where("accessData.metadata.lmPcode", "==", arg.lmPcode),
+            orderBy("accessData.metadata.updated.at", "desc"),
           );
-
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData((draft) => {
               return snapshot.docs.map((doc) => ({
@@ -149,4 +145,4 @@ export const trnsApi = createApi({
   }),
 });
 
-export const { useAddTrnMutation, useGetTrnsQuery } = trnsApi;
+export const { useAddTrnMutation, useGetTrnsByLmPcodeQuery } = trnsApi;

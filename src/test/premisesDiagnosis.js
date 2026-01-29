@@ -24,11 +24,11 @@ const StealthAuditor = ({ lmPcode = "ZA1048" }) => {
 
   // 🏛️ WAREHOUSE & GEO CONTEXT
   const warehouse = useWarehouse();
-  console.log(` `);
-  console.log(
-    `StealthAuditor ----warehouse?.all?.erfs?.length`,
-    warehouse?.all?.erfs?.length,
-  );
+  // console.log(` `);
+  // console.log(
+  //   `StealthAuditor ----warehouse?.all?.erfs?.length`,
+  //   warehouse?.all?.erfs?.length,
+  // );
   const { geoState } = useGeo();
 
   // 🧠 DIRECT RAM READ (Redux Cache)

@@ -12,7 +12,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
 import {
   ActivityIndicator,
   Divider,
@@ -24,7 +23,10 @@ import {
 } from "react-native-paper";
 
 import * as Yup from "yup";
+import SovereignLocationPicker from "../../../components/maps/SovereignLocationPicker";
 import { useGeo } from "../../context/GeoContext";
+import { getSafeCoords } from "../../context/MapContext";
+import { useWarehouse } from "../../context/WarehouseContext";
 import { useAuth } from "../../hooks/useAuth";
 import { useAddPremiseMutation } from "../../redux/premisesApi";
 
@@ -83,6 +85,7 @@ export default function FormPremise() {
   console.log(` `);
   console.log(`FormPremise ----mounted`);
 
+  const { all } = useWarehouse();
   const router = useRouter();
   const { id } = useLocalSearchParams(); // This is the Erf ID
   const { geoState } = useGeo();
@@ -101,12 +104,23 @@ export default function FormPremise() {
   // console.log(`FormPremise ----targetGeometry`, targetGeometry);
 
   const fallbackCentroid = [
-    geoState?.selectedLm?.centroid?.lat || -33.946,
-    geoState?.selectedLm?.centroid?.lng || 22.984,
+    geoState?.selectedLm?.centroid?.lat,
+    geoState?.selectedLm?.centroid?.lng,
   ];
   // console.log(`FormPremise ----fallbackCentroid`, fallbackCentroid);
+  const bestCentroid = selectedErf?.centroid
+    ? [
+        selectedErf.centroid.lat || selectedErf.centroid[0],
+        selectedErf.centroid.lng || selectedErf.centroid[1],
+      ]
+    : fallbackCentroid;
 
   const safeErfNo = selectedErf?.erfNo.replace(/\//g, "-");
+
+  const erfCentroid = targetGeometry?.centroid || [
+    geoState?.selectedLm?.centroid?.lat,
+    geoState?.selectedLm?.centroid?.lng,
+  ];
 
   const initialValues = {
     id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
@@ -114,7 +128,7 @@ export default function FormPremise() {
     erfNo: selectedErf?.erfNo || "",
     // 🛠️ FIX: Lowercase 'address' and camelCase 'strName'
     address: { strNo: "12", strName: "Google", strType: "Street" },
-    propertyType: { type: "Business", name: "", unitNo: [] },
+    propertyType: { type: "Business", untiName: "", unitNo: "" },
     metadata: {
       created: {
         byUser: user?.displayName || "Field Agent",
@@ -128,12 +142,13 @@ export default function FormPremise() {
       },
     },
     geometry: {
-      centroid: targetGeometry?.centroid || fallbackCentroid,
+      // centroid: targetGeometry?.centroid || fallbackCentroid,
+      centroid: erfCentroid,
     },
     // Adding service placeholders to match Detail screen grid
     services: {
-      electricityMeter: 0,
-      waterMeter: 0,
+      electricityMeters: [],
+      waterMeters: [],
     },
     occupancy: { status: "OCCUPIED" },
     isTownship: selectedErf?.isTownship || false,
@@ -214,6 +229,15 @@ export default function FormPremise() {
       }) => {
         // console.log(`FormPremise ----values`, values);
         // console.log(`FormPremise ----errors`, errors);
+
+        // 🎯 2. Logic now lives inside the render function where 'values' is alive
+        const currentErfId = values.erfId;
+        const erfData =
+          all?.geoLibrary?.[currentErfId] || all?.geoEntries?.[currentErfId];
+
+        // 🏛️ 3. Compute the gold boundary for the picker
+        const erfBoundary = getSafeCoords(erfData?.geometry);
+
         return (
           <View style={styles.container}>
             <Stack.Screen
@@ -270,7 +294,7 @@ export default function FormPremise() {
                 </ScrollView>
               </Modal>
 
-              <Modal
+              {/* <Modal
                 visible={mapFullVisible}
                 onDismiss={() => setMapFullVisible(false)}
                 contentContainerStyle={styles.fullMapModal}
@@ -320,7 +344,7 @@ export default function FormPremise() {
                 <View style={styles.mapTip}>
                   <Text style={styles.mapTipText}>Long-press icon to drag</Text>
                 </View>
-              </Modal>
+              </Modal> */}
             </Portal>
 
             <ScrollView contentContainerStyle={styles.formScroll}>
@@ -437,7 +461,17 @@ export default function FormPremise() {
 
                 <Divider style={styles.divider} />
                 <Text style={styles.label}>GEOSPATIAL LOCATION</Text>
-                <TouchableOpacity
+
+                <SovereignLocationPicker
+                  label="Building Geospatial Location"
+                  name="geometry.centroid"
+                  icon="home-map-marker"
+                  referenceBoundary={erfBoundary} // 🏛️ Erf gold lines
+                  erfNo={erfNo} // 🏷️ The Erf Number
+                  erfCentroid={values.geometry.centroid} // 🎯 Initial center point
+                />
+
+                {/* <TouchableOpacity
                   style={styles.miniMapWrapper}
                   onPress={() => setMapFullVisible(true)}
                 >
@@ -475,7 +509,7 @@ export default function FormPremise() {
                       Tap to Position Premise
                     </Text>
                   </View>
-                </TouchableOpacity>
+                </TouchableOpacity> */}
               </Surface>
 
               {/* STRUCTURE MANIFEST */}

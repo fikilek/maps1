@@ -109,52 +109,109 @@ export const erfsApi = createApi({
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
-            // 1. Prepare the fresh data from the snapshot
             const metaEntries = [];
             const geoEntries = {};
             const wardSet = new Set();
 
             snapshot.docs.forEach((doc) => {
-              const erf = transformGeoData(doc);
+              // 1. RAW DATA extraction
+              const erf = doc.data();
 
-              // Construct the lightweight Meta object
+              // 🛡️ THE REFINERY: Parse geometry if it's a string
+              let parsedGeometry = erf.geometry;
+              if (typeof parsedGeometry === "string") {
+                try {
+                  parsedGeometry = JSON.parse(parsedGeometry);
+                } catch (e) {
+                  console.error(`⚠️ [PARSE FAIL] Erf: ${doc.id}`, e);
+                  parsedGeometry = null; // Prevent native crash by passing null vs bad string
+                }
+              }
+
+              // 2. Construct the lightweight Meta object
               const meta = {
-                id: erf.erfId,
+                id: erf.erfId || doc.id,
                 admin: erf?.admin,
                 erf: erf.erf,
-                erfNo: workoutSovereignErf(erf.erfId)?.erfNo,
-                premises: erf.premises || [], // 🎯 THIS is what the Cloud Function updates!
+                erfNo: workoutSovereignErf(erf.erfId || doc.id)?.erfNo,
+                premises: erf.premises || [],
               };
-
               metaEntries.push(meta);
 
-              // Construct the heavy Geo object
-              geoEntries[erf.erfId] = {
+              // 3. Construct the heavy Geo object (NOW WITH PARSED GEOM)
+              geoEntries[meta.id] = {
                 centroid: erf.centroid,
                 bbox: erf.bbox,
-                geometry: erf.geometry,
+                geometry: parsedGeometry, // 🎯 PURE OBJECT NOW
               };
 
               if (erf.admin?.ward?.name) wardSet.add(erf.admin.ward.name);
             });
 
-            // 2. 💉 UPDATE RAM (Redux State)
+            // 4. 💉 UPDATE RAM (Redux State)
             updateCachedData((draft) => {
               draft.metaEntries = metaEntries;
               draft.geoEntries = geoEntries;
               draft.wards = ["ALL", ...Array.from(wardSet)].sort();
             });
 
-            // 3. 📦 VAULT TO DISK (MMKV)
-            // Since we are inside the stream, this happens AUTOMATICALLY
-            // whenever a premise is added and the Cloud Function finishes!
+            // 5. 📦 VAULT TO DISK (MMKV) - Clean data only!
             erfMemory.saveErfsMetaList(lmPcode, metaEntries);
             erfMemory.saveErfsGeoList(lmPcode, geoEntries);
 
+            // console.log(`getErfsByLmPcode ----geoEntries`, geoEntries);
             console.log(
-              `✅ [VAULT SYNC]: ${metaEntries.length} Erfs secured to MMKV.`,
+              `✅ [VAULT SYNC]: ${metaEntries.length} Refined Erfs secured to MMKV.`,
             );
           });
+
+          // unsubscribe = onSnapshot(q, (snapshot) => {
+          //   // 1. Prepare the fresh data from the snapshot
+          //   const metaEntries = [];
+          //   const geoEntries = {};
+          //   const wardSet = new Set();
+
+          //   snapshot.docs.forEach((doc) => {
+          //     const erf = transformGeoData(doc);
+
+          //     // Construct the lightweight Meta object
+          //     const meta = {
+          //       id: erf.erfId,
+          //       admin: erf?.admin,
+          //       erf: erf.erf,
+          //       erfNo: workoutSovereignErf(erf.erfId)?.erfNo,
+          //       premises: erf.premises || [], // 🎯 THIS is what the Cloud Function updates!
+          //     };
+
+          //     metaEntries.push(meta);
+
+          //     // Construct the heavy Geo object
+          //     geoEntries[erf.erfId] = {
+          //       centroid: erf.centroid,
+          //       bbox: erf.bbox,
+          //       geometry: erf.geometry,
+          //     };
+
+          //     if (erf.admin?.ward?.name) wardSet.add(erf.admin.ward.name);
+          //   });
+
+          //   // 2. 💉 UPDATE RAM (Redux State)
+          //   updateCachedData((draft) => {
+          //     draft.metaEntries = metaEntries;
+          //     draft.geoEntries = geoEntries;
+          //     draft.wards = ["ALL", ...Array.from(wardSet)].sort();
+          //   });
+
+          //   // 3. 📦 VAULT TO DISK (MMKV)
+          //   // Since we are inside the stream, this happens AUTOMATICALLY
+          //   // whenever a premise is added and the Cloud Function finishes!
+          //   erfMemory.saveErfsMetaList(lmPcode, metaEntries);
+          //   erfMemory.saveErfsGeoList(lmPcode, geoEntries);
+
+          //   console.log(
+          //     `✅ [VAULT SYNC]: ${metaEntries.length} Erfs secured to MMKV.`,
+          //   );
+          // });
         } catch (error) {
           console.error("❌ [STREAM ERROR]:", error);
         }

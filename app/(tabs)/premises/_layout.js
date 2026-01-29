@@ -1,8 +1,6 @@
-import { Stack, useRouter } from "expo-router";
-import { Text, TouchableOpacity } from "react-native";
+import { Stack } from "expo-router";
 
 export default function PremisesLayout() {
-  const router = useRouter();
   return (
     <Stack
       screenOptions={{
@@ -24,21 +22,9 @@ export default function PremisesLayout() {
       <Stack.Screen
         name="form"
         options={{
-          title: "Meter Discovery",
+          title: "",
           presentation: "modal",
           headerShown: true,
-          headerLeft: () => (
-            <TouchableOpacity
-              style={{ margin: 5 }}
-              onPress={() => router.back()}
-            >
-              <Text
-                style={{ color: "#DC3545", marginLeft: 10, fontWeight: "600" }}
-              >
-                Cancel
-              </Text>
-            </TouchableOpacity>
-          ),
         }}
       />
 

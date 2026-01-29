@@ -6,6 +6,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Provider } from "react-redux";
 
 import { GeoProvider } from "../src/context/GeoContext";
+import { MapProvider } from "../src/context/MapContext";
 import { WarehouseProvider } from "../src/context/WarehouseContext";
 import { useAuth } from "../src/hooks/useAuth";
 import AuthBootstrap from "../src/navigation/AuthBootstrap";
@@ -104,19 +105,40 @@ export default function RootLayout() {
     <Provider store={store}>
       <GeoProvider>
         <WarehouseProvider>
-          <PaperProvider>
-            <SafeAreaProvider>
-              <SafeAreaView style={{ flex: 1 }}>
-                <AuthBootstrap />
-                <AuthGate />
-              </SafeAreaView>
-            </SafeAreaProvider>
-          </PaperProvider>
+          <MapProvider>
+            <PaperProvider>
+              <SafeAreaProvider>
+                <SafeAreaView style={{ flex: 1 }}>
+                  <AuthBootstrap />
+                  <AuthGate />
+                </SafeAreaView>
+              </SafeAreaProvider>
+            </PaperProvider>
+          </MapProvider>
         </WarehouseProvider>
       </GeoProvider>
     </Provider>
   );
 }
+
+// export default function RootLayout() {
+//   return (
+//     <Provider store={store}>
+//       <GeoProvider>
+//         <WarehouseProvider>
+//           <PaperProvider>
+//             <SafeAreaProvider>
+//               <SafeAreaView style={{ flex: 1 }}>
+//                 <AuthBootstrap />
+//                 <AuthGate />
+//               </SafeAreaView>
+//             </SafeAreaProvider>
+//           </PaperProvider>
+//         </WarehouseProvider>
+//       </GeoProvider>
+//     </Provider>
+//   );
+// }
 
 const styles = StyleSheet.create({
   loadingOverlay: {

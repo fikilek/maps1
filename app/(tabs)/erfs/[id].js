@@ -80,7 +80,7 @@ const PremiseCard = ({ premise, isSubUnit, onEdit }) => {
       </View>
 
       {/* 🎯 The 2x2 Service Grid */}
-      <View style={styles.meterGrid}>
+      {/* <View style={styles.meterGrid}>
         <View style={styles.gridCell}>
           <MaterialCommunityIcons
             name="lightning-bolt-circle"
@@ -112,11 +112,11 @@ const PremiseCard = ({ premise, isSubUnit, onEdit }) => {
             <Text style={styles.meterSub}>Water Meters</Text>
           </View>
         </View>
-      </View>
+      </View> */}
 
       <View style={styles.cardActionsRow}>
         {/* ✏️ EDIT BUTTON */}
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={styles.actionBtn}
           onPress={() => onEdit(premise)}
         >
@@ -126,7 +126,7 @@ const PremiseCard = ({ premise, isSubUnit, onEdit }) => {
             color="#64748B"
           />
           <Text style={styles.actionBtnText}>Edit Details</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         <View style={styles.verticalDivider} />
 

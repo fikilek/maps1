@@ -1,75 +1,56 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { getIn, useFormikContext } from "formik";
-import { useRef, useState } from "react";
-import {
-  Alert,
-  Image,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import {
-  ActivityIndicator,
-  Button,
-  IconButton,
-  Modal,
-  Portal,
-} from "react-native-paper";
-import { useAuth } from "../../hooks/useAuth"; // Adjust path as needed
+import { StyleSheet, View } from "react-native";
 import FormInputMeterNo from "./FormInputMeterNo";
 
-export const WaterMeterEntry = ({ disabled }) => {
-  const { setFieldValue, values } = useFormikContext();
-  const mediaPath = "ast.media.astNo"; // The target path
-  const photoUri = getIn(values, mediaPath);
-  const { user } = useAuth();
-  const agentName = user ? `${user.firstName} ${user.lastName}` : "FIELD_AGENT";
+export const WaterMeterEntry = ({ disabled, liveLocation }) => {
+  // const { setFieldValue, values } = useFormikContext();
+  // const mediaPath = "ast.media.astNo"; // The target path
+  // const photoUri = getIn(values, mediaPath);
+  // const { profile } = useAuth();
+  // const agentName = profile?.profile?.displayName || "Field Agent";
 
-  const [viewingUri, setViewingUri] = useState(null); // 🎯 For the full-screen view
-  console.log(`viewingUri`, viewingUri);
+  // const [viewingUri, setViewingUri] = useState(null); // 🎯 For the full-screen view
+  // console.log(`viewingUri`, viewingUri);
 
   // --- CAMERA & OVERLAY STATE (The NA Way) ---
-  const [showCamera, setShowCamera] = useState(false);
-  const [previewUri, setPreviewUri] = useState(null);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef(null);
+  // const [showCamera, setShowCamera] = useState(false);
+  // const [previewUri, setPreviewUri] = useState(null);
+  // const [isCapturing, setIsCapturing] = useState(false);
+  // const [permission, requestPermission] = useCameraPermissions();
+  // const cameraRef = useRef(null);
 
-  const handleOpenScanner = async () => {
-    if (!permission?.granted) {
-      const { granted } = await requestPermission();
-      if (!granted) return;
-    }
-    setShowCamera(true);
-  };
+  // const handleOpenScanner = async () => {
+  //   if (!permission?.granted) {
+  //     const { granted } = await requestPermission();
+  //     if (!granted) return;
+  //   }
+  //   setShowCamera(true);
+  // };
 
-  const handleCapture = async () => {
-    if (cameraRef.current && !isCapturing) {
-      setIsCapturing(true);
-      try {
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.7,
-        });
-        setPreviewUri(photo.uri);
-      } catch (e) {
-        Alert.alert("Error", "Failed to take photo");
-      } finally {
-        setIsCapturing(false);
-      }
-    }
-  };
+  // const handleCapture = async () => {
+  //   if (cameraRef.current && !isCapturing) {
+  //     setIsCapturing(true);
+  //     try {
+  //       const photo = await cameraRef.current.takePictureAsync({
+  //         quality: 0.7,
+  //       });
+  //       setPreviewUri(photo.uri);
+  //     } catch (e) {
+  //       Alert.alert("Error", "Failed to take photo");
+  //     } finally {
+  //       setIsCapturing(false);
+  //     }
+  //   }
+  // };
 
-  const acceptPhoto = () => {
-    setFieldValue(mediaPath, previewUri);
-    closeAll();
-  };
+  // const acceptPhoto = () => {
+  //   setFieldValue(mediaPath, previewUri);
+  //   closeAll();
+  // };
 
-  const closeAll = () => {
-    setShowCamera(false);
-    setPreviewUri(null);
-  };
+  // const closeAll = () => {
+  //   setShowCamera(false);
+  //   setPreviewUri(null);
+  // };
 
   return (
     <View style={styles.container}>
@@ -82,7 +63,7 @@ export const WaterMeterEntry = ({ disabled }) => {
           />
         </View>
 
-        <IconButton
+        {/* <IconButton
           icon="camera"
           mode="contained"
           containerColor="#1E293B"
@@ -90,221 +71,8 @@ export const WaterMeterEntry = ({ disabled }) => {
           onPress={handleOpenScanner}
           disabled={disabled}
           style={styles.inlineMediaBtn}
-        />
+        /> */}
       </View>
-
-      {/* --- PHOTO RIBBON --- */}
-      {photoUri && (
-        <View style={styles.ribbon}>
-          <View style={styles.thumbWrapper}>
-            {/* <Image source={{ uri: photoUri }} style={styles.thumb} /> */}
-            <TouchableOpacity onPress={() => setViewingUri(photoUri)}>
-              <Image source={{ uri: photoUri }} style={styles.thumb} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.deleteBadge}
-              onPress={() => setFieldValue(mediaPath, null)}
-            >
-              <MaterialCommunityIcons name="close" size={14} color="white" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* --- CAMERA PORTAL (The NA Logic) --- */}
-      <Portal>
-        <Modal
-          visible={showCamera}
-          onDismiss={closeAll}
-          contentContainerStyle={styles.modalFull}
-        >
-          {!previewUri ? (
-            <View style={{ flex: 1 }}>
-              <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} />
-              <View style={styles.overlay}>
-                <View style={styles.reticle} />
-                <View style={styles.camControls}>
-                  <IconButton
-                    icon="close"
-                    iconColor="white"
-                    size={30}
-                    onPress={closeAll}
-                  />
-                  <TouchableOpacity
-                    style={styles.shutter}
-                    onPress={handleCapture}
-                  >
-                    {isCapturing ? (
-                      <ActivityIndicator color="#000" />
-                    ) : (
-                      <View style={styles.shutterIn} />
-                    )}
-                  </TouchableOpacity>
-                  <View style={{ width: 60 }} />
-                </View>
-              </View>
-            </View>
-          ) : (
-            // ... inside your Modal after the : (preview mode)
-            <View style={styles.previewContainer}>
-              <Image
-                source={{ uri: previewUri }} // 🎯 CHANGE THIS from photoUri to previewUri
-                style={styles.previewImageStandard} // 🎯 Ensure it uses the LARGE style
-                resizeMode="contain"
-              />
-
-              {/* 🎯 WATERMARK: Anchored Bottom-Left (NA Standard) */}
-              <View style={styles.watermarkBottomLeft} pointerEvents="none">
-                <Text style={styles.watermarkBrand}>FIELD EVIDENCE</Text>
-
-                <View style={styles.metaRow}>
-                  <MaterialCommunityIcons
-                    name="map-marker"
-                    size={12}
-                    color="#FFD700"
-                  />
-                  <Text style={styles.watermarkText}>
-                    GPS: {values.geometry?.centroid?.[1]?.toFixed(5)},{" "}
-                    {values.geometry?.centroid?.[0]?.toFixed(5)}
-                  </Text>
-                </View>
-
-                <View style={styles.metaRow}>
-                  <MaterialCommunityIcons
-                    name="home-city"
-                    size={12}
-                    color="#FFD700"
-                  />
-                  <Text style={styles.watermarkText}>
-                    ERF: {values.erfId || "N/A"}
-                  </Text>
-                </View>
-
-                <View style={styles.metaRow}>
-                  <MaterialCommunityIcons
-                    name="account"
-                    size={12}
-                    color="#FFD700"
-                  />
-                  <Text style={styles.watermarkText}>USER: {agentName}</Text>
-                </View>
-
-                <View style={styles.metaRow}>
-                  <MaterialCommunityIcons
-                    name="clock-outline"
-                    size={12}
-                    color="#FFD700"
-                  />
-                  <Text style={styles.watermarkText}>
-                    DATE: {new Date().toLocaleDateString()}{" "}
-                    {new Date().toLocaleTimeString()}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.reviewBar}>
-                <Button
-                  mode="contained"
-                  buttonColor="#EF4444"
-                  onPress={() => setPreviewUri(null)}
-                  icon="camera-retake"
-                >
-                  RETAKE
-                </Button>
-                <Button
-                  mode="contained"
-                  buttonColor="#22C55E"
-                  onPress={acceptPhoto}
-                  icon="check"
-                >
-                  ACCEPT
-                </Button>
-              </View>
-            </View>
-          )}
-        </Modal>
-
-        <Modal
-          visible={!!viewingUri}
-          onDismiss={() => setViewingUri(null)}
-          contentContainerStyle={styles.modalFull}
-        >
-          <View style={styles.previewContainer}>
-            {/* 🎯 1. Use viewingUri and the LARGE style */}
-            <Image
-              source={{ uri: viewingUri }} // 🎯 FIX: Use the state variable here
-              style={styles.previewImageStandard}
-              resizeMode="contain"
-            />
-
-            {/* 🎯 2. The Evidence Overlay */}
-            <View style={styles.watermarkBottomLeft} pointerEvents="none">
-              <Text style={styles.watermarkBrand}>PREVIEW EVIDENCE</Text>
-
-              {/* GPS ROW */}
-              <View style={styles.metaRow}>
-                <MaterialCommunityIcons
-                  name="map-marker"
-                  size={12}
-                  color="#FFD700"
-                />
-                <Text style={styles.watermarkText}>
-                  GPS: {values.geometry?.centroid?.[1]?.toFixed(5)},{" "}
-                  {values.geometry?.centroid?.[0]?.toFixed(5)}
-                </Text>
-              </View>
-
-              {/* ERF ROW */}
-              <View style={styles.metaRow}>
-                <MaterialCommunityIcons
-                  name="home-city"
-                  size={12}
-                  color="#FFD700"
-                />
-                <Text style={styles.watermarkText}>
-                  ERF: {values.erfId || "N/A"}
-                </Text>
-              </View>
-
-              {/* USER ROW */}
-              <View style={styles.metaRow}>
-                <MaterialCommunityIcons
-                  name="account"
-                  size={12}
-                  color="#FFD700"
-                />
-                <Text style={styles.watermarkText}>USER: {agentName}</Text>
-              </View>
-
-              {/* TIME ROW */}
-              <View style={styles.metaRow}>
-                <MaterialCommunityIcons
-                  name="clock-outline"
-                  size={12}
-                  color="#FFD700"
-                />
-                <Text style={styles.watermarkText}>
-                  TIME: {new Date().toLocaleDateString()}{" "}
-                  {new Date().toLocaleTimeString()}
-                </Text>
-              </View>
-            </View>
-
-            {/* 🎯 3. The Dismiss Button */}
-            {/* <View style={styles.viewerControls}>
-              <Button
-                mode="contained"
-                buttonColor="#1E293B"
-                onPress={() => setViewingUri(null)}
-                icon="close-circle"
-                style={styles.dismissBtn}
-              >
-                DISMISS PREVIEW
-              </Button>
-            </View> */}
-          </View>
-        </Modal>
-      </Portal>
     </View>
   );
 };
@@ -491,3 +259,206 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 });
+
+// {/* --- PHOTO RIBBON --- */}
+// {photoUri && (
+//   <View style={styles.ribbon}>
+//     <View style={styles.thumbWrapper}>
+//       <TouchableOpacity onPress={() => setViewingUri(photoUri)}>
+//         <Image source={{ uri: photoUri }} style={styles.thumb} />
+//       </TouchableOpacity>
+//       <TouchableOpacity
+//         style={styles.deleteBadge}
+//         onPress={() => setFieldValue(mediaPath, null)}
+//       >
+//         <MaterialCommunityIcons name="close" size={14} color="white" />
+//       </TouchableOpacity>
+//     </View>
+//   </View>
+// )}
+
+// {/* --- CAMERA PORTAL (The NA Logic) --- */}
+// <Portal>
+//   <Modal
+//     visible={showCamera}
+//     onDismiss={closeAll}
+//     contentContainerStyle={styles.modalFull}
+//   >
+//     {!previewUri ? (
+//       <View style={{ flex: 1 }}>
+//         <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} />
+//         <View style={styles.overlay}>
+//           <View style={styles.reticle} />
+//           <View style={styles.camControls}>
+//             <IconButton
+//               icon="close"
+//               iconColor="white"
+//               size={30}
+//               onPress={closeAll}
+//             />
+//             <TouchableOpacity
+//               style={styles.shutter}
+//               onPress={handleCapture}
+//             >
+//               {isCapturing ? (
+//                 <ActivityIndicator color="#000" />
+//               ) : (
+//                 <View style={styles.shutterIn} />
+//               )}
+//             </TouchableOpacity>
+//             <View style={{ width: 60 }} />
+//           </View>
+//         </View>
+//       </View>
+//     ) : (
+//       // ... inside your Modal after the : (preview mode)
+//       <View style={styles.previewContainer}>
+//         <Image
+//           source={{ uri: previewUri }} // 🎯 CHANGE THIS from photoUri to previewUri
+//           style={styles.previewImageStandard} // 🎯 Ensure it uses the LARGE style
+//           resizeMode="contain"
+//         />
+
+//         {/* 🎯 WATERMARK: Anchored Bottom-Left (NA Standard) */}
+//         <View style={styles.watermarkBottomLeft} pointerEvents="none">
+//           <Text style={styles.watermarkBrand}>FIELD EVIDENCE</Text>
+
+//           <View style={styles.metaRow}>
+//             <MaterialCommunityIcons
+//               name="map-marker"
+//               size={12}
+//               color="#FFD700"
+//             />
+//             <Text style={styles.watermarkText}>
+//               GPS:
+//               {liveLocation
+//                 ? `${liveLocation.lat.toFixed(6)}, ${liveLocation.lng.toFixed(6)}`
+//                 : "SEARCHING SATELLITES..."}
+//             </Text>
+//           </View>
+
+//           <View style={styles.metaRow}>
+//             <MaterialCommunityIcons
+//               name="home-city"
+//               size={12}
+//               color="#FFD700"
+//             />
+//             <Text style={styles.watermarkText}>
+//               ERF: {values.erfNo || "N/A"}
+//             </Text>
+//           </View>
+
+//           <View style={styles.metaRow}>
+//             <MaterialCommunityIcons
+//               name="account"
+//               size={12}
+//               color="#FFD700"
+//             />
+//             <Text style={styles.watermarkText}>USER: {agentName}</Text>
+//           </View>
+
+//           <View style={styles.metaRow}>
+//             <MaterialCommunityIcons
+//               name="clock-outline"
+//               size={12}
+//               color="#FFD700"
+//             />
+//             <Text style={styles.watermarkText}>
+//               DATE: {new Date().toLocaleDateString()}{" "}
+//               {new Date().toLocaleTimeString()}
+//             </Text>
+//           </View>
+//         </View>
+
+//         <View style={styles.reviewBar}>
+//           <Button
+//             mode="contained"
+//             buttonColor="#EF4444"
+//             onPress={() => setPreviewUri(null)}
+//             icon="camera-retake"
+//           >
+//             RETAKE
+//           </Button>
+//           <Button
+//             mode="contained"
+//             buttonColor="#22C55E"
+//             onPress={acceptPhoto}
+//             icon="check"
+//           >
+//             ACCEPT
+//           </Button>
+//         </View>
+//       </View>
+//     )}
+//   </Modal>
+
+//   <Modal
+//     visible={!!viewingUri}
+//     onDismiss={() => setViewingUri(null)}
+//     contentContainerStyle={styles.modalFull}
+//   >
+//     <View style={styles.previewContainer}>
+//       {/* 🎯 1. Use viewingUri and the LARGE style */}
+//       <Image
+//         source={{ uri: viewingUri }} // 🎯 FIX: Use the state variable here
+//         style={styles.previewImageStandard}
+//         resizeMode="contain"
+//       />
+
+//       {/* 🎯 2. The Evidence Overlay */}
+//       <View style={styles.watermarkBottomLeft} pointerEvents="none">
+//         <Text style={styles.watermarkBrand}>PREVIEW EVIDENCE</Text>
+
+//         {/* GPS ROW */}
+//         <View style={styles.metaRow}>
+//           <MaterialCommunityIcons
+//             name="map-marker"
+//             size={12}
+//             color="#FFD700"
+//           />
+//           <Text style={styles.watermarkText}>
+//             GPS:
+//             {liveLocation
+//               ? `${liveLocation.lat.toFixed(6)}, ${liveLocation.lng.toFixed(6)}`
+//               : "SEARCHING SATELLITES..."}
+//           </Text>
+//         </View>
+
+//         {/* ERF ROW */}
+//         <View style={styles.metaRow}>
+//           <MaterialCommunityIcons
+//             name="home-city"
+//             size={12}
+//             color="#FFD700"
+//           />
+//           <Text style={styles.watermarkText}>
+//             ERF: {values.erfNo || "N/A"}
+//           </Text>
+//         </View>
+
+//         {/* USER ROW */}
+//         <View style={styles.metaRow}>
+//           <MaterialCommunityIcons
+//             name="account"
+//             size={12}
+//             color="#FFD700"
+//           />
+//           <Text style={styles.watermarkText}>USER: {agentName}</Text>
+//         </View>
+
+//         {/* TIME ROW */}
+//         <View style={styles.metaRow}>
+//           <MaterialCommunityIcons
+//             name="clock-outline"
+//             size={12}
+//             color="#FFD700"
+//           />
+//           <Text style={styles.watermarkText}>
+//             TIME: {new Date().toLocaleDateString()}{" "}
+//             {new Date().toLocaleTimeString()}
+//           </Text>
+//         </View>
+//       </View>
+//     </View>
+//   </Modal>
+// </Portal>

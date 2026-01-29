@@ -1,7 +1,11 @@
 import { createContext, useContext, useMemo } from "react";
+import { useGetAstsByLmPcodeQuery } from "../redux/astsApi";
 import { useGetErfsByLmPcodeQuery } from "../redux/erfsApi";
-import { useGetWardByNameQuery } from "../redux/geoApi";
-import { useGetMetersByLmPcodeQuery } from "../redux/metersApi";
+import {
+  useGetLocalMunicipalityByIdQuery,
+  useGetWardByNameQuery,
+  useGetWardsByLocalMunicipalityQuery,
+} from "../redux/geoApi";
 import { useGetPremisesByLmPcodeQuery } from "../redux/premisesApi";
 import { premiseMemory } from "../storage/premiseMemory"; // Standardized Vault
 import { useGeo } from "./GeoContext";
@@ -12,8 +16,20 @@ export const WarehouseProvider = ({ children }) => {
   const { geoState } = useGeo();
   const { selectedLm, selectedWard, selectedErf, selectedPremise } = geoState;
   const lmPcode = selectedLm?.id;
+  // console.log(`WarehouseProvider----selectedLm`, selectedLm);
+  // console.log(`WarehouseProvider----selectedWard`, selectedWard);
+  // console.log(`WarehouseProvider----selectedErf`, selectedErf);
 
   // 🏛️ 1. API PIPELINES (Cloud Source)
+  const { data: wardsList } = useGetWardsByLocalMunicipalityQuery(lmPcode, {
+    skip: !lmPcode,
+  });
+  // console.log(`WarehouseProvider----wardsList`, wardsList);
+
+  const { data: lmDetails, isLoading: lmLoading } =
+    useGetLocalMunicipalityByIdQuery(lmPcode, {
+      skip: !lmPcode,
+    });
 
   const { data: ward } = useGetWardByNameQuery(selectedWard, {
     skip: !selectedWard,
@@ -26,19 +42,41 @@ export const WarehouseProvider = ({ children }) => {
 
   const { data: cloudPrems, isLoading: premsLoading } =
     useGetPremisesByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+  // console.log(`WarehouseProvider----cloudPrems`, cloudPrems);
 
   const { data: cloudMeters, isLoading: metersLoading } =
-    useGetMetersByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+    useGetAstsByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+  // console.log(`WarehouseProvider----cloudMeters`, cloudMeters);
 
   const warehouse = useMemo(() => {
-    // --- 1. RAW INVENTORY MERGE ---
+    // 1. RAW INVENTORY
     const allErfs = erfStore?.metaEntries || [];
-    const allMeters = cloudMeters || []; // Cloud meters list
-    const geoLibrary = erfStore?.geoEntries || {};
-    const rawWards = erfStore?.wards || [];
-    const allWards = ["ALL", ...rawWards];
+    // console.log(`WarehouseProvider----allErfs`, allErfs);
 
-    // Merge Premises (Cloud + Local MMKV)
+    const allMeters = cloudMeters || [];
+    // console.log(`WarehouseProvider----allMeters`, allMeters);
+
+    const rawWardNames = erfStore?.wards || []; // These are the ward names/numbers present in the Erf data
+    // console.log(`WarehouseProvider----rawWardNames`, rawWardNames);
+
+    // 2. TACTICAL WARD FILTERING
+    // Only keep wards from the API if they exist in our Erf inventory
+    const existingWards = (wardsList || []).filter(
+      (w) => rawWardNames.includes(w.number) || rawWardNames.includes(w.name),
+    );
+    // console.log(`WarehouseProvider----existingWards`, existingWards);
+
+    // 3. GEOMETRY LIBRARY
+    const geoLibrary = { ...(erfStore?.geoEntries || {}) };
+    if (lmDetails?.id && lmDetails?.geometry) {
+      geoLibrary[lmDetails.id] = lmDetails.geometry;
+    }
+    // Only map geometries for wards we actually have
+    existingWards.forEach((w) => {
+      geoLibrary[w.id] = w;
+    });
+
+    // 4. PREMISE MERGE (Cloud + Local)
     const localPrems = premiseMemory.getLmList(lmPcode) || [];
     const premMap = new Map();
     (cloudPrems || []).forEach((p) => {
@@ -49,90 +87,218 @@ export const WarehouseProvider = ({ children }) => {
     });
     const allPrems = Array.from(premMap.values());
 
-    // --- 2. CASCADING FILTERS ---
-    // (Keeping your existing logic for filtering Erfs/Prems by Ward/Erf)
-    const activeErfId = selectedErf?.id;
-    let filteredPrems = allPrems;
-    if (activeErfId) {
-      filteredPrems = allPrems.filter((p) => p.erfId === activeErfId);
-    }
+    // --- 🎯 5. CASCADING TACTICAL FILTERS ---
+    const filteredErfs = selectedWard
+      ? allErfs.filter((e) => {
+          // 🛡️ Match by ID, numeric code, or name string
+          return e.admin.ward.pcode === selectedWard.id;
+        })
+      : allErfs;
+    // console.log(`WarehouseProvider----filteredErfs`, filteredErfs);
+
+    // const filteredErfs = selectedWard
+    //   ? allErfs.filter(
+    //       (e) => e.wardId === selectedWard.id || e.ward === selectedWard.name,
+    //     )
+    //   : allErfs;
+
+    const filteredPrems = selectedErf
+      ? allPrems.filter((p) => p.erfId === selectedErf.id)
+      : selectedWard
+        ? allPrems.filter((p) => {
+            // 🛡️ Match premises using the same multi-key logic
+            return (
+              p.wardId === selectedWard.id ||
+              p.wardId === selectedWard.code?.toString() ||
+              p.ward === selectedWard.name
+            );
+          })
+        : allPrems;
+
+    // const filteredPrems = selectedErf
+    //   ? allPrems.filter((p) => p.erfId === selectedErf.id)
+    //   : selectedWard
+    //     ? allPrems.filter((p) => p.wardId === selectedWard.id)
+    //     : allPrems;
 
     return {
       all: {
         erfs: allErfs,
         prems: allPrems,
-        meters: allMeters, // 🚀 Now globally accessible
-        wards: allWards,
+        meters: allMeters,
+        wards: existingWards, // 🎯 Only show wards that have Erfs
         geoLibrary,
       },
       filtered: {
-        wards: allWards,
-        erfs: allErfs, // Add your ward filters here as per your snippet
+        wards: existingWards,
+        erfs: filteredErfs,
         prems: filteredPrems,
+        meters: [],
       },
     };
-  }, [erfStore, cloudPrems, cloudMeters, selectedErf, lmPcode]);
+  }, [
+    erfStore,
+    cloudPrems,
+    cloudMeters,
+    wardsList,
+    lmDetails,
+    selectedWard,
+    selectedErf,
+    lmPcode,
+  ]);
+
+  // const warehouse = useMemo(() => {
+  //   // 1. RAW INVENTORY (Inventory remains the same)
+  //   const allErfs = erfStore?.metaEntries || [];
+  //   const allMeters = cloudMeters || [];
+  //   const rawWards = erfStore?.wards || [];
+  //   const allWardsList = wardsList || []; // Direct from API hook
+
+  //   // 2. GEOMETRY LIBRARY
+  //   const geoLibrary = { ...(erfStore?.geoEntries || {}) };
+  //   if (lmDetails?.id && lmDetails?.geometry) {
+  //     geoLibrary[lmDetails.id] = lmDetails.geometry;
+  //   }
+  //   if (wardsList) {
+  //     wardsList.forEach((w) => {
+  //       geoLibrary[w.id] = w;
+  //     });
+  //   }
+
+  //   // 3. PREMISE MERGE
+  //   const localPrems = premiseMemory.getLmList(lmPcode) || [];
+  //   // console.log(
+  //   //   `WarehouseProvider----(premiseMemory.getLmList) --localPrems`,
+  //   //   localPrems,
+  //   // );
+
+  //   const premMap = new Map();
+  //   (cloudPrems || []).forEach((p) => {
+  //     if (p?.id) premMap.set(p.id, p);
+  //   });
+  //   localPrems.forEach((p) => {
+  //     if (p?.id) premMap.set(p.id, p);
+  //   });
+  //   const allPrems = Array.from(premMap.values());
+  //   // console.log(`WarehouseProvider----allPrems`, allPrems);
+
+  //   // --- 🎯 4. CASCADING TACTICAL FILTERS ---
+
+  //   // Filter Erfs by Selected Ward
+  //   const filteredErfs = selectedWard
+  //     ? allErfs.filter(
+  //         (e) => e.wardId === selectedWard.id || e.ward === selectedWard.name,
+  //       )
+  //     : allErfs;
+
+  //   // Filter Premises by Selected Erf
+  //   const filteredPrems = selectedErf
+  //     ? allPrems.filter((p) => p.erfId === selectedErf.id)
+  //     : selectedWard
+  //       ? allPrems.filter((p) => p.wardId === selectedWard.id) // Fallback to Ward level
+  //       : allPrems;
+
+  //   // Filter Meters by Selected Premise
+  //   const filteredMeters = selectedPremise
+  //     ? allMeters.filter((m) => m.premiseId === selectedPremise.id)
+  //     : allMeters;
+
+  //   return {
+  //     all: {
+  //       erfs: allErfs,
+  //       prems: allPrems,
+  //       meters: allMeters,
+  //       wards: allWardsList,
+  //       geoLibrary,
+  //     },
+  //     filtered: {
+  //       wards: allWardsList,
+  //       erfs: filteredErfs,
+  //       prems: filteredPrems,
+  //       meters: filteredMeters,
+  //     },
+  //   };
+  //   // 🎯 ADD dependencies so the warehouse re-calculates when selections change
+  // }, [
+  //   erfStore,
+  //   cloudPrems,
+  //   cloudMeters,
+  //   wardsList,
+  //   lmDetails,
+  //   selectedWard,
+  //   selectedErf,
+  //   selectedPremise,
+  //   lmPcode,
+  // ]);
 
   // const warehouse = useMemo(() => {
   //   // --- 1. RAW INVENTORY MERGE ---
   //   const allErfs = erfStore?.metaEntries || [];
-  //   const geoLibrary = erfStore?.geoEntries || {};
+  //   const allMeters = cloudMeters || []; // Cloud meters list
+  //   // const geoLibrary = erfStore?.geoEntries || {};
   //   const rawWards = erfStore?.wards || [];
   //   const allWards = ["ALL", ...rawWards];
 
-  //   // 🎯 Standard: Merge Cloud + Local MMKV (Objects Only)
+  //   // 🏛️ Start with Erf Geometries
+  //   const geoLibrary = { ...(erfStore?.geoEntries || {}) };
+
+  //   // 🎯 INJECT the Municipality Boundary into the library
+  //   // This maps the boundary to the ID the BoundaryLayer is looking for (e.g., "ZA1048")
+  //   if (lmDetails?.id && lmDetails?.geometry) {
+  //     // console.log(`📦 Warehouse: Injecting LM Boundary for ${lmDetails.id}`);
+  //     geoLibrary[lmDetails.id] = lmDetails.geometry;
+  //   }
+
+  //   // Merge Premises (Cloud + Local MMKV)
   //   const localPrems = premiseMemory.getLmList(lmPcode) || [];
   //   const premMap = new Map();
-
-  //   // Add cloud items first
   //   (cloudPrems || []).forEach((p) => {
-  //     if (p && typeof p === "object") premMap.set(p.id, p);
+  //     if (p?.id) premMap.set(p.id, p);
   //   });
-  //   // Overwrite with local items (Local is always the latest "Truth")
   //   localPrems.forEach((p) => {
-  //     if (p && typeof p === "object") premMap.set(p.id, p);
+  //     if (p?.id) premMap.set(p.id, p);
   //   });
-
   //   const allPrems = Array.from(premMap.values());
 
   //   // --- 2. CASCADING FILTERS ---
-  //   const activeWardId = ward?.id;
+  //   // (Keeping your existing logic for filtering Erfs/Prems by Ward/Erf)
   //   const activeErfId = selectedErf?.id;
-
-  //   // Level 2: Erfs (Filter by Ward)
-  //   const filteredErfs = activeWardId
-  //     ? allErfs.filter((e) => e.admin?.ward?.pcode === activeWardId)
-  //     : allErfs;
-
-  //   // Level 3: Premises (Erf Anchor > Ward Anchor > All)
   //   let filteredPrems = allPrems;
   //   if (activeErfId) {
-  //     // 🎯 Link directly to Erf
   //     filteredPrems = allPrems.filter((p) => p.erfId === activeErfId);
-  //   } else if (activeWardId) {
-  //     // 🎯 Link via Ward (Check if the Premise's Erf is in the filtered Ward list)
-  //     const erfIdsInWard = new Set(filteredErfs.map((e) => e.id));
-  //     filteredPrems = allPrems.filter((p) => erfIdsInWard.has(p.erfId));
   //   }
 
-  //   // 🕵️ DIAGNOSTIC LOGS
-  //   console.log(
-  //     `🌊 [CASCADE]: Ward(${activeWardId || "ALL"}) -> Erf(${activeErfId || "ALL"})`,
-  //   );
-  //   console.log(
-  //     `📊 [RESULTS]: Erfs: ${filteredErfs.length}, Prems: ${filteredPrems.length}, Wards: ${allWards.length}`,
-  //   );
+  //   // if (wardsList) {
+  //   //   wardsList.forEach((w) => {
+  //   //     if (w.id && w.geometry) {
+  //   //       geoLibrary[w.id] = { geometry: w.geometry, bbox: w.bbox };
+  //   //     }
+  //   //   });
+  //   // }
+
+  //   if (wardsList) {
+  //     wardsList.forEach((ward) => {
+  //       // 🎯 Store the WHOLE object or at least the geometry
+  //       // console.log(`WarehouseProvider----wardsList ----ward`, ward);
+  //       geoLibrary[ward.id] = ward;
+  //     });
+  //   }
 
   //   return {
-  //     all: { erfs: allErfs, prems: allPrems, wards: allWards, geoLibrary },
+  //     all: {
+  //       erfs: allErfs,
+  //       prems: allPrems,
+  //       meters: allMeters, // 🚀 Now globally accessible
+  //       wards: allWards,
+  //       geoLibrary,
+  //     },
   //     filtered: {
   //       wards: allWards,
-  //       erfs: filteredErfs,
+  //       erfs: allErfs, // Add your ward filters here as per your snippet
   //       prems: filteredPrems,
-  //       count: filteredErfs.length,
   //     },
   //   };
-  // }, [erfStore, cloudPrems, ward, selectedErf, selectedPremise, lmPcode]);
+  // }, [erfStore, cloudPrems, cloudMeters, selectedErf, lmPcode]);
 
   const value = {
     ...warehouse,
@@ -153,106 +319,3 @@ export const useWarehouse = () => {
   }
   return context;
 };
-
-// import { createContext, useContext, useMemo } from "react";
-// import { useGetErfsByLmPcodeQuery } from "../redux/erfsApi";
-// import { useGetWardByNameQuery } from "../redux/geoApi";
-// import { useGetPremisesByLmPcodeQuery } from "../redux/premisesApi";
-// import { useGeo } from "./GeoContext";
-
-// export const WarehouseContext = createContext();
-
-// export const WarehouseProvider = ({ children }) => {
-//   const { geoState } = useGeo();
-//   const { selectedLm, selectedWard, selectedErf, selectedPremise } = geoState;
-//   const lmPcode = selectedLm?.id;
-//   console.log(`WarehouseProvider ----selectedWard`, selectedWard);
-
-//   // 🏛️ 1. API PIPELINES (The Raw Source)
-//   const { data: erfStore, isLoading: erfsLoading } = useGetErfsByLmPcodeQuery(
-//     { lmPcode },
-//     { skip: !lmPcode },
-//   );
-
-//   const { data: premiseStore, isLoading: premsLoading } =
-//     useGetPremisesByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
-
-//   const { data: ward } = useGetWardByNameQuery(selectedWard, {
-//     skip: !selectedWard,
-//   });
-//   console.log(`WarehouseProvider ----(selectedWard) ward`, ward);
-
-//   const warehouse = useMemo(() => {
-//     // 1. RAW INVENTORY
-//     const allErfs = erfStore?.metaEntries || [];
-//     const allPrems = premiseStore || [];
-//     // Ensure "ALL" is always the first option for the UI
-//     const rawWards = erfStore?.wards || [];
-//     const allWards = ["ALL", ...rawWards];
-//     const geoLibrary = erfStore?.geoEntries || {};
-
-//     // 🎯 2. THE CASCADING FILTERS
-//     const activeWardId = ward?.id; // Resolved from useGetWardByNameQuery
-//     const activeErfId = selectedErf?.id;
-//     const activePremiseId = selectedPremise?.id;
-
-//     // --- Level 1: Wards (The Dropdown Source) ---
-//     // We keep all wards available for the UI to switch between,
-//     // but we can flag the active one.
-//     const filteredWards = allWards;
-
-//     // --- Level 2: Erfs (Filter by Ward) ---
-//     const filteredErfs = activeWardId
-//       ? allErfs.filter((e) => e.admin?.ward?.pcode === activeWardId)
-//       : allErfs;
-
-//     // --- Level 3: Premises (Erf Anchor > Ward Anchor > All) ---
-//     let filteredPrems = allPrems;
-//     if (activeErfId) {
-//       // Direct Link: Only premises belonging to this specific Erf
-//       filteredPrems = allPrems.filter((p) => p.erfId === activeErfId);
-//     } else if (activeWardId) {
-//       // Ward Link: All premises in this ward
-//       filteredPrems = allPrems.filter(
-//         (p) => p.metadata?.wardPcode === activeWardId,
-//       );
-//     }
-
-//     // 🕵️ DIAGNOSTIC LOGS
-//     console.log(
-//       `🌊 [CASCADE]: Ward(${activeWardId || "ALL"}) -> Erf(${activeErfId || "ALL"})`,
-//     );
-//     console.log(
-//       `📊 [RESULTS]: Erfs: ${filteredErfs.length}, Prems: ${filteredPrems.length}, Wards: ${allWards.length}`,
-//     );
-
-//     return {
-//       all: { erfs: allErfs, prems: allPrems, wards: allWards, geoLibrary },
-//       filtered: {
-//         wards: filteredWards, // Now stays populated for the picker
-//         erfs: filteredErfs,
-//         prems: filteredPrems,
-//         count: filteredErfs.length,
-//       },
-//     };
-//   }, [erfStore, premiseStore, ward, selectedErf, selectedPremise]);
-
-//   const value = {
-//     ...warehouse,
-//     loading: erfsLoading || premsLoading,
-//   };
-
-//   return (
-//     <WarehouseContext.Provider value={value}>
-//       {children}
-//     </WarehouseContext.Provider>
-//   );
-// };
-
-// export const useWarehouse = () => {
-//   const context = useContext(WarehouseContext);
-//   if (context === undefined) {
-//     throw new Error("❌ useWarehouse must be used within a WarehouseProvider");
-//   }
-//   return context;
-// };

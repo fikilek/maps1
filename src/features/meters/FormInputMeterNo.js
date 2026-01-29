@@ -70,29 +70,34 @@ const FormInputMeterNo = ({ label, name, disabled, onCameraPress }) => {
     setScannerVisible(false);
     validateMeterNo(data);
   };
+  const CustomLabel = <Text style={{ color: "grey" }}>Meter Number</Text>;
 
   return (
-    <View>
-      <View style={styles.row}>
-        <View style={{ flex: 1 }}>
-          <TextInput
-            label={label}
-            value={currentValue || ""}
-            onChangeText={validateMeterNo}
-            disabled={disabled}
-            mode="outlined"
-            autoCapitalize="characters"
-          />
-        </View>
+    <View style={{ flex: 1 }}>
+      <View style={{ flexDirection: "row", backgroundColor: "#fff" }}>
+        {/* <View style={styles.inputWrapper}> */}
+        <TextInput
+          label={CustomLabel}
+          value={currentValue || ""}
+          onChangeText={validateMeterNo}
+          disabled={disabled}
+          mode="outlined"
+          // theme={customTheme}
+          // autoCapitalize="characters"
+          style={{ flex: 1, backgroundColor: "white" }} // 🎯 Added style
+          // dense // 🎯 Makes it more compact
+        />
+        {/* </View> */}
 
         {/* 🔄 DYNAMIC ICON: SCAN vs DELETE */}
         <IconButton
           icon={currentValue ? "close-circle" : "barcode-scan"}
           mode="contained"
-          containerColor={currentValue ? "#EF4444" : "#3B82F6"} // Red for delete, Blue for scan
+          containerColor={currentValue ? "#EF4444" : "#3B82F6"}
           iconColor="white"
           onPress={currentValue ? handleClear : handleOpenScanner}
           disabled={disabled}
+          size={24} // 🎯 Controlled size
           style={styles.inlineBtn}
         />
       </View>
@@ -127,9 +132,9 @@ const FormInputMeterNo = ({ label, name, disabled, onCameraPress }) => {
 };
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 5 },
-  inlineBtn: { margin: 0, height: 50, width: 50, borderRadius: 8 },
-  modal: { flex: 1, backgroundColor: "blue" },
+  // row: { flexDirection: "row", alignItems: "center", gap: 5 },
+  // inlineBtn: { margin: 0, height: 50, width: 50, borderRadius: 8 },
+  // modal: { flex: 1, backgroundColor: "blue" },
   overlay: { flex: 1, justifyContent: "center", alignItems: "center" },
   reticle: {
     width: 250,
@@ -140,6 +145,35 @@ const styles = StyleSheet.create({
   },
   scanText: { color: "white", marginTop: 15, fontWeight: "bold" },
   cancelBtn: { position: "absolute", bottom: 40, alignSelf: "center" },
+
+  outerContainer: {
+    marginVertical: 4, // 🎯 Give the whole field some air
+  },
+  row: {
+    flexDirection: "row",
+    // alignItems: "center", // 🎯 Center button with the input body
+    // justifyContent: "center",
+  },
+  inputWrapper: {
+    flex: 1,
+  },
+  inputField: {
+    backgroundColor: "white",
+    height: 50, // 🎯 Explicit height to match button
+  },
+  inlineBtn: {
+    margin: 0,
+    marginLeft: 8, // 🎯 Clean gap
+    height: 50,
+    width: 54,
+    borderRadius: 8,
+    // 🎯 Ensures the button aligns even if the label pushes the input down
+    marginTop: 6,
+  },
+  modal: {
+    flex: 1,
+    backgroundColor: "black", // 🎯 Changed from blue to black for better camera contrast
+  },
 });
 
 export default FormInputMeterNo;

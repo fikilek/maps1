@@ -7,6 +7,7 @@ import { geoApi } from "./geoApi";
 import { reduxStorage } from "./reduxStorage";
 
 // Example future slices (if/when you add them)
+import { astsApi } from "./astsApi";
 import { erfsApi } from "./erfsApi";
 import { metersApi } from "./metersApi";
 import offlineReducer from "./offlineSlice";
@@ -31,6 +32,7 @@ const rootReducer = combineReducers({
   [trnsApi.reducerPath]: trnsApi.reducer,
   [settingsApi.reducerPath]: settingsApi.reducer,
   [metersApi.reducerPath]: metersApi.reducer,
+  [astsApi.reducerPath]: astsApi.reducer,
   // App-level slices (example)
   offline: offlineReducer,
   // ui: uiReducer,
@@ -57,6 +59,7 @@ const persistConfig = {
     trnsApi.reducerPath,
     settingsApi.reducerPath,
     metersApi.reducerPath,
+    astsApi.reducerPath,
   ],
 };
 
@@ -84,6 +87,7 @@ export const store = configureStore({
       trnsApi.middleware,
       settingsApi.middleware,
       metersApi.middleware,
+      astsApi.middleware,
     ),
 });
 

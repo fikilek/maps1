@@ -1,11 +1,5 @@
-import { Text, View } from "react-native";
+import AstsScreen from "../../../src/features/asts/astsScreen";
 
-const AstsEntry = () => {
-  return (
-    <View>
-      <Text>AstsScreen</Text>
-    </View>
-  );
-};
-
-export default AstsEntry;
+export default function Page() {
+  return <AstsScreen />;
+}

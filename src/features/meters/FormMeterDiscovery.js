@@ -1,7 +1,8 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Location from "expo-location"; // Ensure this is imported at the to
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik, getIn, useFormikContext } from "formik";
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -12,7 +13,6 @@ import {
 import {
   Button,
   Divider,
-  IconButton,
   Modal,
   Portal,
   RadioButton,
@@ -20,20 +20,20 @@ import {
   Text,
   TextInput,
 } from "react-native-paper";
+import { array, object, string } from "yup";
 
 // Firebase & Redux
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { Image } from "expo-image";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
-import ViewShot from "react-native-view-shot";
-import { boolean, object, string } from "yup";
-import { FieldMediaPreview } from "../../../components/media/FieldMediaPreview";
+import MapView, { Marker, Polygon } from "react-native-maps";
+import { IrepsMedia } from "../../../components/media/IrepsMedia";
+import { useGeo } from "../../context/GeoContext";
+import { getSafeCoords } from "../../context/MapContext";
 import { useWarehouse } from "../../context/WarehouseContext";
-import { useAssetMedia } from "../../hooks/useAssetMedia";
 import { useAuth } from "../../hooks/useAuth";
 import { useGetSettingsQuery } from "../../redux/settingsApi";
 import { useAddTrnMutation } from "../../redux/trnsApi";
-import { WaterMeterEntry } from "./WaterMeterEntry";
+import { ForensicFooter } from "./ForensicFooter";
+import FormInputMeterNo from "./FormInputMeterNo";
 
 const NA_REASONS = [
   "Locked Gate / No Key",
@@ -49,54 +49,79 @@ const NA_REASONS = [
 
 // --- MAIN FORM COMPONENT ---
 export default function FormMeterDiscovery() {
-  const { premiseId, address, erfNo } = useLocalSearchParams();
+  const {
+    premiseId,
+    address,
+    erfNo,
+    action: actionRaw,
+  } = useLocalSearchParams();
+  // console.log(`FormPremise ----premiseId`, premiseId);
+  // console.log(`FormPremise ----address`, address);
+  // console.log(`FormPremise ----erfNo`, erfNo);
+  // console.log(`FormPremise ----actionRaw`, actionRaw);
+  // 🎯 Parse the action object safely
+
+  const action = (() => {
+    try {
+      return actionRaw
+        ? JSON.parse(actionRaw)
+        : { access: "no", meterType: "" };
+    } catch (e) {
+      return { access: "no", meterType: "" };
+    }
+  })();
+
+  // const action = actionRaw
+  //   ? JSON.parse(actionRaw)
+  //   : { access: "no", meterType: "" };
+  // console.log(`FormPremise ----action`, action);
+
   const auth = useAuth();
   const router = useRouter();
   const { all } = useWarehouse();
   const { data: settings } = useGetSettingsQuery();
   const [addTrn, { isLoading: isTrnLoading }] = useAddTrnMutation();
+  const [liveLocation, setLiveLocation] = useState(null);
+  const { geoState } = useGeo();
+  const activeErf = geoState?.selectedErf;
 
   const agentUid = auth?.user?.uid || "unknown_uid";
   const agentName = auth?.profile?.profile?.displayName || "Field Agent";
+
   const premise = all.prems.find((p) => p.id === premiseId);
   const currentLmPcode = premise?.metadata?.lmPcode || "UNKNOWN";
-  const [inspectedImage, setInspectedImage] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const timestamp = new Date().toISOString();
 
   const [showSuccess, setShowSuccess] = useState(false);
-  console.log(`FormPremise ----showSuccess`, showSuccess);
+  // console.log(`FormPremise ----showSuccess`, showSuccess);
 
-  const viewShotRef = useRef();
-  const [tempUri, setTempUri] = useState(null);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [cameraVisible, setCameraVisible] = useState(false);
-  const cameraRef = useRef(null);
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [tempCoords, setTempCoords] = useState(null);
 
   const getOptions = (name) =>
     settings?.find((s) => s.name === name)?.options || [];
 
-  const initialValues = {
-    hasAccess: true,
-    meterType: "electricity",
-    ast: {
-      astData: {
-        astNo: "",
-        astManufacturer: "",
-        meter: {
-          phase: "",
-          type: "Normal",
-          keypad: { serialNo: "" },
-          cb: { size: "" },
-        },
-      },
-      anomalies: { anomaly: "", anomalyDetail: "" },
-      sc: { status: "" },
-      location: { placement: "" },
-      ogs: { hasOffGridSupply: false },
-      normalisation: { actionTaken: "" },
+  const accessInitValues = {
+    erfId: premise?.erfId || "",
+    erfNo: premise?.erfNo || "",
+    trnType: "METER_DISCOVERY",
+    access: {
+      hasAccess: action?.access,
+      reason: "",
     },
-    naSection: { reason: "", photos: [] },
+    metadata: {
+      created: { at: timestamp, byUser: agentName, byUid: agentUid },
+      updated: { at: timestamp, byUser: agentName, byUid: agentUid },
+      lmPcode: currentLmPcode,
+    },
+    premise: {
+      id: premise?.id,
+      address: address || "N/A",
+    },
+    media: [],
   };
+  // console.log(`handleSubmitDiscovery --accessInitValues`, accessInitValues);
 
   const handleSubmitDiscovery = async (values) => {
     if (!premise?.id) {
@@ -105,659 +130,1054 @@ export default function FormMeterDiscovery() {
     }
 
     try {
-      const timestamp = new Date().toISOString();
-      let finalPhotoUrls = [];
+      const storage = getStorage();
 
-      // 1. GATE CHECK: NO ACCESS LOGIC
-      if (!values?.hasAccess) {
-        // Handle Photo Uploads for No Access
-        if (values?.naSection?.photos?.length > 0) {
-          const storage = getStorage();
-          const uploadPromises = values.naSection.photos.map(
-            async (photo, index) => {
-              const fileName = `${premise.erfId}_${premise.id}_NA_${timestamp}_${index}.jpg`;
-              const storageRef = ref(storage, `premises/no_access/${fileName}`);
-              const response = await fetch(photo.uri);
-              const blob = await response.blob();
-              await uploadBytes(storageRef, blob);
-              return await getDownloadURL(storageRef);
+      // --- PHASE 1: UPLOAD ---
+      const syncedMedia = await Promise.all(
+        (values?.accessData?.media || []).map(async (item) => {
+          if (item.uri && !item.url) {
+            // 🎯 Fixed Folder Logic: Use meterType from Section 3
+            const folder =
+              values?.accessData?.access?.hasAccess === "yes"
+                ? `${values?.meterType}_meters`
+                : "no_access";
+
+            const fileName = `${values?.accessData?.erfId}_${item.tag}_${Date.now()}.jpg`;
+            const storageRef = ref(storage, `meters/${folder}/${fileName}`);
+
+            const response = await fetch(item.uri);
+            const blob = await response.blob();
+            await uploadBytes(storageRef, blob);
+            const downloadUrl = await getDownloadURL(storageRef);
+
+            const { uri, ...cleanItem } = item;
+            return { ...cleanItem, url: downloadUrl };
+          }
+          return item;
+        }),
+      );
+
+      // --- PHASE 2: THE SCRUBBER & RE-NESTING ---
+      const cleanPayload = JSON.parse(
+        JSON.stringify(
+          {
+            ...values,
+            accessData: {
+              ...values.accessData,
+              media: syncedMedia, // 🎯 PUT MEDIA BACK IN SECTION 1
             },
-          );
-          finalPhotoUrls = await Promise.all(uploadPromises);
-        }
-
-        const naPayload = {
-          trnType: "METER_DISCOVERY",
-          erfId: premise.erfId,
-          premise: {
-            id: premise.id,
-            address: address || "N/A",
-            status: "NO_ACCESS",
           },
-          metadata: {
-            created: premise?.metadata?.created || {
-              at: timestamp,
-              byUser: agentName,
-              byUid: agentUid,
-            },
-            updated: { at: timestamp, byUser: agentName, byUid: agentUid },
-            lmPcode: currentLmPcode,
-          },
-          data: {
-            hasAccess: false,
-            naReason: values?.naSection?.reason || "No Reason Provided",
-            evidencePhotos: finalPhotoUrls,
-          },
-        };
-        await addTrn(naPayload).unwrap();
-        router.back();
-        return; // EXIT HERE
-      }
+          (key, value) => (value === undefined ? null : value),
+        ),
+      );
 
-      // 2. GATE CHECK: ACCESS GRANTED (WATER OR ELEC)
-      const commonMetadata = {
-        created: premise?.metadata?.created || {
-          at: timestamp,
-          byUser: agentName,
-          byUid: agentUid,
-        },
-        updated: { at: timestamp, byUser: agentName, byUid: agentUid },
-        lmPcode: currentLmPcode,
-      };
+      // console.log(`Final 3-Section Clean Payload:`, cleanPayload);
 
-      let specificData = {};
-
-      if (values?.meterType === "water") {
-        // WATER DATA GATE
-        specificData = {
-          meterType: "water",
-          astNo: values?.ast?.astData?.astNo,
-          manufacturer: values?.ast?.astData?.astManufacturer,
-          model: values?.ast?.astData?.astName,
-          waterMeterType: values?.ast?.astData?.meter?.type,
-          anomaly: values?.ast?.anomalies?.anomaly,
-          anomalyDetail: values?.ast?.anomalies?.anomalyDetail,
-          placement: values?.ast?.location?.placement,
-          gps: values?.ast?.location?.gps,
-        };
-      } else {
-        // ELECTRICITY DATA GATE
-        specificData = {
-          meterType: "electricity",
-          // ... (Your electricity specific fields go here)
-          astNo: values?.ast?.astData?.astNo,
-        };
-      }
-
-      const accessPayload = {
-        trnType: "METER_DISCOVERY",
-        erfId: premise.erfId,
-        premise: {
-          id: premise.id,
-          address: address || "N/A",
-          status: "ACCESSED",
-        },
-        metadata: commonMetadata,
-        data: {
-          hasAccess: true,
-          ...specificData,
-        },
-      };
-
-      await addTrn(accessPayload).unwrap();
-      // 🎯 Trigger Success Overlay instead of immediate router.replace
+      // --- PHASE 3: DISPATCH ---
+      await addTrn(cleanPayload).unwrap();
       setShowSuccess(true);
 
-      // Auto-navigate after 2 seconds if they don't tap anything
       setTimeout(() => {
-        setShowSuccess(false);
-        router.replace(`/(tabs)/erfs/${values.erfId}`);
+        router.back();
       }, 2000);
-
-      router.back();
     } catch (error) {
       console.error("Submission Error:", error);
       Alert.alert("Sync Error", error.message);
     }
   };
 
-  // const handleSubmitDiscovery = async (values) => {
-  //   if (!premise?.id) {
-  //     Alert.alert("Error", "Premise data not found.");
-  //     return;
-  //   }
-
-  //   try {
-  //     const timestamp = new Date().toISOString();
-  //     let finalPhotoUrls = [];
-
-  //     // 1. STORAGE UPLOAD (Keep this here)
-  //     if (!values.hasAccess && values.naSection.photos?.length > 0) {
-  //       const storage = getStorage();
-  //       const uploadPromises = values.naSection.photos.map(
-  //         async (photo, index) => {
-  //           // Path: erfId_premiseId_noAccess_timestamp_index.jpg
-  //           const fileName = `${premise.erfId}_${premise.id}_noAccess_${timestamp}_${index}.jpg`;
-  //           const storageRef = ref(storage, `premises/${fileName}`);
-  //           const response = await fetch(photo.uri);
-  //           const blob = await response.blob();
-  //           await uploadBytes(storageRef, blob);
-  //           return await getDownloadURL(storageRef);
-  //         },
-  //       );
-  //       finalPhotoUrls = await Promise.all(uploadPromises);
-  //     }
-
-  //     // 2. CONSTRUCT THE CONSOLIDATED METADATA
-  //     const metadata = {
-  //       ...premise.metadata,
-  //       created: premise.metadata?.created || {
-  //         at: timestamp,
-  //         byUser: agentName,
-  //         byUid: agentUid,
-  //       },
-  //       updated: { at: timestamp, byUser: agentName, byUid: agentUid },
-  //       lmPcode: currentLmPcode, // Ensure this is present for the query filters
-  //     };
-
-  //     // 3. CONSTRUCT THE TRN (Payload matches standard)
-  //     const trnPayload = {
-  //       trnType: "METER_DISCOVERY",
-  //       erfId: premise.erfId,
-  //       premise: {
-  //         id: premise.id,
-  //         address: address || "Unknown Address",
-  //         status: values.hasAccess ? "true" : "false",
-  //       },
-  //       metadata,
-  //       data: {
-  //         hasAccess: values.hasAccess,
-  //         ...(values.hasAccess
-  //           ? {
-  //               meterSerial: values.meterSerial || "N/A",
-  //               reading: values.reading || "0",
-  //             }
-  //           : {
-  //               naReason: values.naSection.reason || "No Reason Provided",
-  //               evidencePhotos: finalPhotoUrls,
-  //               adverseCondition: true,
-  //             }),
-  //       },
-  //     };
-
-  //     // 4. 🔥 SINGLE SOURCE OF ACTION
-  //     // This will trigger the Firestore doc AND the local Premise cache update
-  //     await addTrn(trnPayload).unwrap();
-
-  //     router.back();
-  //   } catch (error) {
-  //     console.error("Submission Error:", error);
-  //     Alert.alert("Sync Error", "Failed to upload.");
-  //   }
-  // };
-
-  const DiscoverySchema = object().shape({
-    hasAccess: boolean(),
-    meterSerial: string().when("hasAccess", {
-      is: true,
-      then: (schema) => schema.required("Serial required"),
-    }),
-    naSection: object().shape({
-      reason: string().when("$hasAccess", {
-        is: false,
-        then: (schema) => schema.required("Reason is required"),
+  const accessSchema = object().shape({
+    accessData: object().shape({
+      erfId: string().required("Required"),
+      erfNo: string().required("Required"),
+      trnType: string().required(),
+      access: object().shape({
+        hasAccess: string().required("Access status is required"),
+        reason: string().when("hasAccess", {
+          is: "no",
+          then: (s) => s.required("Please provide a reason for no access"),
+          otherwise: (s) => s.notRequired(),
+        }),
       }),
+      metadata: object().shape({
+        created: object().shape({
+          at: string().required(),
+          byUser: string().required(),
+          byUid: string().required(),
+        }),
+        lmPcode: string().required(),
+      }),
+      premise: object().shape({
+        id: string().required(),
+        address: string().required(),
+      }),
+
+      // 🎯 MEDIA VALIDATION: The Forensic Guardrail
+      media: array()
+        .of(object())
+        .test(
+          "has-no-access-photo",
+          "A 'No Access' forensic photo is required",
+          function (value) {
+            console.log(`handleSubmitDiscovery --yup value`, value);
+
+            // We reach into the sibling 'access' object to see the status
+            const { hasAccess } = this.parent.access;
+            console.log(`handleSubmitDiscovery --yup hasAccess`, hasAccess);
+
+            // If they chose NO access, we MUST find an item with the 'noAccessPhoto' tag
+            if (hasAccess === "no") {
+              return value?.some((item) => item.tag === "noAccessPhoto");
+            }
+
+            // If access is YES, this specific test passes (Water/Elec photos handled in their schemas)
+            return true;
+          },
+        ),
     }),
   });
 
-  const handleCaptureNAPhoto = async () => {
-    if (!permission?.granted) {
-      const res = await requestPermission();
-      if (!res?.granted) return;
+  const WaterDiscoverySchema = object().shape({
+    // --- SECTION 1 ---
+    accessData: object().shape({
+      ...accessSchema.fields.accessData.fields,
+
+      media: array()
+        .of(object())
+        .test("media-forensics", "Forensic photos missing", function (value) {
+          // 🎯 Accessing the 3 Sections from the root
+          const root = this.options.from[this.options.from.length - 1].value;
+          const hasAccess = root.accessData?.access?.hasAccess;
+          const meterNo = root.ast?.astData?.astNo;
+          const anomaly = root.ast?.anomalies?.anomaly;
+
+          // 🚩 Rule 1: No Access Photo (Required if hasAccess is 'no')
+          if (hasAccess === "no") {
+            if (!value?.some((item) => item.tag === "noAccessPhoto"))
+              return false;
+          }
+
+          // 🚩 Rule 2: Asset Photo (Required if Meter No is not empty)
+          if (meterNo && meterNo.trim() !== "") {
+            if (!value?.some((item) => item.tag === "astNoPhoto")) return false;
+          }
+
+          // 🚩 Rule 3: Anomaly Photo (Required if Anomaly is selected)
+          // We exclude "Meter Ok" if that's your standard for "no anomaly"
+          if (anomaly && anomaly !== "" && anomaly !== "Meter Ok") {
+            if (!value?.some((item) => item.tag === "anomalyPhoto"))
+              return false;
+          }
+
+          return true;
+        }),
+    }),
+
+    // --- SECTION 2 ---
+    ast: object().shape({
+      astData: object().shape({
+        astNo: string().required("Meter number is required"),
+        astManufacturer: string().required("Manufacturer is required"),
+        astName: string().required("Model is required"),
+        meter: object().shape({
+          category: string().required(),
+        }),
+      }),
+      anomalies: object().shape({
+        anomaly: string().required("Please select an anomaly status"),
+        anomalyDetail: string().required("Detail is required"),
+      }),
+    }),
+
+    // --- SECTION 3 ---
+    meterType: string().oneOf(["water"]).required(),
+  });
+
+  const ElecDiscoverySchema = object().shape({
+    // --- SECTION 1: ACCESS & MEDIA ---
+    accessData: object().shape({
+      ...accessSchema.fields.accessData.fields,
+      media: array()
+        .of(object())
+        .test(
+          "elec-media-forensics",
+          "Forensic photos missing",
+          function (value) {
+            const root = this.options.from[this.options.from.length - 1].value;
+            const hasAccess = root.accessData?.access?.hasAccess;
+            const meterNo = root.ast?.astData?.astNo;
+            const anomaly = root.ast?.anomalies?.anomaly;
+
+            if (hasAccess === "no") {
+              return value?.some((item) => item.tag === "noAccessPhoto");
+            }
+
+            // Proof of Meter Number
+            if (meterNo && meterNo.trim() !== "") {
+              if (!value?.some((item) => item.tag === "astNoPhoto"))
+                return false;
+            }
+
+            // Proof of Anomaly
+            if (anomaly && anomaly !== "" && anomaly !== "Meter Ok") {
+              if (!value?.some((item) => item.tag === "anomalyPhoto"))
+                return false;
+            }
+
+            return true;
+          },
+        ),
+    }),
+
+    // --- SECTION 2: THE ELECTRICAL ASSET (Detailed) ---
+    ast: object().shape({
+      astData: object().shape({
+        astNo: string().required("Meter number is required"),
+        astManufacturer: string().required("Manufacturer is required"),
+        astName: string().required("Model name is required"),
+        meter: object().shape({
+          phase: string().oneOf(["single", "three"]).required("Select phase"),
+          type: string()
+            .oneOf(["prepaid", "conventional"])
+            .required("Select type"),
+          category: string()
+            .oneOf(["Normal", "Bulk"])
+            .required("Select category"),
+
+          // 🎯 Keypad Logic: Comment required if Serial is empty
+          keypad: object().shape({
+            serialNo: string(),
+            comment: string().when("serialNo", {
+              is: (val) => !val || val.length === 0,
+              then: (s) => s.required("Comment required if no keypad serial"),
+              otherwise: (s) => s.notRequired(),
+            }),
+          }),
+
+          // 🎯 CB Logic: Comment required if Size is empty
+          cb: object().shape({
+            size: string()
+              .matches(/^[0-9]*$/, "Size must be numbers only") // 🎯 Pure numeric guard
+              .nullable(),
+            comment: string().when("size", {
+              is: (val) => !val || val.trim().length === 0,
+              then: (s) => s.required("Comment required if CB size is missing"),
+              otherwise: (s) => s.notRequired(),
+            }),
+          }),
+        }),
+      }),
+      anomalies: object().shape({
+        anomaly: string().required("Anomaly status is required"),
+        anomalyDetail: string().required("Detail is required"),
+      }),
+      sc: object().shape({
+        status: string().required("Seal condition required"),
+      }),
+      location: object().shape({
+        placement: string().required("Placement required"),
+      }),
+      ogs: object().shape({
+        hasOffGridSupply: string()
+          .oneOf(["yes", "no"], "Selection required")
+          .required("Please specify off-grid status"),
+      }),
+      normalisation: object().shape({
+        actionTaken: string().required("Action required"),
+      }),
+    }),
+
+    // --- SECTION 3: TYPE ---
+    meterType: string().oneOf(["electricity"]).required(),
+  });
+
+  const getInitialValues = () => {
+    // 🎯 Standardize access to the string "yes" or "no"
+    const accessStr = action?.access === "yes" ? "yes" : "no";
+
+    // --- STEP 1: THE NO ACCESS MISSION ---
+    if (accessStr === "no") {
+      return {
+        initValues: {
+          accessData: { ...accessInitValues },
+          ast: null,
+          meterType: "NA",
+        },
+        schema: accessSchema,
+      };
     }
-    setCameraVisible(true);
+
+    // --- STEP 2: WATER DISCOVERY ---
+    if (action?.meterType === "water") {
+      return {
+        initValues: {
+          accessData: {
+            ...accessInitValues,
+            access: { hasAccess: "yes", reason: "N/A" },
+          },
+          ast: {
+            astData: {
+              astNo: "", // Empty for real field use
+              astManufacturer: "",
+              astName: "",
+              meter: { category: "Normal" },
+            },
+            anomalies: {
+              anomaly: "Meter Ok",
+              anomalyDetail: "Operationaly Ok",
+            },
+            location: {
+              gps: null, // Placeholder for the final liveLocation capture
+              placement: "kiosk",
+            },
+          },
+          meterType: "water",
+        },
+        schema: WaterDiscoverySchema,
+      };
+    }
+
+    // --- STEP 3: ELECTRICITY DISCOVERY (The Default) ---
+    return {
+      initValues: {
+        accessData: {
+          ...accessInitValues,
+          access: { hasAccess: "yes", reason: "N/A" },
+        },
+        ast: {
+          astData: {
+            astNo: "4455",
+            astManufacturer: "Kent",
+            astName: "Kent5555",
+            meter: {
+              phase: "single", // Default
+              type: "prepaid", // Default
+              category: "Normal", // Default
+              keypad: { serialNo: "", comment: "" },
+              cb: { size: "60", comment: "" },
+            },
+          },
+          anomalies: {
+            anomaly: "Meter Ok",
+            anomalyDetail: "Operationaly Ok",
+          },
+          sc: { status: "" },
+          location: {
+            gps: null, // Placeholder for the final liveLocation capture
+            placement: "kiosk",
+          },
+          // location: { placement: "kiosk" },
+          ogs: { hasOffGridSupply: "no" },
+          normalisation: { actionTaken: "None" },
+        },
+        meterType: "electricity",
+      },
+      schema: ElecDiscoverySchema, // ⚡ Pointing to the new deep schema
+    };
   };
 
-  const capturePhoto = async () => {
-    if (cameraRef.current) {
-      try {
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.8,
-        });
-        setTempUri(photo.uri);
-        setCameraVisible(false);
-      } catch (error) {
-        console.error("Capture Error:", error);
+  const actionInit = getInitialValues();
+  // console.log(`FormPremise ----actionInit`, actionInit);
+
+  // 2. Setup the Watcher in a useEffect
+  useEffect(() => {
+    let subscription;
+
+    const startWatching = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Denied",
+          "Location is required for forensic evidence.",
+        );
+        return;
       }
-    }
+
+      // Watch position changes in real-time
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 1, // Update every 1 meter moved
+          timeInterval: 5000, // Or every 5 seconds
+        },
+        (location) => {
+          setLiveLocation({
+            lat: location.coords.latitude,
+            lng: location.coords.longitude,
+          });
+        },
+      );
+    };
+
+    startWatching();
+
+    // Cleanup on unmount
+    return () => {
+      if (subscription) subscription.remove();
+    };
+  }, []);
+
+  const openLocationMission = (currentGps) => {
+    // Set initial pin to current GPS or the live blue dot
+    setTempCoords(currentGps || liveLocation);
+    setShowMapPicker(true);
   };
+
+  const ElectricitySections = ({
+    values,
+    setFieldValue,
+    getOptions,
+    disabled,
+    liveLocation,
+    agentName,
+    agentUid,
+  }) => (
+    <View>
+      {/* ⚡ SECTION 1: CORE METER DATA */}
+      <FormSection title="Meter Details">
+        <FormInput
+          label="METER NUMBER"
+          name="ast.astData.astNo"
+          disabled={disabled}
+        />
+        <IrepsMedia
+          tag={"astNoPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+        <FormSelect
+          label="MANUFACTURER"
+          name="ast.astData.astManufacturer"
+          options={getOptions("elec_manufacturers")}
+          disabled={disabled}
+        />
+        <FormInput
+          label="MODEL (NAME)"
+          name="ast.astData.astName"
+          disabled={disabled}
+        />
+
+        <View style={styles.row}>
+          <FormSelect
+            label="PHASE"
+            name="ast.astData.meter.phase"
+            options={["single", "three"]}
+            style={{ flex: 1 }}
+            disabled={disabled}
+          />
+          <FormSelect
+            label="TYPE"
+            name="ast.astData.meter.type"
+            options={["prepaid", "conventional"]}
+            style={{ flex: 1, marginLeft: 8 }}
+            disabled={disabled}
+          />
+        </View>
+
+        <FormSelect
+          label="CATEGORY"
+          name="ast.astData.meter.category"
+          options={["Normal", "Bulk"]}
+          disabled={disabled}
+        />
+      </FormSection>
+
+      {/* ⌨️ SECTION 2: KEYPAD & CIRCUIT BREAKER */}
+      <FormSection title="Infrastructure">
+        <FormInput
+          label="KEYPAD SERIAL NO"
+          name="ast.astData.meter.keypad.serialNo"
+          disabled={disabled}
+        />
+
+        <IrepsMedia
+          tag={"keypadPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+        {/* 🎯 Conditional Comment: Keypad */}
+        {!values.ast.astData.meter.keypad.serialNo && (
+          <FormInput
+            label="KEYPAD COMMENT (REQUIRED)"
+            name="ast.astData.meter.keypad.comment"
+            placeholder="Why is there no serial?"
+            disabled={disabled}
+          />
+        )}
+
+        <FormInput
+          label="CB SIZE (AMPS)"
+          name="ast.astData.meter.cb.size"
+          keyboardType="numeric"
+          disabled={disabled}
+        />
+        <IrepsMedia
+          tag={"astCbPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+        {/* 🎯 Conditional Comment: Circuit Breaker */}
+        {!values.ast.astData.meter.cb.size && (
+          <FormInput
+            label="CB COMMENT (REQUIRED)"
+            name="ast.astData.meter.cb.comment"
+            placeholder="Why is the CB size missing?"
+            disabled={disabled}
+          />
+        )}
+      </FormSection>
+
+      {/* 🔒 SECTION 3: CONNECTION & STATUS */}
+      <FormSection title="Status & Supply">
+        <FormSelect
+          label="SERVICE CONNECTION (SC)"
+          name="ast.sc.status"
+          options={["Connected", "Disconnected", "Not In Use"]}
+          disabled={disabled}
+        />
+
+        {/* Boolean Switch/Select for Off-Grid */}
+
+        <FormSelect
+          label="OFF-GRID SUPPLY?"
+          name="ast.ogs.hasOffGridSupply"
+          options={["yes", "no"]} // 🎯 The new universal standard
+          getOptionLabel={(val) => (val === "yes" ? "Yes" : "No")}
+          disabled={disabled}
+        />
+
+        <IrepsMedia
+          tag={"ogsPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+      </FormSection>
+
+      {/* 🚩 SECTION 5: LOCATION */}
+      <FormSection title="Meter Location">
+        <FormSelect
+          label="LOCATION"
+          name="ast.location.placement"
+          options={["Internal", "External", "Pole"]}
+          disabled={disabled}
+        />
+
+        <View style={{ paddingVertical: 10 }}>
+          <Text style={styles.label}>Physical Asset Positioning</Text>
+
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setShowMapPicker(true)} // 🛰️ Launch the Mission Modal
+            style={[
+              styles.selector,
+              // 🛡️ Visual Warning if not yet set
+              !values.ast?.location?.gps && {
+                borderColor: "#ef4444",
+                borderWidth: 1.5,
+              },
+            ]}
+          >
+            <View
+              style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
+            >
+              {/* 🎯 Status Icon */}
+              <View
+                style={[
+                  styles.iconCircleSmall,
+                  {
+                    backgroundColor: values.ast?.location?.gps
+                      ? "#dcfce7"
+                      : "#fee2e2",
+                  },
+                ]}
+              >
+                <MaterialCommunityIcons
+                  name={
+                    values.ast?.location?.gps
+                      ? "map-marker-check"
+                      : "map-marker-plus"
+                  }
+                  size={24}
+                  color={values.ast?.location?.gps ? "#16a34a" : "#dc2626"}
+                />
+              </View>
+
+              <View style={{ marginLeft: 12 }}>
+                <Text
+                  style={[
+                    styles.selectorValue,
+                    {
+                      color: values.ast?.location?.gps ? "#1e293b" : "#dc2626",
+                    },
+                  ]}
+                >
+                  {values.ast?.location?.gps
+                    ? `${values.ast.location.gps.lat.toFixed(6)}, ${values.ast.location.gps.lng.toFixed(6)}`
+                    : "TAP TO PINPOINT METER"}
+                </Text>
+                <Text style={styles.actionText}>
+                  {values.ast?.location?.gps
+                    ? "Manual GPS Verified"
+                    : "Location Required"}
+                </Text>
+              </View>
+            </View>
+
+            <MaterialCommunityIcons name="target" size={24} color="#64748B" />
+          </TouchableOpacity>
+        </View>
+      </FormSection>
+
+      {/* 🚩 SECTION 5: ANOMALIES */}
+      <FormSection title="Anomalies & Actions">
+        <FormSelect
+          label="ANOMALY"
+          name="ast.anomalies.anomaly"
+          options={getOptions("anomalies").map((a) => a.anomaly)}
+          disabled={disabled}
+        />
+        <FormInput
+          label="ANOMALY DETAIL"
+          name="ast.anomalies.anomalyDetail"
+          multiline
+          disabled={disabled}
+        />
+
+        <IrepsMedia
+          tag={"anomalyPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+      </FormSection>
+
+      {/* 🚩 SECTION 4: NORMALISATION */}
+      <FormSection title="Normalisation">
+        <FormSelect
+          label="NORMALISATION ACTION"
+          name="ast.normalisation.actionTaken"
+          options={["None", "Sealed", "Replaced", "Fined"]}
+          disabled={disabled}
+        />
+        <IrepsMedia
+          tag={"normalisationPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+      </FormSection>
+    </View>
+  );
+
+  const WaterSections = ({
+    values,
+    setFieldValue,
+    getOptions,
+    disabled,
+    liveLocation,
+    agentName,
+    agentUid,
+  }) => {
+    const anomalies = getOptions("anomalies") || [];
+
+    return (
+      <View style={disabled && { opacity: 0.7 }}>
+        {/* 2.1: Water Meter Description */}
+        <FormSection title="Water Meter Description">
+          <View style={styles.row}>
+            <FormInputMeterNo
+              label="Meter Number"
+              name="ast.astData.astNo"
+              disabled={disabled}
+            />
+          </View>
+          <IrepsMedia
+            tag={"astNoPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+          />
+
+          <FormSelect
+            label="Category (Normal/Bulk)"
+            options={["Normal", "Bulk"]}
+            name="ast.astData.meter.category"
+            disabled={disabled}
+          />
+
+          <FormSelect
+            label="Manufacture"
+            options={getOptions("water_manufacturers")}
+            name="ast.astData.astManufacturer"
+            disabled={disabled}
+          />
+
+          <FormInput
+            label="Model Name"
+            name="ast.astData.astName"
+            disabled={disabled}
+          />
+        </FormSection>
+
+        {/* 2.2: Meter Anomalies */}
+        <FormSection title="Meter Anomalies">
+          <View
+            style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}
+          >
+            <View style={{ flex: 1 }}>
+              <FormSelect
+                label="ANOMALY"
+                options={anomalies.map((a) => a.anomaly)}
+                name="ast.anomalies.anomaly"
+                disabled={disabled}
+              />
+            </View>
+          </View>
+
+          <FormSelect
+            label="Anomaly Detail"
+            options={
+              anomalies.find(
+                (a) => a.anomaly === values?.ast?.anomalies?.anomaly,
+              )?.anomalyDetails || []
+            }
+            name="ast.anomalies.anomalyDetail"
+            disabled={!values?.ast?.anomalies?.anomaly || disabled}
+          />
+          <IrepsMedia
+            tag={"anomalyPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+          />
+        </FormSection>
+
+        {/* 2.3: Meter Location */}
+        <FormSection title="Meter Location">
+          <View style={{ paddingVertical: 10 }}>
+            <Text style={styles.label}>Physical Asset Positioning</Text>
+
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setShowMapPicker(true)} // 🛰️ Launch the Mission Modal
+              style={[
+                styles.selector,
+                // 🛡️ Visual Warning if not yet set
+                !values.ast?.location?.gps && {
+                  borderColor: "#ef4444",
+                  borderWidth: 1.5,
+                },
+              ]}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
+              >
+                {/* 🎯 Status Icon */}
+                <View
+                  style={[
+                    styles.iconCircleSmall,
+                    {
+                      backgroundColor: values.ast?.location?.gps
+                        ? "#dcfce7"
+                        : "#fee2e2",
+                    },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name={
+                      values.ast?.location?.gps
+                        ? "map-marker-check"
+                        : "map-marker-plus"
+                    }
+                    size={24}
+                    color={values.ast?.location?.gps ? "#16a34a" : "#dc2626"}
+                  />
+                </View>
+
+                <View style={{ marginLeft: 12 }}>
+                  <Text
+                    style={[
+                      styles.selectorValue,
+                      {
+                        color: values.ast?.location?.gps
+                          ? "#1e293b"
+                          : "#dc2626",
+                      },
+                    ]}
+                  >
+                    {values.ast?.location?.gps
+                      ? `${values.ast.location.gps.lat.toFixed(6)}, ${values.ast.location.gps.lng.toFixed(6)}`
+                      : "TAP TO PINPOINT METER"}
+                  </Text>
+                  <Text style={styles.actionText}>
+                    {values.ast?.location?.gps
+                      ? "Manual GPS Verified"
+                      : "Location Required"}
+                  </Text>
+                </View>
+              </View>
+
+              <MaterialCommunityIcons name="target" size={24} color="#64748B" />
+            </TouchableOpacity>
+          </View>
+        </FormSection>
+      </View>
+    );
+  };
+
+  const selectedErfId = activeErf?.id;
+  console.log(`WaterSections ----selectedErfId`, selectedErfId);
+  const erfGeo =
+    all?.geoLibrary?.[selectedErfId] || all?.geoEntries?.[selectedErfId];
+  const erfBoundary = getSafeCoords(erfGeo?.geometry);
+  const erfCentroid = erfGeo?.centroid;
 
   return (
     <Formik
-      initialValues={initialValues}
+      initialValues={actionInit.initValues}
       onSubmit={handleSubmitDiscovery}
-      validationSchema={DiscoverySchema}
+      validationSchema={actionInit.schema}
+      validateOnMount={true}
+      enableReinitialize={false}
     >
-      {({ values, setFieldValue, handleSubmit, resetForm, isValid, dirty }) => (
-        <ScrollView
-          style={styles.container}
-          contentContainerStyle={{ paddingBottom: 50 }}
-        >
-          <Stack.Screen options={{ title: address || "Discovery" }} />
+      {({ values, setFieldValue, isSuccess, errors, isValid }) => {
+        console.log(` `);
+        // console.log(
+        //   `handleSubmitDiscovery values`,
+        //   JSON.stringify(values, null, 2),
+        // );
+        // console.log(`handleSubmitDiscovery --values`, values);
+        // console.log(
+        //   `handleSubmitDiscovery --values?.meterType`,
+        //   values?.meterType,
+        // );
+        // console.log(`handleSubmitDiscovery --errors`, errors);
+        // console.log(`handleSubmitDiscovery --isValid`, isValid);
 
-          {/* ACCESS TOGGLE */}
-          <Surface style={styles.card} elevation={1}>
-            <FormToggle
-              label="Access Status"
-              name="hasAccess"
-              disabled={isTrnLoading}
-              trueLabel="ACCESS"
-              falseLabel="NO ACCESS"
+        return (
+          <ScrollView
+            style={styles.container}
+            contentContainerStyle={{ paddingBottom: 50 }}
+          >
+            <Stack.Screen
+              options={{
+                title: address || "Discovery",
+                headerRight: () => (
+                  <Text style={{ color: "blue", fontSize: 16 }}>
+                    {premise?.erfNo || "N/Av"}
+                  </Text>
+                ),
+              }}
             />
-          </Surface>
 
-          {values.hasAccess ? (
-            // ACCESS SECTION
-            <View>
-              <Surface style={styles.card} elevation={1}>
-                <Text style={styles.labelSmall}>Resource Type</Text>
-                <View style={styles.row}>
-                  {/* ELECTRICITY BUTTON */}
-                  <Button
-                    mode={
-                      values?.meterType === "electricity"
-                        ? "contained"
-                        : "outlined"
-                    }
-                    style={styles.flex1}
-                    buttonColor={
-                      values?.meterType === "electricity"
-                        ? "#FFF7ED"
-                        : undefined
-                    } // Light amber tint
-                    textColor={
-                      values?.meterType === "electricity"
-                        ? "#9A3412"
-                        : "#64748B"
-                    }
-                    onPress={() => setFieldValue("meterType", "electricity")}
-                    icon={() => (
+            {/* ACCESS TOGGLE */}
+
+            {values?.accessData?.access?.hasAccess === "yes" ? (
+              // ACCESS SECTION
+              <View>
+                {values?.meterType === "electricity" ? (
+                  <ElectricitySections
+                    values={values}
+                    setFieldValue={setFieldValue}
+                    getOptions={getOptions}
+                    disabled={isTrnLoading}
+                    liveLocation={liveLocation}
+                  />
+                ) : (
+                  <WaterSections
+                    values={values}
+                    setFieldValue={setFieldValue}
+                    getOptions={getOptions}
+                    disabled={isTrnLoading}
+                    liveLocation={liveLocation}
+                  />
+                )}
+              </View>
+            ) : (
+              // NO ACCESS SECTION
+              <Surface style={styles.card}>
+                {values?.accessData?.access?.hasAccess === "no" && (
+                  <Surface style={styles.naCard} elevation={2}>
+                    <View style={styles.sectionHeader}>
                       <MaterialCommunityIcons
-                        name="flash"
-                        size={20}
-                        color={
-                          values?.meterType === "electricity"
-                            ? "#F59E0B"
-                            : "#94A3B8"
-                        }
-                      />
-                    )}
-                  >
-                    ELECTRICITY
-                  </Button>
-
-                  {/* WATER BUTTON */}
-                  <Button
-                    mode={
-                      values?.meterType === "water" ? "contained" : "outlined"
-                    }
-                    style={styles.flex1}
-                    buttonColor={
-                      values?.meterType === "water" ? "#EFF6FF" : undefined
-                    } // Light blue tint
-                    textColor={
-                      values?.meterType === "water" ? "#1E40AF" : "#64748B"
-                    }
-                    onPress={() => setFieldValue("meterType", "water")}
-                    icon={() => (
-                      <MaterialCommunityIcons
-                        name="water"
-                        size={20}
-                        color={
-                          values?.meterType === "water" ? "#3B82F6" : "#94A3B8"
-                        }
-                      />
-                    )}
-                  >
-                    WATER
-                  </Button>
-                </View>
-              </Surface>
-
-              {values.meterType === "electricity" ? (
-                <ElectricitySections
-                  values={values}
-                  setFieldValue={setFieldValue}
-                  getOptions={getOptions}
-                  disabled={isTrnLoading}
-                />
-              ) : (
-                <WaterSections
-                  values={values}
-                  setFieldValue={setFieldValue}
-                  getOptions={getOptions}
-                  disabled={isTrnLoading}
-                />
-              )}
-            </View>
-          ) : (
-            // NO ACCESS SECTION
-            <Surface style={styles.card}>
-              {/* NO ACCESSS */}
-              {!values.hasAccess && (
-                <Surface style={styles.naCard} elevation={2}>
-                  <View style={styles.sectionHeader}>
-                    <MaterialCommunityIcons
-                      name="alert-circle"
-                      size={18}
-                      color="#dc2626"
-                    />
-                    <Text style={[styles.sectionTitle, { color: "#dc2626" }]}>
-                      N/A JUSTIFICATION
-                    </Text>
-                  </View>
-
-                  {/* Reason Selector */}
-                  <TouchableOpacity
-                    style={styles.selector}
-                    onPress={() => setModalVisible(true)}
-                  >
-                    <View>
-                      <Text style={styles.label}>NA REASON</Text>
-                      <Text style={styles.selectorValue}>
-                        {values.naSection.reason || "Select..."}
-                      </Text>
-                    </View>
-                    <MaterialCommunityIcons
-                      name="chevron-down"
-                      size={22}
-                      color="#dc2626"
-                    />
-                  </TouchableOpacity>
-
-                  <Divider style={{ marginVertical: 15 }} />
-
-                  {/* Capture Button */}
-                  <View style={styles.row}>
-                    <TouchableOpacity
-                      style={[styles.actionBlock, { flex: 1, height: 80 }]}
-                      onPress={handleCaptureNAPhoto}
-                    >
-                      <MaterialCommunityIcons
-                        name="camera-plus"
-                        size={32}
+                        name="alert-circle"
+                        size={18}
                         color="#dc2626"
                       />
-                      <Text style={styles.actionText}>ADD EVIDENCE PHOTO</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* 🎯 THE THUMBNAIL BED (Horizontal Scroll) */}
-                  {values.naSection.photos?.length > 0 && (
-                    <View style={{ marginVertical: 15 }}>
-                      <Text style={styles.label}>
-                        Captured Evidence ({values.naSection.photos.length})
+                      <Text style={[styles.sectionTitle, { color: "#dc2626" }]}>
+                        N/A Reason
                       </Text>
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={{ gap: 12, paddingRight: 20 }}
-                      >
-                        {values.naSection.photos.map((item, index) => (
-                          <View key={index} style={styles.thumbnailContainer}>
-                            {/* 🎯 WRAP THE IMAGE IN THE CLICKABLE TOUCHABLE */}
-                            <TouchableOpacity
-                              onPress={() => setInspectedImage(item.uri)}
-                              activeOpacity={0.8}
-                            >
-                              <Image
-                                source={{ uri: item.uri }}
-                                style={styles.thumbnail}
-                              />
-                            </TouchableOpacity>
-
-                            {/* KEEP THE REMOVE BUTTON ON TOP */}
-                            <TouchableOpacity
-                              style={styles.removePhotoBadge}
-                              onPress={() => {
-                                const updated = values.naSection.photos.filter(
-                                  (_, i) => i !== index,
-                                );
-                                setFieldValue("naSection.photos", updated);
-                              }}
-                            >
-                              <MaterialCommunityIcons
-                                name="close-circle"
-                                size={22}
-                                color="white"
-                              />
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </ScrollView>
                     </View>
-                  )}
 
-                  {/* FULL SCREEN INSPECTION MODAL */}
-                  <Portal>
-                    <Modal
-                      visible={!!inspectedImage}
-                      onDismiss={() => setInspectedImage(null)}
-                      contentContainerStyle={styles.inspectionModal}
+                    {/* Reason Selector */}
+                    <TouchableOpacity
+                      style={styles.selector}
+                      onPress={() => setModalVisible(true)}
                     >
-                      <View style={styles.inspectionContainer}>
-                        <Image
-                          source={{ uri: inspectedImage }}
-                          style={styles.fullImage}
-                          contentFit="contain"
-                        />
-                        <TouchableOpacity
-                          style={styles.closeInspectionBtn}
-                          onPress={() => setInspectedImage(null)}
-                        >
-                          <MaterialCommunityIcons
-                            name="close-circle"
-                            size={40}
-                            color="white"
-                          />
-                        </TouchableOpacity>
-
-                        <View style={styles.inspectionFooter}>
-                          <Text style={styles.inspectionText}>
-                            Evidence Review
-                          </Text>
-                        </View>
+                      <View>
+                        <Text style={styles.selectorValue}>
+                          {values?.accessData?.access?.reason ||
+                            "Select reason ..."}
+                        </Text>
                       </View>
-                    </Modal>
-                  </Portal>
-                </Surface>
-              )}
-            </Surface>
-          )}
+                      <MaterialCommunityIcons
+                        name="chevron-down"
+                        size={22}
+                        color="#dc2626"
+                      />
+                    </TouchableOpacity>
 
-          {/* RESET / SUBMIT BTNS */}
-          <View style={styles.footer}>
-            <Button
-              mode="outlined"
-              onPress={() => {
-                Alert.alert(
-                  "Reset Form?",
-                  "This will permanently delete all captured data and evidence photos for this premise. Are you sure?",
-                  [
-                    {
-                      text: "CANCEL",
-                      style: "cancel",
-                    },
-                    {
-                      text: "YES, RESET",
-                      style: "destructive", // Shows red on iOS
-                      onPress: () => resetForm(),
-                    },
-                  ],
-                );
-              }}
-              style={styles.resetBtn}
-              disabled={isTrnLoading || !isValid}
-              textColor="#64748B"
-            >
-              RESET
-            </Button>
-            <Button
-              mode="contained"
-              onPress={handleSubmit}
-              loading={isTrnLoading}
-              buttonColor={isValid && dirty ? "#22C55E" : "#DC2626"}
-              style={styles.submitBtn}
-              disabled={isTrnLoading || !isValid}
-            >
-              {isValid && dirty ? "SUBMIT DISCOVERY" : "COMPLETE FORM"}
-            </Button>
-          </View>
+                    <Divider style={{ marginVertical: 15 }} />
 
-          <Portal>
-            <Modal
-              visible={cameraVisible}
-              onDismiss={() => setCameraVisible(false)}
-              contentContainerStyle={{ flex: 1 }}
-            >
-              <TouchableOpacity
-                style={styles.cameraCloseBtn}
-                onPress={() => setCameraVisible(false)}
+                    <IrepsMedia
+                      tag={"noAccessPhoto"}
+                      agentName={agentName}
+                      agentUid={agentUid}
+                    />
+                  </Surface>
+                )}
+              </Surface>
+            )}
+
+            {/* RESET / SUBMIT BTNS */}
+            <ForensicFooter isTrnLoading={isTrnLoading} isSuccess={isSuccess} />
+
+            <Portal>
+              <Modal
+                visible={modalVisible}
+                onDismiss={() => setModalVisible(false)}
+                contentContainerStyle={styles.modalContent}
               >
-                <MaterialCommunityIcons
-                  name="arrow-left"
-                  size={30}
-                  color="white"
-                />
-              </TouchableOpacity>
-              <CameraView style={{ flex: 1 }} ref={cameraRef} />
-
-              <View style={styles.cameraControls}>
-                <TouchableOpacity
-                  style={styles.captureBtn}
-                  onPress={capturePhoto}
+                <RadioButton.Group
+                  onValueChange={(v) => {
+                    setFieldValue("accessData.access.reason", v);
+                    setModalVisible(false);
+                  }}
+                  value={values?.accessData?.access?.reason}
                 >
-                  <View style={styles.captureBtnInternal} />
-                </TouchableOpacity>
-              </View>
-            </Modal>
+                  {NA_REASONS.map((r) => (
+                    <RadioButton.Item key={r} label={r} value={r} />
+                  ))}
+                </RadioButton.Group>
+              </Modal>
 
-            <Modal visible={!!tempUri} onDismiss={() => setTempUri(null)}>
-              <View
-                style={{
-                  height: 500,
-                  backgroundColor: "black",
-                  margin: 20,
-                  borderRadius: 15,
-                  overflow: "hidden",
-                }}
+              <Modal
+                visible={showSuccess}
+                dismissable={false} // Force them to acknowledge or wait for auto-nav
+                contentContainerStyle={styles.successModal}
               >
-                <ViewShot
-                  ref={viewShotRef}
-                  options={{ format: "jpg", quality: 0.8 }}
-                  style={{ flex: 1 }}
-                >
-                  <Image
-                    source={{ uri: tempUri }}
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <View style={styles.watermarkOverlay}>
-                    <Text style={styles.watermarkText}>
-                      📍 GPS:{" "}
-                      {values.naSection.gps
-                        ? `${values.naSection.gps[0].toFixed(4)}, ${values.naSection.gps[1].toFixed(4)}`
-                        : "NO GPS"}
-                    </Text>
-                    <Text style={styles.watermarkText}>🏠 ERF: {erfNo}</Text>
-                    <Text style={styles.watermarkText}>
-                      👤 AGENT: {agentName}
-                    </Text>
-                    <Text style={styles.watermarkText}>
-                      📅 {new Date().toLocaleString()}
-                    </Text>
+                <View style={styles.successContent}>
+                  <View style={styles.successIconCircle}>
+                    <Feather name="check" size={50} color="#fff" />
                   </View>
-                </ViewShot>
-                <View style={styles.row}>
-                  <Button
-                    style={{ flex: 1 }}
-                    mode="contained"
-                    buttonColor="red"
-                    onPress={() => setTempUri(null)}
-                  >
-                    DISCARD
-                  </Button>
-                  <Button
-                    style={{ flex: 1 }}
-                    mode="contained"
-                    buttonColor="#22C55E"
-                    onPress={async () => {
-                      const burnedUri = await viewShotRef.current.capture();
+                  <Text style={styles.successTitle}>MISSION SUCCESS</Text>
+                  <Text style={styles.successSub}>
+                    {values?.accessData?.access?.hasAccess ? "" : "NA Access"}{" "}
+                    Trn saved successfully
+                  </Text>
 
-                      const newPhotoEntry = {
-                        uri: burnedUri,
-                        timestamp: new Date().toISOString(),
-                      };
-
-                      const existingPhotos = values.naSection.photos || [];
-                      setFieldValue("naSection.photos", [
-                        ...existingPhotos,
-                        newPhotoEntry,
-                      ]);
-                      setTempUri(null); // Close the preview modal
+                  <TouchableOpacity
+                    style={styles.continueBtn}
+                    onPress={() => {
+                      setShowSuccess(false);
+                      router.replace(
+                        `/(tabs)/erfs/${values?.accessData?.erfId}`,
+                      );
+                      // router.replace(`/(tabs)/erfs/${erfNo}`);
                     }}
                   >
-                    SAVE & BURN
-                  </Button>
+                    <Text style={styles.continueBtnText}>CONTINUE</Text>
+                  </TouchableOpacity>
                 </View>
-              </View>
-            </Modal>
+              </Modal>
 
-            <Modal
-              visible={modalVisible}
-              onDismiss={() => setModalVisible(false)}
-              contentContainerStyle={styles.modalContent}
-            >
-              <RadioButton.Group
-                onValueChange={(v) => {
-                  setFieldValue("naSection.reason", v);
-                  setModalVisible(false);
-                }}
-                value={values.naSection.reason}
+              <Modal
+                visible={showMapPicker}
+                onDismiss={() => setShowMapPicker(false)}
+                contentContainerStyle={styles.mapModalContainer}
               >
-                {NA_REASONS.map((r) => (
-                  <RadioButton.Item key={r} label={r} value={r} />
-                ))}
-              </RadioButton.Group>
-            </Modal>
+                <Surface style={styles.mapPickerSurface}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>DRAG PIN TO METER</Text>
+                  </View>
 
-            <Modal
-              visible={showSuccess}
-              dismissable={false} // Force them to acknowledge or wait for auto-nav
-              contentContainerStyle={styles.successModal}
-            >
-              <View style={styles.successContent}>
-                <View style={styles.successIconCircle}>
-                  <Feather name="check" size={50} color="#fff" />
-                </View>
-                <Text style={styles.successTitle}>MISSION SUCCESS</Text>
-                <Text style={styles.successSub}>
-                  Premise has been vaulted successfully
-                </Text>
+                  <MapView
+                    style={styles.pickerMap}
+                    showsUserLocation={true}
+                    initialRegion={{
+                      latitude:
+                        erfCentroid?.lat || liveLocation?.lat || -33.9249,
+                      longitude:
+                        erfCentroid?.lng || liveLocation?.lng || 18.4241,
+                      latitudeDelta: 0.001,
+                      longitudeDelta: 0.001,
+                    }}
+                  >
+                    {/* 🏛️ REFERENCE LAYER: The Erf Boundary */}
+                    {erfBoundary.length > 2 && (
+                      <Polygon
+                        coordinates={erfBoundary}
+                        strokeColor="#FFD700" // 🟡 Sovereign Gold
+                        fillColor="rgba(255, 215, 0, 0.1)"
+                        strokeWidth={2}
+                      />
+                    )}
 
-                <TouchableOpacity
-                  style={styles.continueBtn}
-                  onPress={() => {
-                    setShowSuccess(false);
-                    router.replace(`/(tabs)/erfs/${values.erfId}`);
-                  }}
-                >
-                  <Text style={styles.continueBtnText}>CONTINUE</Text>
-                </TouchableOpacity>
-              </View>
-            </Modal>
-          </Portal>
-        </ScrollView>
-      )}
+                    {/* 🏷️ TARGET LABEL: The Erf Number at Centroid */}
+                    {erfCentroid && (
+                      <Marker
+                        coordinate={{
+                          latitude: erfCentroid.lat,
+                          longitude: erfCentroid.lng,
+                        }}
+                        tracksViewChanges={false} // Optimization
+                      >
+                        <View style={styles.centroidLabel}>
+                          <Text style={styles.centroidText}>
+                            {values.accessData?.erfNo}
+                          </Text>
+                        </View>
+                      </Marker>
+                    )}
+
+                    {/* 📍 THE MISSION OBJECTIVE: The Draggable Meter */}
+                    <Marker
+                      draggable
+                      coordinate={{
+                        latitude:
+                          tempCoords?.lat || liveLocation?.lat || -33.9249,
+                        longitude:
+                          tempCoords?.lng || liveLocation?.lng || 18.4241,
+                      }}
+                      onDragEnd={(e) => {
+                        const c = e.nativeEvent.coordinate;
+                        setTempCoords({ lat: c.latitude, lng: c.longitude });
+                      }}
+                      pinColor="#3B82F6" // 🔵 Blue to represent the Water Meter
+                      title="Drag to actual meter location"
+                    />
+                  </MapView>
+
+                  <View style={styles.modalFooter}>
+                    <Button
+                      mode="outlined"
+                      onPress={() => setShowMapPicker(false)}
+                    >
+                      CANCEL
+                    </Button>
+                    <Button
+                      mode="contained"
+                      onPress={() => {
+                        setFieldValue("ast.location.gps", tempCoords);
+                        setShowMapPicker(false);
+                      }}
+                      style={{ backgroundColor: "#16a34a" }}
+                    >
+                      SAVE POSITION
+                    </Button>
+                  </View>
+                </Surface>
+              </Modal>
+            </Portal>
+          </ScrollView>
+        );
+      }}
     </Formik>
   );
 }
@@ -789,119 +1209,6 @@ const FormInput = ({ label, name, disabled, ...props }) => {
     />
   );
 };
-
-// const FormInputMeterNo = ({ label, name, disabled, ...props }) => {
-//   const { setFieldValue, values } = useFormikContext();
-//   const { all } = useWarehouse();
-
-//   // Scanner State
-//   const [scannerVisible, setScannerVisible] = useState(false);
-//   const [permission, requestPermission] = useCameraPermissions();
-
-//   const handleOpenScanner = async () => {
-//     if (!permission?.granted) {
-//       const { granted } = await requestPermission();
-//       if (!granted) {
-//         Alert.alert(
-//           "Permission Denied",
-//           "Camera access is required to scan barcodes.",
-//         );
-//         return;
-//       }
-//     }
-//     setScannerVisible(true);
-//   };
-
-//   const validateMeterNo = (val) => {
-//     const cleanedVal = val.trim().toUpperCase();
-//     setFieldValue(name, cleanedVal);
-
-//     if (cleanedVal.length > 3) {
-//       // Searching across all.meters and all.prems for absolute safety
-//       const duplicate =
-//         (all.meters || []).find((m) => m.meterNo === cleanedVal) ||
-//         (all.prems || []).find(
-//           (p) =>
-//             p.ast?.astData?.astNo === cleanedVal ||
-//             p.services?.waterMeterNo === cleanedVal ||
-//             p.services?.electricityMeterNo === cleanedVal,
-//         );
-
-//       if (duplicate) {
-//         Alert.alert(
-//           "🚨 DUPLICATE METER DETECTED",
-//           `Meter [${cleanedVal}] is already linked to:\n\n📍 ${duplicate.address?.strNo || "Unknown"} ${duplicate.address?.StrName || ""}`,
-//           [
-//             {
-//               text: "I WILL FIX IT",
-//               style: "destructive",
-//               onPress: () => setFieldValue(name, ""),
-//             },
-//           ],
-//         );
-//       }
-//     }
-//   };
-
-//   const onBarCodeScanned = ({ data }) => {
-//     setScannerVisible(false);
-//     validateMeterNo(data); // Pass scanned data through validation
-//   };
-
-//   return (
-//     <>
-//       <TextInput
-//         label={label}
-//         value={getIn(values, name) || ""}
-//         onChangeText={validateMeterNo}
-//         disabled={disabled}
-//         mode="outlined"
-//         autoCapitalize="characters"
-//         style={{ marginBottom: 10 }}
-//         {...props}
-//       />
-//       <TextInput.Icon
-//         icon="barcode-scan"
-//         onPress={handleOpenScanner}
-//         disabled={disabled}
-//         forceTextInputFocus={false}
-//       />
-
-//       {/* Embedded Scanner UI */}
-//       <Portal>
-//         <Modal
-//           visible={scannerVisible}
-//           onDismiss={() => setScannerVisible(false)}
-//           contentContainerStyle={styles.modalContainer}
-//         >
-//           <View style={styles.cameraWrapper}>
-//             <CameraView
-//               style={StyleSheet.absoluteFill}
-//               facing="back"
-//               barcodeScannerSettings={{
-//                 barcodeTypes: ["code128", "qr", "ean13", "code39"],
-//               }}
-//               onBarcodeScanned={scannerVisible ? onBarCodeScanned : undefined}
-//             />
-//             <View style={styles.overlay}>
-//               <View style={styles.scanTarget} />
-//               <Text style={styles.scanText}>
-//                 Align Barcode inside the frame
-//               </Text>
-//             </View>
-//             <Button
-//               mode="contained"
-//               onPress={() => setScannerVisible(false)}
-//               style={styles.closeBtn}
-//             >
-//               CANCEL
-//             </Button>
-//           </View>
-//         </Modal>
-//       </Portal>
-//     </>
-//   );
-// };
 
 const FormSelect = ({ label, name, options = [], disabled }) => {
   const { values, setFieldValue } = useFormikContext();
@@ -945,190 +1252,58 @@ const FormSelect = ({ label, name, options = [], disabled }) => {
   );
 };
 
-const FormToggle = ({ label, name, trueLabel, falseLabel, disabled }) => {
-  const { values, setFieldValue } = useFormikContext();
-  // Using the Safe Chain here
-  const val = getIn(values, name);
+// const FormToggle = ({ label, name, trueLabel, falseLabel, disabled }) => {
+//   const { values, setFieldValue } = useFormikContext();
+//   // Using the Safe Chain here
+//   const val = getIn(values, name);
 
-  return (
-    <View style={{ marginBottom: 10 }}>
-      <Text style={styles.labelSmall}>{label}</Text>
-      <View style={styles.row}>
-        {/* HAVE ACCESS BUTTON */}
-        <Button
-          mode={val === true ? "contained" : "outlined"}
-          style={styles.flex1}
-          onPress={() => setFieldValue(name, true)}
-          disabled={disabled}
-          buttonColor={val === true ? "#E8F5E9" : undefined} // Light green background when selected
-          textColor={val === true ? "#2E7D32" : "#64748B"} // Dark green text when selected
-          icon={() => (
-            <MaterialCommunityIcons
-              name="check-circle"
-              size={20}
-              color={val === true ? "#2E7D32" : "#94A3B8"}
-            />
-          )}
-        >
-          {trueLabel}
-        </Button>
+//   return (
+//     <View style={{ marginBottom: 10 }}>
+//       <Text style={styles.labelSmall}>{label}</Text>
+//       <View style={styles.row}>
+//         {/* HAVE ACCESS BUTTON */}
+//         <Button
+//           mode={val === true ? "contained" : "outlined"}
+//           style={styles.flex1}
+//           onPress={() => setFieldValue(name, true)}
+//           disabled={disabled}
+//           buttonColor={val === true ? "#E8F5E9" : undefined} // Light green background when selected
+//           textColor={val === true ? "#2E7D32" : "#64748B"} // Dark green text when selected
+//           icon={() => (
+//             <MaterialCommunityIcons
+//               name="check-circle"
+//               size={20}
+//               color={val === true ? "#2E7D32" : "#94A3B8"}
+//             />
+//           )}
+//         >
+//           {trueLabel}
+//         </Button>
 
-        {/* NO ACCESS BUTTON */}
-        <Button
-          mode={val === false ? "contained" : "outlined"}
-          style={styles.flex1}
-          onPress={() => setFieldValue(name, false)}
-          disabled={disabled}
-          buttonColor={val === false ? "#FFEBEE" : undefined} // Light red background when selected
-          textColor={val === false ? "#D32F2F" : "#64748B"} // Dark red text when selected
-          icon={() => (
-            <MaterialCommunityIcons
-              name="close-circle"
-              size={20}
-              color={val === false ? "#D32F2F" : "#94A3B8"}
-            />
-          )}
-        >
-          {falseLabel}
-        </Button>
-      </View>
-    </View>
-  );
-};
+//         {/* NO ACCESS BUTTON */}
+//         <Button
+//           mode={val === false ? "contained" : "outlined"}
+//           style={styles.flex1}
+//           onPress={() => setFieldValue(name, false)}
+//           disabled={disabled}
+//           buttonColor={val === false ? "#FFEBEE" : undefined} // Light red background when selected
+//           textColor={val === false ? "#D32F2F" : "#64748B"} // Dark red text when selected
+//           icon={() => (
+//             <MaterialCommunityIcons
+//               name="close-circle"
+//               size={20}
+//               color={val === false ? "#D32F2F" : "#94A3B8"}
+//             />
+//           )}
+//         >
+//           {falseLabel}
+//         </Button>
+//       </View>
+//     </View>
+//   );
+// };
 
 // --- SECTIONS ---
-
-const ElectricitySections = ({
-  values,
-  setFieldValue,
-  getOptions,
-  disabled,
-}) => (
-  <View>
-    <FormSection title="Meter Details">
-      <FormInput
-        label="METER NUMBER"
-        name="ast.astData.astNo"
-        disabled={disabled}
-      />
-      <FormSelect
-        label="MANUFACTURER"
-        name="ast.astData.astManufacturer"
-        options={getOptions("elec_manufacturers")}
-        disabled={disabled}
-      />
-    </FormSection>
-    <FormSection title="Anomalies">
-      <FormSelect
-        label="ANOMALY"
-        name="ast.anomalies.anomaly"
-        options={getOptions("anomalies").map((a) => a.anomaly)}
-        disabled={disabled}
-      />
-    </FormSection>
-  </View>
-);
-
-const WaterSections = ({ values, setFieldValue, getOptions, disabled }) => {
-  // Pulling specific water anomalies from the settings API
-  const anomalies = getOptions("anomalies") || [];
-  const { takePhoto } = useAssetMedia();
-
-  return (
-    <View style={disabled && { opacity: 0.7 }}>
-      {/* 2.1: Water Meter Description */}
-      <FormSection title="Water Meter Description">
-        <View style={styles.row}>
-          <WaterMeterEntry disabled={disabled} />
-        </View>
-
-        <FormSelect
-          label="METER TYPE"
-          options={["Normal", "Bulk"]}
-          name="ast.astData.meter.type"
-          disabled={disabled}
-        />
-
-        <FormSelect
-          label="MANUFACTURER"
-          options={getOptions("water_manufacturers")}
-          name="ast.astData.astManufacturer"
-          disabled={disabled}
-        />
-
-        <FormInput
-          label="METER MODEL NAME"
-          name="ast.astData.astName"
-          disabled={disabled}
-        />
-      </FormSection>
-
-      {/* 2.2: Meter Anomalies */}
-      <FormSection title="Meter Anomalies">
-        <FormSelect
-          label="ANOMALY"
-          options={anomalies.map((a) => a.anomaly)}
-          // onSelect={(val) => {
-          //   setFieldValue("ast.anomalies.anomaly", val);
-          //   setFieldValue("ast.anomalies.anomalyDetail", "");
-          // }}
-          name="ast.anomalies.anomaly"
-          disabled={disabled}
-        />
-        <FormSelect
-          label="ANOMALY DETAIL"
-          // Safe chaining to prevent crash if anomaly is not yet selected
-          // options={
-          //   anomalies.find((a) => a.anomaly === values?.ast?.anomalies?.anomaly)
-          //     ?.anomalyDetails || []
-          // }
-          name="ast.anomalies.anomalyDetail"
-          disabled={disabled}
-        />
-      </FormSection>
-
-      {/* 2.3: Meter Location */}
-      <FormSection title="Meter Location">
-        <TextInput
-          label="GOOGLE ADDRESS"
-          // Applied optional chaining as requested to prevent crash
-          value={values?.ast?.location?.address?.googleAdr || ""}
-          disabled
-          mode="outlined"
-          style={styles.readOnlyInput}
-        />
-
-        <View style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <FormSelect
-              label="PLACEMENT"
-              options={[
-                "Kiosk",
-                "Top Pole",
-                "Bottom Pole",
-                "Indoors",
-                "Boundary Wall",
-                "Other",
-              ]}
-              name="ast.location.placement"
-              disabled={disabled}
-            />
-          </View>
-          <IconButton
-            icon="camera"
-            mode="contained"
-            containerColor="#E2E8F0"
-            onPress={() => takePhoto("ast.media.meterPlacement")} // 🎯 Using the standard hook
-            disabled={disabled}
-            style={styles.inlineMediaBtn}
-          />
-        </View>
-        {/* 🎯 Always add the preview below the camera action */}
-        <FieldMediaPreview path="ast.media.meterPlacement" />
-      </FormSection>
-    </View>
-  );
-};
 
 // --- STYLES ---
 
@@ -1140,7 +1315,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     overflow: "hidden",
   },
-  sectionHeader: { padding: 10, backgroundColor: "#E2E8F0" },
+  sectionHeader: {
+    padding: 10,
+    backgroundColor: "#E2E8F0",
+    flexDirection: "row",
+    gap: 8,
+  },
   sectionTitle: { fontSize: 14, fontWeight: "bold", color: "#475569" },
   input: { marginBottom: 10, backgroundColor: "#fff" },
   selector: {
@@ -1391,4 +1571,113 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 14,
   },
+
+  integratedMediaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+    backgroundColor: "#F1F5F9", // Subtle background to "group" the media tools
+    borderRadius: 12,
+    padding: 8,
+    height: 120, // Enough height for 100px thumbnails + padding
+  },
+  cameraSlot: {
+    width: 90,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRightWidth: 1,
+    borderRightColor: "#CBD5E1",
+    paddingRight: 8,
+  },
+  ribbonSlot: {
+    flex: 1, // Takes all remaining space
+    height: "100%",
+  },
+  tinyLabel: {
+    fontSize: 9,
+    fontWeight: "bold",
+    color: "#475569",
+    marginTop: 2,
+  },
+  inputContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: "#e2e8f0", // Normal border
+    overflow: "hidden", // Keeps the left border sharp
+  },
+  errorIndicator: {
+    borderLeftWidth: 5, // 🎯 The "Sexy" thin indicator
+    borderLeftColor: "#EF4444", // Forensic Red
+    backgroundColor: "#FEF2F2", // Very light red tint (Optional)
+  },
+
+  mapModalContainer: { padding: 10, flex: 1, justifyContent: "center" },
+  mapPickerSurface: {
+    borderRadius: 20,
+    height: "70%",
+    overflow: "hidden",
+    backgroundColor: "white",
+  },
+  pickerMap: { flex: 1 },
+  modalHeader: {
+    padding: 15,
+    backgroundColor: "#f8fafc",
+    alignItems: "center",
+  },
+  modalFooter: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    padding: 15,
+    backgroundColor: "#f8fafc",
+  },
+
+  iconCircleSmall: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  centroidLabel: {
+    backgroundColor: "rgba(15, 23, 42, 0.7)", // Dark slate semi-transparent
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#FFD700",
+  },
+  centroidText: {
+    color: "#FFD700",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  // selector: {
+  //   flexDirection: "row",
+  //   justifyContent: "space-between",
+  //   alignItems: "center",
+  //   padding: 12,
+  //   borderRadius: 12,
+  //   backgroundColor: "#f8fafc", // Sexy Light Grey
+  //   borderWidth: 1,
+  //   borderColor: "#e2e8f0",
+  //   elevation: 2,
+  // },
+  // label: {
+  //   fontSize: 11,
+  //   fontWeight: "900",
+  //   color: "#475569",
+  //   marginBottom: 8,
+  //   textTransform: "uppercase",
+  //   letterSpacing: 1,
+  // },
+  // actionText: {
+  //   fontSize: 10,
+  //   color: "#94a3b8",
+  //   fontWeight: "600",
+  //   marginTop: 2,
+  // },
 });

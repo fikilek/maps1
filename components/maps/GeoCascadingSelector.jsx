@@ -1,283 +1,606 @@
-// components/maps/GeoCascadingSelector.js
-import { FlashList } from "@shopify/flash-list";
-import { useEffect, useMemo, useState } from "react";
-import { View } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Location from "expo-location";
+import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Button,
-  Dialog,
-  IconButton,
-  List,
-  Portal,
-  TextInput,
-} from "react-native-paper";
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Button, Modal, Portal, Searchbar, Surface } from "react-native-paper";
 import { useGeo } from "../../src/context/GeoContext";
-import {
-  useGetLocalMunicipalityByIdQuery,
-  useGetWardsByLocalMunicipalityQuery,
-} from "../../src/redux/geoApi";
-import { erfMemory } from "../../src/storage/erfMemory";
-import { geoMemory } from "../../src/storage/geoMemory";
+import { getSafeCoords, useMap } from "../../src/context/MapContext";
+import { useWarehouse } from "../../src/context/WarehouseContext";
 
-export default function GeoCascadingSelector({ onRefreshCamera = () => {} }) {
-  const [wardDialogOpen, setWardDialogOpen] = useState(false);
-  const [erfDialogOpen, setErfDialogOpen] = useState(false);
-  const [erfSearch, setErfSearch] = useState("");
+export default function GeoCascadingSelector() {
+  const { geoState, setGeoState } = useGeo();
+  const { all } = useWarehouse();
+  // console.log(`GeoCascadingSelector----all?.prems`, all?.prems);
+  // console.log(`GeoCascadingSelector----all?.meters`, all?.meters);
 
-  const activeStyle = { color: "#2563eb", fontWeight: "bold" };
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showErfs, setShowErfs] = useState(false);
+  // console.log(`GeoCascadingSelector----showErfs`, showErfs);
 
-  // 🏛️ ACCESS SUPREME SOURCE OF TRUTH
-  const { geoState, updateGeo } = useGeo();
-  const { lmId, wardId, id } = geoState;
-
-  // 1. 🛰️ API FETCH: Official LM Data (Knysna)
-  const { data: activeWorkbase } = useGetLocalMunicipalityByIdQuery(lmId, {
-    skip: !lmId,
+  const [showMeters, setShowMeters] = useState(false);
+  const [meterSearchQuery, setMeterSearchQuery] = useState("");
+  const filteredMeters = (all?.meters || []).filter((m) => {
+    const mNo = m?.ast?.astData?.astNo || "";
+    return mNo.toLowerCase().includes(meterSearchQuery.toLowerCase());
   });
 
-  // 2. 🛰️ API FETCH: Ward List (Background Sync)
-  const { data: apiWards = [], isLoading: wardsLoading } =
-    useGetWardsByLocalMunicipalityQuery(lmId, {
-      skip: !lmId,
-    });
+  const [erfSearchQuery, setErfSearchQuery] = useState("");
+  // console.log(`GeoCascadingSelector----erfSearchQuery`, erfSearchQuery);
 
-  // 3. 📦 WAREHOUSE: Get all Erfs from MMKV (Meta Only)
-  const erfs = useMemo(() => {
-    return lmId ? erfMemory.getErfsMetaList(lmId) : [];
-  }, [lmId]);
+  const { flyTo } = useMap();
+  // const lmId = geoState?.selectedLm?.id;
 
-  // 4. 📦 WAREHOUSE FETCH: The Instant Ward Source
-  const wards = useMemo(() => {
-    const storedWards = geoMemory.getWards(lmId);
-    // Favor API data if available, otherwise fall back to MMKV warehouse
-    return apiWards.length > 0 ? apiWards : storedWards || [];
-  }, [apiWards, lmId]);
+  const { selectedErf, selectedPremise } = geoState;
+  // console.log(`GeoCascadingSelector----selectedErf`, selectedErf);
 
-  // 💾 AUTOMATIC SYNC: Save API results to MMKV whenever they arrive
-  useEffect(() => {
-    if (apiWards.length > 0 && lmId) {
-      console.log(
-        `💾 geoMemory: Warehousing ${apiWards.length} wards for ${lmId}`,
-      );
-      geoMemory.saveWards(lmId, apiWards);
-    }
-  }, [apiWards, lmId]);
+  const [showWards, setShowWards] = useState(false);
 
-  // 🔍 RESOLVE: Get selected objects for UI display
-  const selectedWard = useMemo(() => {
-    return wards.find((w) => w.id === wardId) || null;
-  }, [wards, wardId]);
+  const [showPrems, setShowPrems] = useState(false);
+  // console.log(`GeoCascadingSelector----showPrems`, showPrems);
 
-  const selectedErf = useMemo(() => {
-    return erfs.find((e) => e.id === id) || null;
-  }, [erfs, id]);
+  const activeLm = geoState?.selectedLm;
+  const activeWard = geoState?.selectedWard;
 
-  // 5. 🔍 FILTER: Handle Erf List by Ward + Search String
+  const lmNameStr = `${activeLm?.name || "LM"}`;
+  const wardNameStr = `${activeWard?.name || "All Wards"}`;
+  const premiseIdStr = selectedPremise?.id
+    ? `Prem: ${selectedPremise.id}`
+    : "Premise";
+
+  // 🎯 TACTICAL ERF FILTER: Uses 'filtered.erfs' from the Warehouse
   const filteredErfs = useMemo(() => {
-    if (!wardId) return [];
-    let list = erfs.filter((e) => e.wardPcode === wardId);
+    if (!erfSearchQuery) return all?.erfs || [];
+    const query = erfSearchQuery.toLowerCase();
+    return all.erfs.filter((e) => {
+      const searchString = `${e.erfNo} ${e.id}`.toLowerCase();
+      return searchString.includes(query);
+    });
+  }, [erfSearchQuery, all?.erfs]);
 
-    if (erfSearch.trim()) {
-      const q = erfSearch.toLowerCase();
-      list = list.filter(
-        (e) =>
-          (e.erfNo?.toString() || "").toLowerCase().includes(q) ||
-          (e.id || "").toLowerCase().includes(q),
-      );
+  // ✈️ 3. ERF SELECTION & JUMP
+  const selectErf = (erf) => {
+    console.log(`GeoCascadingSelector----erf`, erf);
+
+    setGeoState((prev) => ({ ...prev, selectedErf: erf }));
+    setShowErfs(false);
+    setErfSearchQuery("");
+  };
+
+  // 🛰️ DIRECT SOURCE: Fetch ALL wards for this LM from the API
+  // const { data: fullWardsList } = useGetWardsByLocalMunicipalityQuery(lmId, {
+  //   skip: !lmId,
+  // });
+
+  // ✈️ 1. LM JUMP LOGIC (RESTORED)
+  const handleLmJump = () => {
+    if (!activeLm) return;
+    const lmEntry = all?.geoLibrary?.[activeLm.id] || activeLm;
+    const coords = getSafeCoords(lmEntry.geometry || lmEntry);
+    if (coords.length > 0) flyTo(coords, 50); // Wider padding for LM
+  };
+
+  // ✈️ 2. WARD SELECTION & JUMP
+  const selectWard = (ward) => {
+    // console.log(`GeoCascadingSelector----selectWard ----ward`, ward);
+
+    setGeoState((prev) => ({ ...prev, selectedWard: ward }));
+    setShowWards(false);
+
+    const wardEntry = all?.geoLibrary?.[ward.id] || ward;
+
+    const coords = getSafeCoords(wardEntry.geometry || wardEntry);
+    console.log(
+      `GeoCascadingSelector --selectWard() --coords?.length`,
+      coords?.length,
+    );
+
+    if (coords.length > 0) flyTo(coords, 20); // Tighter padding for Ward
+  };
+
+  const selectPremise = (prem) => {
+    setGeoState((prev) => ({ ...prev, selectedPremise: prem }));
+    setShowPrems(false);
+
+    // Logic: If premise has coords, fly to them.
+    // Usually, we fly to the parent ERF if the premise has no geometry.
+    // if (prem.geometry || prem.coords) {
+    //   flyTo(getSafeCoords(prem.geometry || prem));
+    // }
+  };
+
+  const selectMeter = (meter) => {
+    const gps = meter?.ast?.location?.gps;
+
+    if (gps?.lat) {
+      setGeoState((prev) => ({
+        ...prev,
+        selectedMeter: meter,
+        // 🎯 Vital: Lock the parent Erf so the map highlights the property
+        selectedErf: { id: meter.accessData?.erfId },
+      }));
+
+      // 🚀 Flight Plan
+      flyTo([{ latitude: gps.lat, longitude: gps.lng }], 70);
     }
-    return list;
-  }, [erfs, wardId, erfSearch]);
-
-  // 🎯 REPORTING: Update GeoContext for Ward changes
-  const handleWardSelect = (ward) => {
-    updateGeo({
-      selectedWard: ward,
-      id: null,
-      selectedErf: null,
-    });
-    setWardDialogOpen(false);
-    onRefreshCamera();
   };
 
-  // 🎯 REPORTING: Update GeoContext for Erf changes
-  const handleErfSelect = (erf) => {
-    updateGeo({
-      id: erf.id,
-      selectedErf: erf,
+  // 🎯 TACTICAL FILTER ENGINE
+  const filteredList = useMemo(() => {
+    if (!searchQuery) return all.prems;
+
+    const query = searchQuery.toLowerCase();
+    return all.prems.filter((p) => {
+      const addr = p.address;
+      const searchString = `
+      ${p.id} 
+      ${addr?.strNo} 
+      ${addr?.strName} 
+      ${p?.propertyType?.type}
+    `.toLowerCase();
+
+      return searchString.includes(query);
     });
-    setErfDialogOpen(false);
-    onRefreshCamera();
+  }, [searchQuery, all.prems]);
+
+  // Inside GeoCascadingSelector component
+  const handleCenterOnMe = async () => {
+    try {
+      console.log("🛰️ Pilot: Requesting GPS lock...");
+
+      // 🛡️ Guard 1: Check Permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        console.warn("⚠️ Pilot: Location permission denied.");
+        return;
+      }
+
+      // 🛡️ Guard 2: High-Accuracy Lock
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      const { latitude, longitude } = location.coords;
+      console.log(`🎯 Pilot: User position secured: ${latitude}, ${longitude}`);
+
+      // ✈️ Execute the Flight (Target: User's 10-meter radius)
+      // We wrap it in an array to satisfy our flyTo validator
+      flyTo([{ latitude, longitude }], 100);
+    } catch (error) {
+      console.error("❌ Pilot: GPS acquisition failed", error);
+    }
   };
+
+  // 🎯 Data Extraction for the Labels
+  const selectedMeter = geoState?.selectedMeter;
+  const meterNoStr = selectedMeter?.ast?.astData?.astNo
+    ? `Mtr ${selectedMeter.ast.astData.astNo}`
+    : "Meter";
+
+  // 🏷️ Using the logic we built yesterday for Erf + Ward No
+  const rawWardName = selectedErf?.admin?.ward?.name || "";
+  const wardNoDigits = rawWardName.replace(/\D/g, "");
+  const erfLabelStr = selectedErf?.erfNo
+    ? `Erf ${selectedErf.erfNo}${wardNoDigits ? ` (W${wardNoDigits})` : ""}`
+    : "Erf";
 
   return (
-    <View style={{ padding: 12, backgroundColor: "rgba(255,255,255,0.95)" }}>
-      {/* 🏛️ 1. MUNICIPALITY */}
-      <List.Item
-        title={activeWorkbase?.name || "Local Municipality"}
-        titleStyle={activeStyle}
-        description="Active Workbase"
-        left={(p) => (
-          <List.Icon {...p} icon="office-building" color="#2563eb" />
-        )}
-        onPress={() => {
-          updateGeo({ sekectedWard: null, id: null, selectedErf: null });
-          onRefreshCamera();
-        }}
-      />
-
-      {/* 🏛️ 2. WARD SELECTION */}
-      <View>
-        <List.Item
-          title={
-            selectedWard
-              ? `Ward ${selectedWard.code || selectedWard.number}`
-              : "Select Ward"
-          }
-          titleStyle={selectedWard ? activeStyle : {}}
-          description={
-            wardsLoading && wards.length === 0
-              ? "Loading..."
-              : `${wards.length} wards available`
-          }
-          onPress={() => setWardDialogOpen(true)}
-          left={(p) => (
-            <List.Icon
-              {...p}
-              icon="map-marker-radius"
-              color={selectedWard ? "#2563eb" : p.color}
-            />
-          )}
-          right={(p) => (
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              {selectedWard && (
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <IconButton
-                    icon="target"
-                    iconColor="#2563eb"
-                    size={20}
-                    onPress={() => onRefreshCamera()}
-                  />
-                  <IconButton
-                    icon="close-circle-outline"
-                    iconColor="#dc2626"
-                    size={24}
-                    onPress={() => {
-                      updateGeo({
-                        selectedWard: null,
-                        id: null,
-                        selectedErf: null,
-                      });
-                      onRefreshCamera();
-                    }}
-                  />
-                </View>
-              )}
-              {wardsLoading && wards.length === 0 ? (
-                <ActivityIndicator size="small" />
-              ) : (
-                <List.Icon {...p} icon="chevron-down" />
-              )}
-            </View>
-          )}
-        />
-      </View>
-
-      {/* 🏛️ 3. ERF SELECTION */}
-      <View>
-        <List.Item
-          title={selectedErf ? `ERF ${selectedErf.erfNo}` : "Select ERF"}
-          titleStyle={selectedErf ? activeStyle : {}}
-          disabled={!wardId}
-          description={
-            !wardId ? "Select ward first" : `${filteredErfs.length} ERFs found`
-          }
-          onPress={() => filteredErfs.length && setErfDialogOpen(true)}
-          left={(p) => (
-            <List.Icon
-              {...p}
-              icon="home-map-marker"
-              color={selectedErf ? "#2563eb" : p.color}
-            />
-          )}
-          right={(p) => (
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              {selectedErf && (
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <IconButton
-                    icon="target"
-                    iconColor="#2563eb"
-                    size={20}
-                    onPress={() => onRefreshCamera()}
-                  />
-                  <IconButton
-                    icon="close-circle-outline"
-                    iconColor="#dc2626"
-                    size={24}
-                    onPress={() => {
-                      updateGeo({ id: null, selectedErf: null });
-                      onRefreshCamera();
-                    }}
-                  />
-                </View>
-              )}
-              <List.Icon {...p} icon="chevron-down" />
-            </View>
-          )}
-        />
-      </View>
-
+    <>
       <Portal>
-        <Dialog
-          visible={wardDialogOpen}
-          onDismiss={() => setWardDialogOpen(false)}
+        {/* WARD MODAL */}
+        <Modal
+          visible={showWards}
+          onDismiss={() => setShowWards(false)}
+          contentContainerStyle={styles.modalContainer}
         >
-          <Dialog.Title>Select Ward</Dialog.Title>
-          <Dialog.Content style={{ height: 400 }}>
-            <FlashList
-              data={wards}
-              keyExtractor={(i) => i.id}
-              estimatedItemSize={50}
-              renderItem={({ item }) => (
-                <List.Item
-                  title={`Ward ${item.code || item.number}`}
-                  onPress={() => handleWardSelect(item)}
-                />
-              )}
-            />
-          </Dialog.Content>
-        </Dialog>
+          <Surface style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {/* 🎯 SANITIZED TITLE */}
+              {`${lmNameStr} : All Wards`}
+            </Text>
 
-        <Dialog
-          visible={erfDialogOpen}
-          onDismiss={() => setErfDialogOpen(false)}
+            <ScrollView style={{ maxHeight: 400 }}>
+              {all?.wards?.map((ward, index) => {
+                // console.log(`GeoCascadingSelector----modal ----ward`, ward);
+
+                // 🛡️ Force item text to be a string
+                const wardLabel = `${ward?.name || ward?.code || `Ward ${index + 1}`}`;
+                // console.log(
+                //   `GeoCascadingSelector----modal ----wardLabel`,
+                //   wardLabel,
+                // );
+                return (
+                  <TouchableOpacity
+                    key={`ward-full-${ward?.id || index}`}
+                    style={styles.wardItem}
+                    onPress={() => selectWard(ward)}
+                  >
+                    <Text style={styles?.wardText}>{wardLabel}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Surface>
+        </Modal>
+
+        {/* PREMISE MODAL */}
+        <Modal
+          visible={showPrems}
+          onDismiss={() => {
+            setShowPrems(false);
+            setSearchQuery("");
+          }}
+          contentContainerStyle={styles.modalContainer}
         >
-          <Dialog.Title>Select ERF</Dialog.Title>
-          <Dialog.Content style={{ height: 400 }}>
-            <TextInput
-              mode="outlined"
-              placeholder="Search ERF Number..."
-              value={erfSearch}
-              onChangeText={setErfSearch}
-              style={{ marginBottom: 10 }}
+          <Surface style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {`Premises (${filteredList.length})`}
+            </Text>
+
+            <Searchbar
+              placeholder="Search..."
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+              style={styles.searchBar}
             />
-            <FlashList
+
+            <FlatList
+              data={filteredList}
+              keyExtractor={(item, index) => `${item.id || index}`}
+              style={{ maxHeight: 400 }}
+              renderItem={({ item: p }) => {
+                const addr = p.address;
+                const formattedAddr = addr
+                  ? `${addr.strNo} ${addr.strName} ${addr.strType}`
+                  : "No Address";
+                const pType = `${p?.propertyType?.type || "Unknown"}`;
+                return (
+                  <TouchableOpacity
+                    style={styles.wardItem}
+                    onPress={() => selectPremise(p)}
+                  >
+                    <Text
+                      style={styles.wardText}
+                    >{`${pType} - ${formattedAddr}`}</Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </Surface>
+        </Modal>
+
+        <Modal
+          visible={showErfs}
+          onDismiss={() => setShowErfs(false)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          <Surface style={styles.modalContent}>
+            <Text
+              style={styles.modalTitle}
+            >{`Erfs (${filteredErfs.length})`}</Text>
+            <Searchbar
+              placeholder="Search Erf No..."
+              onChangeText={setErfSearchQuery}
+              value={erfSearchQuery}
+              style={styles.searchBar}
+            />
+            <FlatList
               data={filteredErfs}
-              keyExtractor={(i) => i.id}
-              estimatedItemSize={60}
-              renderItem={({ item }) => (
-                <List.Item
-                  title={`ERF ${item.erfNo}`}
-                  description={`ID: ${item.id}`}
-                  onPress={() => handleErfSelect(item)}
-                />
-              )}
+              keyExtractor={(item) => `${item?.id}`}
+              style={{ maxHeight: 400 }}
+              renderItem={({ item: e }) => {
+                // 🛡️ 1. Extract Ward Digits from "Ward X"
+                const rawWardName = e?.admin?.ward?.name || "";
+                const wardNo = rawWardName.replace(/\D/g, "");
+
+                // 🛡️ 2. Build the display string
+                const displayLabel = `ERF ${e?.erfNo || "N/A"}${wardNo ? ` (W${wardNo})` : ""}`;
+
+                return (
+                  <TouchableOpacity
+                    style={styles.wardItem}
+                    onPress={() => selectErf(e)}
+                  >
+                    {/* <Text style={styles.wardText}>{displayLabel}</Text> */}
+                    <Text style={styles.wardText}>
+                      {`ERF ${e?.erfNo || "N/A"} `}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          color: "#94a3b8",
+                          fontWeight: "400",
+                        }}
+                      >
+                        {wardNo ? `(W${wardNo})` : ""}
+                      </Text>
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
             />
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setErfDialogOpen(false)}>Close</Button>
-          </Dialog.Actions>
-        </Dialog>
+          </Surface>
+        </Modal>
+
+        <Modal
+          visible={showMeters}
+          onDismiss={() => setShowMeters(false)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          <Surface style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {`Meters (${filteredMeters.length})`}
+            </Text>
+
+            <Searchbar
+              placeholder="Search Meter No..."
+              onChangeText={setMeterSearchQuery}
+              value={meterSearchQuery}
+              style={styles.searchBar}
+            />
+
+            <FlatList
+              data={filteredMeters}
+              keyExtractor={(item) => `${item?.id}`}
+              style={{ maxHeight: 400 }}
+              renderItem={({ item: m }) => {
+                // 🛡️ 1. Extract Parent Info for metadata
+                const erfNo = m?.accessData?.erfNo || "N/A";
+                const meterNo = m?.ast?.astData?.astNo || "N/A";
+                const isWater = m?.meterType === "water";
+
+                return (
+                  <TouchableOpacity
+                    style={styles.wardItem} // Reusing the same "Sexy" style
+                    onPress={() => {
+                      // ✈️ Trigger the Global Selection logic
+                      selectMeter(m);
+                      setShowMeters(false);
+                    }}
+                  >
+                    <View
+                      style={{ flexDirection: "row", alignItems: "center" }}
+                    >
+                      <MaterialCommunityIcons
+                        name={isWater ? "water" : "lightning-bolt"}
+                        size={18}
+                        color={isWater ? "#3b82f6" : "#eab308"}
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text style={styles.wardText}>
+                        {`MTR ${meterNo} `}
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            color: "#94a3b8",
+                            fontWeight: "400",
+                          }}
+                        >
+                          {` (ERF ${erfNo})`}
+                        </Text>
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </Surface>
+        </Modal>
       </Portal>
-    </View>
+
+      <View style={styles.container}>
+        {/* 🏛️ ROW 1: THE ADMINISTRATION & PILOT */}
+        <View style={styles.buttonRow}>
+          <Button
+            mode="contained"
+            icon="city"
+            onPress={handleLmJump}
+            style={[styles.pill, styles.lmPill]}
+            labelStyle={styles.labelText}
+            contentStyle={styles.buttonContent}
+            numberOfLines={1}
+          >
+            {lmNameStr}
+          </Button>
+
+          <View style={{ width: 6 }} />
+
+          <Button
+            mode="contained"
+            icon="layers-outline"
+            onPress={() => setShowWards(true)}
+            style={[styles.pill, styles.wardPill]}
+            labelStyle={styles.labelText}
+            contentStyle={styles.buttonContent}
+          >
+            {wardNameStr}
+          </Button>
+
+          <View style={{ width: 6 }} />
+
+          {/* 🛰️ THE "ME" BEACON */}
+          <TouchableOpacity
+            style={[styles.pill, styles.locationButtonRowVersion]}
+            onPress={handleCenterOnMe}
+          >
+            <MaterialCommunityIcons
+              name="account-search"
+              size={20}
+              color="white"
+            />
+            <Text style={styles.locationTextSmall}>ME</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 🏛️ ROW 2: THE INFRASTRUCTURE (The Drill-Down) */}
+        <View style={[styles.buttonRow, { marginTop: 8 }]}>
+          <Button
+            mode="contained"
+            icon="map-marker-path"
+            onPress={() => setShowErfs(true)}
+            style={[styles.pill, styles.erfPill]}
+            labelStyle={styles.labelText}
+            contentStyle={styles.buttonContent}
+          >
+            {erfLabelStr}
+          </Button>
+
+          <View style={{ width: 6 }} />
+
+          <Button
+            mode="contained"
+            icon="home-city"
+            onPress={() => setShowPrems(true)}
+            style={[styles.pill, styles.premPill]}
+            labelStyle={styles.labelText}
+            contentStyle={styles.buttonContent}
+          >
+            {premiseIdStr}
+          </Button>
+
+          <View style={{ width: 6 }} />
+
+          {/* ⚡ THE ASSET SELECTOR */}
+          <Button
+            mode="contained"
+            icon="water-pump"
+            onPress={() => setShowMeters(true)}
+            style={[styles.pill, styles.meterPill]}
+            labelStyle={styles.labelText}
+            contentStyle={styles.buttonContent}
+          >
+            {meterNoStr}
+          </Button>
+        </View>
+      </View>
+    </>
   );
 }
+
+const styles = StyleSheet.create({
+  buttonHeight: { height: 54 },
+  modalContainer: { padding: 20, justifyContent: "center" },
+  modalContent: {
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 20,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+    textAlign: "center",
+    color: "#1e293b",
+  },
+  wardItem: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  wardText: { fontSize: 16, color: "#334155" },
+
+  // container: {
+  //   position: "absolute",
+  //   bottom: -15,
+  //   left: 10,
+  //   right: 10,
+  //   flexDirection: "row", // 🎯 The Split
+  //   zIndex: 100,
+  //   gap: 8,
+  // },
+  leftColumn: {
+    flex: 4, // Takes most of the width
+    flexDirection: "column",
+  },
+  // buttonRow: {
+  //   flexDirection: "row",
+  //   alignItems: "center",
+  // },
+  locationButton: {
+    flex: 1,
+    backgroundColor: "#7894aa",
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: "white",
+  },
+  locationText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 2,
+  },
+
+  // pill: {
+  //   flex: 1,
+  //   borderRadius: 14, // Slightly rounder for that "sexy" look
+  //   backgroundColor: "rgba(241, 245, 249, 0.95)", // 🛡️ Light Slate Grey / 95% Opaque
+  //   elevation: 3,
+  //   borderWidth: 0.5,
+  //   borderColor: "rgba(42, 57, 75, 0.5)", // Soft border
+  // },
+  lmPill: {},
+  wardPill: {},
+  erfPill: {},
+  premPill: {},
+
+  labelText: {
+    fontSize: 11, // Slightly smaller for elegance
+    fontWeight: "800",
+    color: "#334155", // Deep Slate for readability against light grey
+    letterSpacing: 0.3,
+  },
+
+  // buttonContent: {
+  //   height: 50,
+  // },
+
+  container: {
+    position: "absolute",
+    bottom: 25,
+    left: 10,
+    right: 10,
+    zIndex: 100,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  pill: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: "rgba(241, 245, 249, 0.95)", // Sexy Light Grey
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "rgba(203, 213, 225, 0.5)",
+  },
+  buttonContent: {
+    height: 52,
+  },
+  locationButtonRowVersion: {
+    backgroundColor: "#ef4444", // Sovereign Red
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    height: 52,
+  },
+  locationTextSmall: {
+    color: "white",
+    fontSize: 11,
+    fontWeight: "900",
+    marginLeft: 4,
+  },
+  // labelText: {
+  //   fontSize: 10,
+  //   fontWeight: "800",
+  //   color: "#334155"
+  // },
+});

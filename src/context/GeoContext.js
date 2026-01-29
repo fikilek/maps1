@@ -24,6 +24,7 @@ export const GeoProvider = ({ children }) => {
     return saved ? JSON.parse(saved) : INITIAL_GEO;
   });
   // console.log(`GeoProvider ----geoState`, geoState);
+  // console.log(`GeoProvider ----geoState?.selectedErf`, geoState?.selectedErf);
 
   // 🏛️ 2. The Law of the Land: Life and Death
 
@@ -88,7 +89,7 @@ export const GeoProvider = ({ children }) => {
     if (remoteLmDoc && geoState.selectedLm?.id !== remoteLmDoc.id) {
       updateGeo({ selectedLm: remoteLmDoc });
     }
-  }, [remoteLmDoc]);
+  }, [remoteLmDoc, geoState.selectedLm?.id]);
 
   // 🏛️ 4. Persistent Mirror (Flight Recorder)
   useEffect(() => {
@@ -123,7 +124,7 @@ export const GeoProvider = ({ children }) => {
   };
 
   return (
-    <GeoContext.Provider value={{ geoState, updateGeo }}>
+    <GeoContext.Provider value={{ geoState, setGeoState }}>
       {children}
     </GeoContext.Provider>
   );

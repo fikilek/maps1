@@ -1,9 +1,15 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ActivityIndicator } from "react-native-paper";
+import {
+  ActivityIndicator,
+  Button,
+  Modal,
+  Portal,
+  Surface,
+} from "react-native-paper";
 import { useGeo } from "../../../src/context/GeoContext";
 import { useWarehouse } from "../../../src/context/WarehouseContext";
 
@@ -17,6 +23,11 @@ const PremiseItem = memo(function PremiseItem({
   onInstall,
   onDetailPress,
 }) {
+  const addressStr =
+    `${item?.address?.strNo || ""} ${item?.address?.strName || ""} ${item?.address?.strType || ""}`.trim();
+  const propertyTypeStr = `${item?.propertyType?.type || "Residential"}`;
+  const erfIdStr = `${item?.erfId || item?.erfNo || "N/A"}`;
+
   return (
     <TouchableOpacity
       style={styles.card}
@@ -27,12 +38,10 @@ const PremiseItem = memo(function PremiseItem({
       <View style={styles.cardHeader}>
         <View style={styles.addressSection}>
           <Text style={styles.addressText} numberOfLines={1}>
-            {item.address?.strNo} {item.address?.strName}{" "}
-            {item.address?.strType}
+            {addressStr || "No Address Found"}
           </Text>
           <Text style={styles.propertyTypeText}>
-            {item.propertyType?.type || "Residential"}{" "}
-            {item.propertyType?.name ? `• ${item.propertyType.name}` : ""}
+            {`${propertyTypeStr}${item?.propertyType?.name ? ` • ${item?.propertyType.name}` : ""}`}
           </Text>
         </View>
 
@@ -60,10 +69,12 @@ const PremiseItem = memo(function PremiseItem({
             size={14}
             color="#64748b"
           />
-          <Text style={styles.erfLabel}>ERF {item.erfId || "N/A"}</Text>
+          {/* <Text style={styles.erfLabel}>ERF {item?.erfId || "N/A"}</Text> */}
+          <Text style={styles.erfLabel}>{`ERF ${erfIdStr}`}</Text>
         </View>
 
         <View style={styles.meterStats}>
+          {/* ⚡ Electricity Count */}
           <View style={styles.statItem}>
             <MaterialCommunityIcons
               name="lightning-bolt"
@@ -71,13 +82,21 @@ const PremiseItem = memo(function PremiseItem({
               color="#EAB308"
             />
             <Text style={styles.statCount}>
-              {item.services?.electricityMeter || 0}
+              {/* 🎯 Count the IDs in the array, default to 0 if empty/missing */}
+              {Array.isArray(item?.services?.electricityMeters)
+                ? item?.services?.electricityMeters?.length
+                : 0}
             </Text>
           </View>
+
+          {/* 💧 Water Count */}
           <View style={[styles.statItem, { marginLeft: 12 }]}>
             <MaterialCommunityIcons name="water" size={16} color="#3B82F6" />
             <Text style={styles.statCount}>
-              {item.services?.waterMeter || 0}
+              {/* 🎯 Count the IDs in the array, default to 0 if empty/missing */}
+              {Array.isArray(item?.services?.waterMeters)
+                ? item?.services?.waterMeters?.length
+                : 0}
             </Text>
           </View>
         </View>
@@ -118,7 +137,44 @@ PremiseItem.displayName = "PremiseItem";
 export default function PremisesScreen() {
   const router = useRouter();
   const { filtered, loading } = useWarehouse();
+  // console.log(`GeoProvider ----filtered`, filtered);
+
   const { geoState, updateGeo } = useGeo();
+
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [selectedPremise, setSelectedPremise] = useState(null);
+
+  // Local state for the "Pre-Flight" decisions
+  const [hasAccess, setHasAccess] = useState(true);
+  const [meterType, setMeterType] = useState("");
+
+  const handleOpenDiscovery = (p) => {
+    setSelectedPremise(p);
+    setIsModalVisible(true);
+  };
+
+  // 3. The Modal's confirm button "reads" from the state
+  const handleConfirmMission = () => {
+    if (!selectedPremise) return; // Safety check
+
+    setIsModalVisible(false);
+
+    // 🎯 Use the data we stored in 'selectedPremise'
+    router.push({
+      pathname: "/(tabs)/premises/form",
+      params: {
+        premiseId: selectedPremise?.id,
+        address:
+          `${selectedPremise?.address?.strNo || ""} ${selectedPremise?.address?.strName || ""}  ${selectedPremise?.address?.strType || ""}`?.trim(),
+        erfNo: selectedPremise?.erfNo,
+        // Pass our toggles
+        action: JSON.stringify({
+          access: hasAccess ? "yes" : "no",
+          meterType: meterType,
+        }),
+      },
+    });
+  };
 
   const sortedPremises = useMemo(() => {
     return [...(filtered?.prems || [])].sort((a, b) => {
@@ -126,7 +182,7 @@ export default function PremisesScreen() {
       const dateB = new Date(b.metadata?.updatedAt?.timestamp || 0).getTime();
       return dateB - dateA;
     });
-  }, [filtered.prems]);
+  }, [filtered?.prems]);
   // console.log(`PremisesScreen ----sortedPremises`, sortedPremises);
 
   if (loading) {
@@ -141,18 +197,18 @@ export default function PremisesScreen() {
     <View style={styles.container}>
       <FlashList
         data={sortedPremises}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item?.id}
         estimatedItemSize={180}
         contentContainerStyle={{ padding: 12 }}
         ListHeaderComponent={() => (
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>
-              {geoState.selectedErf
-                ? `ERF ${geoState.selectedErf.erfNo}`
+              {geoState?.selectedErf
+                ? `ERF ${geoState?.selectedErf?.erfNo}`
                 : "All Premises"}
             </Text>
             <Text style={styles.headerSubtitle}>
-              {geoState.selectedWard || "All Wards"} • {sortedPremises.length}{" "}
+              {geoState?.selectedWard || "All Wards"} • {sortedPremises?.length}{" "}
               Units Found
             </Text>
           </View>
@@ -172,27 +228,85 @@ export default function PremisesScreen() {
         renderItem={({ item }) => (
           <PremiseItem
             item={item}
-            onDetailPress={(p) => router.push(`/erfs/${p.erfId}`)}
+            onDetailPress={(p) => router.push(`/erfs/${p?.erfId}`)}
             onMapPress={(p) => {
-              updateGeo({ selectedErf: { id: p.erfId, erfNo: p.erfId } });
+              updateGeo({ selectedErf: { id: p?.erfId, erfNo: p?.erfId } });
               router.push("/(tabs)/maps");
             }}
-            onDiscover={(p) => {
-              // console.log(`PremisesScreen ----p`, p);
-              router.push({
-                pathname: "/(tabs)/premises/form", // Points to app/(tabs)/premises/form.js
-                params: {
-                  premiseId: p.id,
-                  address:
-                    `${p.address?.strNo || ""} ${p.address?.strName || ""} ${p.address?.strType || ""}`.trim(),
-                  erfNo: p?.erfNo,
-                },
-              });
-            }}
-            onInstall={(p) => console.log("Installing meter for:", p.id)}
+            onDiscover={(p) => handleOpenDiscovery(p)}
+            onInstall={(p) => console.log("Installing meter for:", p?.id)}
           />
         )}
       />
+
+      <Portal>
+        <Modal
+          visible={isModalVisible}
+          onDismiss={() => setIsModalVisible(false)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          <Text variant="headlineSmall" style={styles.modalTitle}>
+            Mission Discovery
+          </Text>
+          <Text variant="bodyMedium" style={styles.modalSubtitle}>
+            Select the current situation:
+          </Text>
+
+          {/* 🎯 1. ACCESS TOGGLE */}
+          <Surface style={styles.modalCard} elevation={1}>
+            <Text variant="labelLarge">Access Status</Text>
+            <View style={styles.toggleRow}>
+              <Button
+                mode={hasAccess ? "contained" : "outlined"}
+                onPress={() => setHasAccess(true)}
+                style={styles.toggleButton}
+              >
+                ACCESS
+              </Button>
+              <Button
+                mode={!hasAccess ? "contained" : "outlined"}
+                onPress={() => setHasAccess(false)}
+                style={styles.toggleButton}
+                buttonColor={!hasAccess ? "#B22222" : null} // Red for No Access
+              >
+                NO ACCESS
+              </Button>
+            </View>
+          </Surface>
+
+          {/* 🎯 2. METER TYPE TOGGLE (Only show if Access is YES) */}
+          {hasAccess && (
+            <Surface style={styles.modalCard} elevation={1}>
+              <Text variant="labelLarge">Resource Type</Text>
+              <View style={styles.toggleRow}>
+                <Button
+                  mode={meterType === "water" ? "contained" : "outlined"}
+                  onPress={() => setMeterType("water")}
+                  style={styles.toggleButton}
+                >
+                  WATER
+                </Button>
+                <Button
+                  mode={meterType === "electricity" ? "contained" : "outlined"}
+                  onPress={() => setMeterType("electricity")}
+                  style={styles.toggleButton}
+                >
+                  ELECTRICITY
+                </Button>
+              </View>
+            </Surface>
+          )}
+
+          <Button
+            mode="contained"
+            onPress={handleConfirmMission}
+            style={styles.confirmButton}
+            contentStyle={{ height: 50 }}
+          >
+            START DISCOVERY
+          </Button>
+        </Modal>
+      </Portal>
     </View>
   );
 }
@@ -293,4 +407,39 @@ const styles = StyleSheet.create({
 
   emptyContainer: { alignItems: "center", marginTop: 100 },
   emptyText: { color: "#94A3B8", marginTop: 12, fontWeight: "600" },
+
+  modalContainer: {
+    backgroundColor: "white",
+    padding: 20,
+    margin: 20,
+    borderRadius: 12,
+  },
+  modalTitle: {
+    textAlign: "center",
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+  modalSubtitle: {
+    textAlign: "center",
+    marginBottom: 20,
+    color: "#666",
+  },
+  modalCard: {
+    padding: 15,
+    marginBottom: 15,
+    borderRadius: 8,
+    backgroundColor: "#f9f9f9",
+  },
+  toggleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  toggleButton: {
+    flex: 0.48,
+  },
+  confirmButton: {
+    marginTop: 10,
+    borderRadius: 8,
+  },
 });
