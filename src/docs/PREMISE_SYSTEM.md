@@ -10,23 +10,35 @@
 
 This table defines the forensic life-cycle of every data point in the Premise object.
 
-| Data Item               | Type      | Rules & Validation          | Default          | Journey / Evolution                                             | Description                                                              |
-| :---------------------- | :-------- | :-------------------------- | :--------------- | :-------------------------------------------------------------- | :----------------------------------------------------------------------- |
-| **id**                  | `string`  | Unique, Immutable           | `PRM_{ts}_{erf}` | **Form:** Generated on Mount -> **Firestore:** Document ID      | The primary key. Built from timestamp and ErfNo to ensure no collisions. |
-| **erfId**               | `string`  | Mandatory                   | `id` from URL    | **Context:** Injected from `useLocalSearchParams`               | The link to the parent land parcel. Used for indexing.                   |
-| **address.strNo**       | `string`  | Required, Alpha-numeric     | `""`             | **Form:** Input -> **UI:** Displayed on Premise Card            | The street number. Can include letters (e.g., 12A).                      |
-| **address.strName**     | `string`  | Required, Title Case        | `""`             | **Form:** Auto-capitalized on change                            | The official name of the street.                                         |
-| **propertyType.type**   | `enum`    | Required, Must match Matrix | `"RESD"`         | **Form:** Picker -> **CF:** Determines spawning logic           | Determines if we create 1 main house or a block of units.                |
-| **structure.backrooms** | `number`  | Integer >= 0                | `0`              | **Form:** Counter -> **CF:** Triggers loop to create N premises | Critical for infrastructure load analysis.                               |
-| **geometry.centroid**   | `array`   | Required, `[lat, lng]`      | `erfCentroid`    | **Form:** Manual Map Drag -> **Map:** Draggable Marker          | The "Human Truth" location of the building footprint.                    |
-| **isTownship**          | `boolean` | Required                    | `false`          | **Form:** Toggle -> **Firestore:** Filter key                   | Segregates data for municipal reporting (Township vs Suburb).            |
-| **metadata.lmPcode**    | `string`  | Mandatory                   | `geoState.lm.id` | **Submit:** Attached as payload key                             | The "Security Key" that ensures the data lands in the correct LM cache.  |
+| Field Path           | Type     | Design Story & Evolution                                 | Validation |
+| :------------------- | :------- | :------------------------------------------------------- | :--------- |
+| **id**               | `string` | `PRM_{timestamp}_{erfNo}`. The immutable primary key.    | Required   |
+| **erfId**            | `string` | The heavy ID for the parent Erf (link to geoLibrary).    | Required   |
+| **erfNo**            | `string` | Redundant for fast list filtering and UI display.        | Required   |
+| **context**          | `string` | Allowed: `suburb` OR `township`.                         | Required   |
+| **address**          | `object` | `{ strNo, strName, strType }`. Street address.           | Required   |
+| **geometry**         | `object` | `{ centroid: [lat, lng] }`. The human-verified anchor.   | Required   |
+| **propertyType**     | `object` | `{ type, unitName, unitNo     }`. (Renamed from 'name'). | Required   |
+| **occupancy.status** | `enum`   | [See Status List Below]                                  | Required   |
+| **services**         | `object` | `{ waterMeters: [IDs], electricityMeters: [IDs] }`.      | Required   |
+| **metadata**         | `object` | Includes `created`, `updated`, and `lmPcode`.            | Required   |
+| **parents**          | `object` | DM, LM, and Province IDs for regional reporting.         | Required   |
 
 # PREMISE_SYSTEM Documentation
 
 ## Overview
 
 This document contains system documentation for the PREMISE system within the maps1 project.
+
+### 🛠️ Occupancy Status Registry
+
+The following values are the only allowed inputs for `occupancy.status`:
+
+1. `OCCUPIED` - Standard usage.
+2. `UNOCCUPIED` - No sign of life/usage.
+3. `VANDALISED` - Infrastructure stripped or damaged.
+4. `UNDER_CONSTRUCTION` - Active building site.
+5. `DILAPIDATED` - Structurally unsound/ruins.
 
 ## File Location
 
