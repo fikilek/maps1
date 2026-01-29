@@ -24,33 +24,6 @@ This table defines the forensic life-cycle of every data point in the Premise ob
 | **metadata**         | `object` | Includes `created`, `updated`, and `lmPcode`.            | Required   |
 | **parents**          | `object` | DM, LM, and Province IDs for regional reporting.         | Required   |
 
-|     | Premise Schema              |        |               |                  |                                     |                          |            |
-| --- | --------------------------- | ------ | ------------- | ---------------- | ----------------------------------- | ------------------------ | ---------- |
-| #   |  Path                       | Type   | default value | allowed valuees  | Description                         | Design Story & Evolution | Validation |
-| 1   | id                          | string |               |                  | uniquie identifier for each premise |                          | required   |
-| 2   | erfId                       | string |               |                  | id of the premise parent erf        |                          | required   |
-| 3   | erfNo                       | string |               |                  | erfNo of the parent erf             |                          | required   |
-| 4   | context                     | string |               | township, suburb |                                     |                          | required   |
-| 5   | address.strNo               | string |               |                  |                                     |                          | required   |
-| 6   | address.strName             | string |               |                  |                                     |                          | required   |
-| 7   | address.strType             | string |               |                  |                                     |                          | required   |
-| 8   | geometry.lat                | number |               |                  |                                     |                          | required   |
-| 9   | geometry.lng                | number |               |                  |                                     |                          | required   |
-| 10  | propertyType.type           | string |               |                  |                                     |                          | required   |
-| 11  | propertyType.unitName       | string |               |                  |                                     |                          | required   |
-| 12  | propertyType.unitNo         | string |               |                  |                                     |                          | required   |
-| 13  | services .waterMeters       | array  |               |                  |                                     |                          | required   |
-| 14  | services .electricityMeters | array  |               |                  |                                     |                          | required   |
-| 15  | metadata.created.at         | string |               |                  |                                     |                          | required   |
-| 16  | metadata.created.byUid      | string |               |                  |                                     |                          | required   |
-| 17  | metadata.created.byUser     | string |               |                  |                                     |                          | required   |
-| 18  | metadata.updated.at         | string |               |                  |                                     |                          | required   |
-| 19  | metadata.updated.byUid      | string |               |                  |                                     |                          | required   |
-| 20  | metadata.updated.byUser     | string |               |                  |                                     |                          | required   |
-| 21  | parents.lmId                | string |               |                  |                                     |                          | required   |
-| 22  | parents.dmId                | string |               |                  |                                     |                          | required   |
-| 23  | parents.provinceId          | string |               |                  |                                     |                          | required   |
-
 # PREMISE_SYSTEM Documentation
 
 ## Overview
