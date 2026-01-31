@@ -9,8 +9,8 @@ import {
   View,
 } from "react-native";
 import { useSelector } from "react-redux";
-import { useGeo } from "../context/GeoContext"; // 🎯 Import GeoContext
-import { useWarehouse } from "../context/WarehouseContext"; // 🎯 Import Warehouse
+import { useGeo } from "../context/GeoContext";
+import { useWarehouse } from "../context/WarehouseContext";
 import { erfsApi } from "../redux/erfsApi";
 import { premisesApi } from "../redux/premisesApi";
 import { erfMemory } from "../storage/erfMemory";
@@ -21,23 +21,15 @@ const EMPTY_PREMS = [];
 
 const StealthAuditor = ({ lmPcode = "ZA1048" }) => {
   const [visible, setVisible] = useState(false);
-
-  // 🏛️ WAREHOUSE & GEO CONTEXT
   const warehouse = useWarehouse();
-  // console.log(` `);
-  // console.log(
-  //   `StealthAuditor ----warehouse?.all?.erfs?.length`,
-  //   warehouse?.all?.erfs?.length,
-  // );
   const { geoState } = useGeo();
 
-  // 🧠 DIRECT RAM READ (Redux Cache)
+  // 🧠 REDUX CACHE SELECTORS (RAM)
   const ramErfData = useSelector(
     (state) =>
       erfsApi.endpoints.getErfsByLmPcode.select({ lmPcode })(state)?.data ||
       EMPTY_META,
   );
-
   const ramPremiseData = useSelector(
     (state) =>
       premisesApi.endpoints.getPremisesByLmPcode.select({ lmPcode })(state)
@@ -45,135 +37,79 @@ const StealthAuditor = ({ lmPcode = "ZA1048" }) => {
   );
 
   const auditReport = useMemo(() => {
-    // 1. Get whatever is on disk
+    // 💾 DISK DATA
     const diskRaw = erfMemory.getErfsMetaList(lmPcode);
-
-    // 🎯 SMART EXTRACTION:
-    // If it's an array, use it. If it's an object with metaEntries, use those.
     const diskErfs = Array.isArray(diskRaw)
       ? diskRaw
       : diskRaw?.metaEntries || [];
-
     const diskPremises = premiseMemory.getLmList(lmPcode) || [];
+    // console.log(`StealthAuditor ----diskErfs`, diskErfs);
+
+    // diskErfs?.map((erf) => console.log(`StealthAuditor ----id`, erf?.id));
+
+    // 🧠 RAM DATA
     const ramErfs = ramErfData?.metaEntries || [];
 
-    // 🛡️ Safe Calculation helpers
-    const getLinks = (arr) =>
-      Array.isArray(arr)
-        ? arr.reduce((acc, e) => acc + (e.premises?.length || 0), 0)
-        : 0;
+    // 🎯 METER & LINK LOGIC
+    const countMeters = (prems) =>
+      prems.reduce(
+        (acc, p) => ({
+          water: acc.water + (p.services?.waterMeters?.length || 0),
+          elec: acc.elec + (p.services?.electricityMeters?.length || 0),
+        }),
+        { water: 0, elec: 0 },
+      );
 
-    const totalRamLinks = getLinks(ramErfs);
-    const totalDiskLinks = getLinks(diskErfs);
+    const ramMeters = countMeters(ramPremiseData);
+    const diskMeters = countMeters(diskPremises);
+
+    // 🏘️ TABLE 1: Erfs with Premises (Rule 2)
+    const linkedErfs = diskErfs
+      .filter((e) => e.premises?.length > 0)
+      .map((e) => ({ erfNo: e.erfNo, count: e.premises.length }));
+
+    // 📟 TABLE 2: Premises with Meters (Rule 3)
+    const premiseMeterLinks = diskPremises.map((p) => ({
+      erfNo: p.erfNo || "??",
+      id: p.id.slice(-6),
+      water: p.services?.waterMeters?.length || 0,
+      elec: p.services?.electricityMeters?.length || 0,
+    }));
 
     return {
       ram: {
         erfs: ramErfs.length,
         prems: ramPremiseData?.length || 0,
-        links: totalRamLinks,
+        meters: ramMeters.water + ramMeters.elec,
+        links: ramErfs.reduce((acc, e) => acc + (e.premises?.length || 0), 0),
       },
       disk: {
         erfs: diskErfs.length,
         prems: diskPremises.length,
-        links: totalDiskLinks,
+        meters: diskMeters.water + diskMeters.elec,
+        links: diskErfs.reduce((acc, e) => acc + (e.premises?.length || 0), 0),
       },
+      linkedErfs,
+      premiseMeterLinks,
       isSynced:
-        (ramErfData?.metaEntries?.length || 0) === diskErfs.length &&
-        (ramPremiseData?.length || 0) === diskPremises.length &&
-        totalRamLinks === totalDiskLinks,
+        ramErfs.length === diskErfs.length &&
+        ramPremiseData.length === diskPremises.length,
     };
   }, [ramErfData, ramPremiseData, lmPcode]);
-
-  // const auditReport = useMemo(() => {
-  //   // 🎯 FIX: erfMemory returns an object { metaEntries: [], geoEntries: {}, ... }
-  //   const diskRaw = erfMemory.getErfsMetaList(lmPcode);
-  //   const diskErfs = diskRaw?.metaEntries || []; // Extract the array here
-
-  //   const diskPremises = premiseMemory.getLmList(lmPcode) || [];
-
-  //   const ramErfs = ramErfData.metaEntries || [];
-
-  //   // 🛡️ Safety filters to ensure we are working with arrays
-  //   const ramLinkedErfs = Array.isArray(ramErfs)
-  //     ? ramErfs.filter((e) => e.premises?.length > 0)
-  //     : [];
-
-  //   const totalRamLinks = ramLinkedErfs.reduce(
-  //     (acc, e) => acc + (e.premises?.length || 0),
-  //     0,
-  //   );
-
-  //   // 🎯 This was the crashing line: now diskErfs is guaranteed to be an array
-  //   const diskLinkedErfs = diskErfs.filter((e) => e.premises?.length > 0);
-  //   const totalDiskLinks = diskLinkedErfs.reduce(
-  //     (acc, e) => acc + (e.premises?.length || 0),
-  //     0,
-  //   );
-
-  //   return {
-  //     ram: {
-  //       erfs: ramErfs.length,
-  //       prems: ramPremiseData?.length || 0,
-  //       links: totalRamLinks,
-  //     },
-  //     disk: {
-  //       erfs: diskErfs.length,
-  //       prems: diskPremises.length,
-  //       links: totalDiskLinks,
-  //     },
-  //     isSynced:
-  //       (ramPremiseData?.length || 0) === (diskPremises?.length || 0) &&
-  //       totalRamLinks === totalDiskLinks,
-  //   };
-  // }, [ramErfData, ramPremiseData, lmPcode]);
-
-  // const auditReport = useMemo(() => {
-  //   const diskErfs = erfMemory.getErfsMetaList(lmPcode) || [];
-  //   const diskPremises = premiseMemory.getLmList(lmPcode) || [];
-
-  //   const ramErfs = ramErfData.metaEntries || [];
-  //   const ramLinkedErfs = ramErfs?.filter((e) => e.premises?.length > 0);
-  //   const totalRamLinks = ramLinkedErfs.reduce(
-  //     (acc, e) => acc + (e.premises?.length || 0),
-  //     0,
-  //   );
-
-  //   const diskLinkedErfs = diskErfs?.filter((e) => e.premises?.length > 0);
-  //   const totalDiskLinks = diskLinkedErfs.reduce(
-  //     (acc, e) => acc + (e.premises?.length || 0),
-  //     0,
-  //   );
-
-  //   return {
-  //     ram: {
-  //       erfs: ramErfs?.length || [],
-  //       prems: ramPremiseData?.length || [],
-  //       links: totalRamLinks || [],
-  //     },
-  //     disk: {
-  //       erfs: diskErfs?.length || [],
-  //       prems: diskPremises?.length || [],
-  //       links: totalDiskLinks || [],
-  //     },
-  //     isSynced:
-  //       ramPremiseData?.length === diskPremises?.length &&
-  //       totalRamLinks === totalDiskLinks,
-  //   };
-  // }, [ramErfData, ramPremiseData, lmPcode]);
 
   return (
     <>
       <TouchableOpacity
         style={[
           styles.fab,
-          { backgroundColor: auditReport?.isSynced ? "#4CD964" : "#FF9500" },
+          { backgroundColor: auditReport.isSynced ? "#4CD964" : "#FF9500" },
         ]}
         onPress={() => setVisible(true)}
       >
         <Text style={styles.fabText}>📊</Text>
       </TouchableOpacity>
 
-      <Modal visible={visible} animationType="slide" transparent={false}>
+      <Modal visible={visible} animationType="slide">
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>System Diagnostic</Text>
@@ -186,7 +122,7 @@ const StealthAuditor = ({ lmPcode = "ZA1048" }) => {
           </View>
 
           <ScrollView style={styles.content}>
-            {/* SECTION 1: GEO CONTEXT (Current Selections) */}
+            {/* 📍 SECTION 1: GEO CONTEXT (The Compass) */}
             <Text style={styles.sectionTitle}>📍 GEO CONTEXT</Text>
             <View style={styles.contextCard}>
               <ContextRow
@@ -207,49 +143,85 @@ const StealthAuditor = ({ lmPcode = "ZA1048" }) => {
               />
             </View>
 
-            {/* SECTION 2: WAREHOUSE (The Logic Layer) */}
-            <Text style={styles.sectionTitle}>🏭 WAREHOUSE DASHBOARD</Text>
-            <View style={styles.statsContainer}>
-              <WarehouseCard
-                title="📦 ALL DATA"
-                stats={{
-                  erfs: warehouse?.all?.erfs?.length || [],
-                  wards: warehouse?.all?.wards?.length || [],
-                  prems: warehouse?.all?.prems?.length || [],
-                }}
-                color="#5856D6"
-              />
-              <WarehouseCard
-                title="🔍 FILTERED"
-                stats={{
-                  erfs: warehouse?.filtered?.erfs?.length || 0,
-                  wards: warehouse?.filtered?.wards?.length || 0,
-                  prems: warehouse?.filtered?.prems?.length || 0,
-                }}
-                color="#AF52DE"
-              />
-            </View>
-
-            {/* SECTION 3: STORAGE (RAM vs DISK) */}
+            {/* 💾 SECTION 2: STORAGE INTEGRITY (RAM vs DISK) */}
             <Text style={styles.sectionTitle}>💾 STORAGE INTEGRITY</Text>
             <View style={styles.statsContainer}>
               <AuditCard
                 title="🧠 RAM CACHE"
-                data={auditReport?.ram}
+                data={auditReport.ram}
                 color="#007AFF"
               />
               <AuditCard
                 title="💾 MMKV DISK"
-                data={auditReport?.disk}
+                data={auditReport.disk}
                 color="#4CD964"
               />
             </View>
 
-            {!auditReport?.isSynced && (
-              <View style={styles.warningBanner}>
-                <Text style={styles.warningText}>⚠️ DISK/RAM OUT OF SYNC</Text>
+            {/* 🏘️ SECTION 3: ERF LINKS (Rule 2) */}
+            <Text style={styles.sectionTitle}>🏘️ ERFS WITH PREMISE LINKS</Text>
+            <View style={styles.tableCard}>
+              <View style={styles.tableHeader}>
+                <Text style={{ flex: 2, fontSize: 10, fontWeight: "800" }}>
+                  Erf No
+                </Text>
+                <Text
+                  style={{
+                    flex: 1,
+                    fontSize: 10,
+                    fontWeight: "800",
+                    textAlign: "right",
+                  }}
+                >
+                  Total Prems
+                </Text>
               </View>
-            )}
+              {auditReport.linkedErfs.map((item, i) => {
+                console.log(`StealthAuditor ----item`, item);
+                return (
+                  <View key={i} style={styles.tableRow}>
+                    <Text style={{ flex: 2, fontWeight: "700" }}>
+                      {item.erfNo}
+                    </Text>
+                    <Text
+                      style={{
+                        flex: 1,
+                        textAlign: "right",
+                        color: "#059669",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {item.count}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* 📟 SECTION 4: PREMISE METERS (Rule 3) */}
+            <Text style={styles.sectionTitle}>📟 PREMISES WITH METERS</Text>
+            <View style={styles.tableCard}>
+              <View style={styles.tableHeader}>
+                <Text style={styles.tableColHead}>ERF</Text>
+                <Text style={styles.tableColHead}>PREM ID</Text>
+                <Text style={styles.tableColHead}>WTR</Text>
+                <Text style={styles.tableColHead}>ELC</Text>
+              </View>
+              {auditReport.premiseMeterLinks.map((p, i) => (
+                <View key={i} style={styles.tableRow}>
+                  <Text style={styles.tableColText}>{p.erfNo}</Text>
+                  <Text style={styles.tableColText}>{p.id}</Text>
+                  <Text style={[styles.tableColText, { color: "#3b82f6" }]}>
+                    {p.water}
+                  </Text>
+                  <Text style={[styles.tableColText, { color: "#f59e0b" }]}>
+                    {p.elec}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={{ height: 40 }} />
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -257,8 +229,7 @@ const StealthAuditor = ({ lmPcode = "ZA1048" }) => {
   );
 };
 
-// --- Helper Components ---
-
+// --- Helpers ---
 const ContextRow = ({ label, value }) => (
   <View style={styles.contextRow}>
     <Text style={styles.contextLabel}>{label}:</Text>
@@ -266,33 +237,9 @@ const ContextRow = ({ label, value }) => (
   </View>
 );
 
-const WarehouseCard = ({ title, stats, color }) => {
-  console.log(` `);
-  console.log(`WarehouseCard ----title`, title);
-  console.log(`WarehouseCard ----stats`, stats);
-  console.log(`------------------------------------------- `);
-
-  return (
-    <View style={[styles.card, { borderTopColor: color }]}>
-      <Text style={[styles.cardTitle, { color }]}>{title}</Text>
-      <Text style={styles.statLabel}>
-        Erfs: <Text style={styles.statVal}>{stats.erfs}</Text>
-      </Text>
-      <Text style={styles.statLabel}>
-        Wards: <Text style={styles.statVal}>{stats.wards}</Text>
-      </Text>
-      <Text style={styles.statLabel}>
-        Prems: <Text style={styles.statVal}>{stats.prems}</Text>
-      </Text>
-    </View>
-  );
-};
-
 const AuditCard = ({ title, data, color }) => {
-  console.log(` `);
-  console.log(`AuditCard ----title`, title);
-  console.log(`AuditCard ----data`, data);
-  console.log(`------------------------------------------- `);
+  console.log(`title`, title);
+  console.log(`data`, data);
   return (
     <View style={[styles.card, { borderTopColor: color }]}>
       <Text style={[styles.cardTitle, { color }]}>{title}</Text>
@@ -301,6 +248,9 @@ const AuditCard = ({ title, data, color }) => {
       </Text>
       <Text style={styles.statLabel}>
         Prems: <Text style={styles.statVal}>{data.prems}</Text>
+      </Text>
+      <Text style={styles.statLabel}>
+        Meters: <Text style={styles.statVal}>{data.meters}</Text>
       </Text>
       <Text style={styles.statLabel}>
         Links: <Text style={styles.statVal}>{data.links}</Text>
@@ -312,14 +262,14 @@ const AuditCard = ({ title, data, color }) => {
 const styles = StyleSheet.create({
   fab: {
     position: "absolute",
-    // bottom: 20,
-    // right: 20,
+    bottom: 20,
+    right: 20,
     width: 56,
     height: 56,
-    // borderRadius: 28,
+    borderRadius: 28,
     justifyContent: "center",
     alignItems: "center",
-    elevation: 5,
+    elevation: 8,
   },
   fabText: { fontSize: 24 },
   modalContainer: { flex: 1, backgroundColor: "#F2F2F7" },
@@ -327,41 +277,31 @@ const styles = StyleSheet.create({
     padding: 20,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
     backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#D1D1D6",
+    borderColor: "#eee",
   },
-  headerTitle: { fontSize: 18, fontWeight: "bold" },
+  headerTitle: { fontSize: 18, fontWeight: "900" },
   closeBtn: { padding: 8, backgroundColor: "#FF3B30", borderRadius: 6 },
   closeText: { color: "#fff", fontWeight: "bold" },
   content: { padding: 15 },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 11,
+    fontWeight: "900",
     color: "#8E8E93",
-    marginBottom: 10,
-    marginTop: 15,
-    textTransform: "uppercase",
+    marginTop: 20,
+    marginBottom: 8,
+    letterSpacing: 1,
   },
-  contextCard: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 5,
-  },
+  contextCard: { backgroundColor: "#fff", padding: 15, borderRadius: 12 },
   contextRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 5,
+    marginBottom: 4,
   },
-  contextLabel: { fontSize: 13, color: "#8E8E93", fontWeight: "600" },
-  contextValue: { fontSize: 13, color: "#000", fontWeight: "700" },
-  statsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
+  contextLabel: { fontSize: 12, color: "#8E8E93", fontWeight: "600" },
+  contextValue: { fontSize: 12, fontWeight: "800" },
+  statsContainer: { flexDirection: "row", justifyContent: "space-between" },
   card: {
     width: "48%",
     backgroundColor: "#fff",
@@ -369,16 +309,35 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderTopWidth: 5,
   },
-  cardTitle: { fontWeight: "bold", fontSize: 12, marginBottom: 8 },
-  statLabel: { fontSize: 11, color: "#8E8E93", marginBottom: 2 },
-  statVal: { color: "#000", fontWeight: "bold" },
-  warningBanner: {
-    backgroundColor: "#FF9500",
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 10,
+  cardTitle: { fontWeight: "900", fontSize: 11, marginBottom: 8 },
+  statLabel: { fontSize: 10, color: "#8E8E93", marginBottom: 2 },
+  statVal: { color: "#000", fontWeight: "800" },
+  tableCard: { backgroundColor: "#fff", borderRadius: 12, padding: 12 },
+  tableHeader: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: "#f1f5f9",
+    paddingBottom: 6,
   },
-  warningText: { color: "#fff", textAlign: "center", fontWeight: "bold" },
+  tableColHead: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#94a3b8",
+    textAlign: "center",
+  },
+  tableColText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  tableRow: {
+    flexDirection: "row",
+    paddingVertical: 10,
+    borderBottomWidth: 0.5,
+    borderColor: "#f1f5f9",
+  },
 });
 
 export default StealthAuditor;

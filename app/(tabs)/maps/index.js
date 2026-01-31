@@ -5,6 +5,7 @@ import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
 // 🎯 Context & Utilities
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
+import SelectedErf from "../../../components/maps/SelectedErf";
 import { useGeo } from "../../../src/context/GeoContext";
 import { getSafeCoords, useMap } from "../../../src/context/MapContext"; // 🚀 New
 import { useWarehouse } from "../../../src/context/WarehouseContext";
@@ -12,6 +13,7 @@ import { useWarehouse } from "../../../src/context/WarehouseContext";
 const { width } = Dimensions.get("window");
 
 export default function SovereignMap() {
+  console.log(`SovereignMap ---mounted`);
   const { mapRef, flyTo } = useMap();
   const { geoState } = useGeo();
   const { all } = useWarehouse();
@@ -24,48 +26,33 @@ export default function SovereignMap() {
   const geometry = lmEntry?.geometry || lmEntry;
   const safeCoords = getSafeCoords(geometry);
 
+  // 🏛️ Consolidated Sovereign Pilot
   useEffect(() => {
-    if (safeCoords.length > 0) flyTo(safeCoords);
-  }, [lmId, safeCoords.length]);
+    // 🛡️ 1. NATIVE GUARD: Ensure the map hardware is actually ready
+    if (!mapRef.current) return;
 
-  useEffect(() => {
-    // 🛡️ 1. ID Guard: Ensure we have a target
-    const targetId = selectedErf?.id;
-    console.log(`SovereignMap----targetId`, targetId);
+    // 🎯 2. PRIORITY 1: The Erf (Tactical Zoom)
+    if (selectedErf?.id) {
+      const heavyGeo =
+        all?.geoLibrary?.[selectedErf.id] || all?.geoEntries?.[selectedErf.id];
+      const erfCoords = getSafeCoords(heavyGeo?.geometry);
 
-    if (!targetId) return;
-
-    console.log(
-      `✈️ Pilot: Target Locked: ERF ${selectedErf.erfNo || targetId}`,
-    );
-
-    // 🎯 2. THE VAULT LOOKUP: Fetch the "Heavy" GeoData from RAM
-    // This is the geoEntries we just refined in the API endpoint
-    const heavyGeo = all?.geoLibrary?.[targetId] || all?.geoEntries?.[targetId];
-    // console.log(`SovereignMap----heavyGeo`, heavyGeo);
-
-    if (!heavyGeo || !heavyGeo.geometry) {
-      console.warn(
-        "⚠️ Pilot: No geometry found in RAM Vault for this ID. Staying grounded.",
-      );
-      return;
+      if (erfCoords.length > 0) {
+        console.log(
+          `✈️ Pilot: Flying to Tactical Target (ERF ${selectedErf.erfNo})`,
+        );
+        flyTo(erfCoords, 100); // Low altitude
+        return; // Exit here; Erf takes precedence over LM
+      }
     }
 
-    // 🛡️ 3. Safe Extraction
-    const coords = getSafeCoords(heavyGeo.geometry);
-    // console.log(`SovereignMap----coords`, coords);
-
-    // 🛡️ 4. THE NATIVE FIREWALL: Never fly to an empty list
-    if (coords && coords.length > 0) {
-      console.log(`SovereignMap----ABOUT TO FLY ----coords`, coords);
-
-      flyTo(coords, 30); // High-altitude flight with 70px padding
-    } else {
-      console.error(
-        "❌ Pilot: Failed to extract valid coordinates from Geo-Vault.",
-      );
+    // 🌍 3. PRIORITY 2: The Local Municipality (Strategic Zoom)
+    if (lmId && safeCoords.length > 0) {
+      console.log(`🌍 Pilot: Flying to Strategic Boundary (LM ${lmId})`);
+      flyTo(safeCoords, 100); // High altitude
     }
-  }, [selectedErf?.id]); // 🎯 Trigger only when the ID changes
+  }, [lmId, selectedErf?.id, safeCoords.length, !!mapRef.current]);
+  // 🎯 Note: We watch safeCoords.length and the existence of the ref
 
   const renderLM = () => {
     const lmId = geoState?.selectedLm?.id;
@@ -126,6 +113,8 @@ export default function SovereignMap() {
     const selectedId = geoState?.selectedErf?.id;
     if (!selectedId) return null;
 
+    console.log(`renderSelectedErf ---selectedErf`, selectedErf);
+
     // 🎯 THE VAULT LOOKUP: Fetch the Heavy GeoData
     const heavyEntry =
       all?.geoLibrary?.[selectedId] || all?.geoEntries?.[selectedId];
@@ -150,32 +139,70 @@ export default function SovereignMap() {
         />
 
         {/* 📍 THE COMMAND PIN */}
-        <Marker
-          key={`sovereign-marker-${selectedId}`}
+        <SelectedErf
           coordinate={{
             latitude: centroid.lat,
             longitude: centroid.lng,
           }}
-          // 🎯 Identifying the Erf clearly
-          title={`ERF ${geoState.selectedErf.erfNo || "N/A"}`}
-          description={heavyEntry?.address || "Selected Target"}
-          zIndex={1001} // Stay above the border
-        >
-          {/* 🎨 Custom Icon & Label (Optional) */}
-          <View style={styles.markerContainer}>
-            <View style={styles.markerPill}>
-              <MaterialCommunityIcons
-                name="map-marker"
-                size={34}
-                color="#0004ff"
-              />
-              <Text style={styles.markerText}>
-                {geoState.selectedErf.erfNo}
-              </Text>
-            </View>
-          </View>
-        </Marker>
+          erfNo={geoState.selectedErf.erfNo}
+        />
+
+        {/* <CustomErf
+          gps={{
+            latitude: centroid.lat,
+            longitude: centroid.lng,
+          }}
+          text={`ERF ${geoState.selectedErf.erfNo}`}
+          color="#3B82F6" // 🎯 FORCING BLUE HERE
+        /> */}
       </>
+    );
+  };
+
+  const renderSelectedPremise = () => {
+    console.log(`renderSelectedPremise ---running`);
+    const selectedPremise = geoState?.selectedPremise;
+    const centroid = selectedPremise?.geometry?.centroid;
+
+    if (!selectedPremise?.id || !centroid || centroid.length < 2) return null;
+
+    // 🏗️ ADDRESS CONSTRUCTION
+    const addr = selectedPremise.address;
+    const erfNo = selectedPremise.erfNo;
+    const adrLn1 = addr
+      ? `${addr.strNo || ""} ${addr.strName}`.trim()
+      : "NO ADR";
+    const adrLn2 = addr ? ` ${addr.strType || ""}`.trim() : "NO ADR";
+
+    return (
+      <Marker
+        key={`premise-marker-${selectedPremise.id}`}
+        coordinate={{
+          latitude: centroid[0],
+          longitude: centroid[1],
+        }}
+        // 🎯 Anchor to the center-bottom
+        anchor={{ x: 0.5, y: 1 }}
+        zIndex={1500}
+        tracksViewChanges={false}
+      >
+        <View style={styles.premiseMarkerContainer}>
+          {/* 🔘 THE SOVEREIGN CIRCLE */}
+          <View style={styles.premiseCircle}>
+            <MaterialCommunityIcons
+              name="home-variant" // 🏠 Cleaner, less "noisy" icon
+              size={22}
+              color="#ffffff"
+            />
+          </View>
+
+          {/* 🏷️ THE FLOATING LABEL (Below the circle) */}
+          <View style={styles.premiseLabel}>
+            <Text style={styles.premiseLabelText}>Erf:{erfNo}</Text>
+            <Text style={styles.premiseLabelText}>{`${adrLn1} ${adrLn2}`}</Text>
+          </View>
+        </View>
+      </Marker>
     );
   };
 
@@ -226,6 +253,7 @@ export default function SovereignMap() {
       </Marker>
     );
   };
+
   return (
     <View style={styles.container}>
       <MapView
@@ -241,6 +269,7 @@ export default function SovereignMap() {
         {renderLM() /* Level 0 */}
         {renderWards() /* Level 1 */}
         {renderSelectedErf() /* Level 2 - Selection */}
+        {renderSelectedPremise()}
         {/* {renderNeighborhood() /* Level 3 - Step 3 coming next */}
         {renderAssetMarker()}
       </MapView>
@@ -270,10 +299,74 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   markerText: {
-    fontSize: 14,
+    fontSize: 10,
     // fontWeight: "900",
-    color: "#1e293b",
+    // color: "#1e293b",
     // marginLeft: 2,
     backgroundColor: "white",
+  },
+
+  premiseMarkerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Erf Marker
+  markerContainer: {
+    // borderRadius: 15,
+    // backgroundColor: "#507adc",
+    // borderWidth: 2,
+    // borderColor: "#ffffff",
+    // // alignItems: "center",
+    // // justifyContent: "center",
+    // shadowColor: "#622ea1",
+    // // shadowOffset: { width: 0, height: 2 },
+    // shadowOpacity: 0.5,
+    // shadowRadius: 2,
+    // elevation: 6,
+  },
+  markerPill: {
+    // borderRadius: 15,
+    // backgroundColor: "#507adc",
+    // borderWidth: 2,
+    borderColor: "#ffffff",
+    // alignItems: "center",
+    // justifyContent: "center",
+    shadowColor: "#622ea1",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 2,
+    elevation: 6,
+  },
+
+  // Premise Marker
+  premiseCircle: {
+    // width: 60,
+    // height: 60,
+    borderRadius: 15,
+    backgroundColor: "#507adc",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    // alignItems: "center",
+    // justifyContent: "center",
+    shadowColor: "#622ea1",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 2,
+    elevation: 6,
+  },
+  premiseLabel: {
+    backgroundColor: "#507adc",
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  premiseLabelText: {
+    fontSize: 6,
+    fontWeight: "500",
+    color: "#ffffff",
+    // alignSelf: "center",
+    // textTransform: "uppercase",
   },
 });

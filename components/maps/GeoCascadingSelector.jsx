@@ -51,8 +51,13 @@ export default function GeoCascadingSelector() {
   const lmNameStr = `${activeLm?.name || "LM"}`;
   const wardNameStr = `${activeWard?.name || "All Wards"}`;
   const premiseIdStr = selectedPremise?.id
-    ? `Prem: ${selectedPremise.id}`
+    ? `${selectedPremise.id}`
     : "Premise";
+
+  // 🏗️ ADDRESS CONSTRUCTION
+  const addr = selectedPremise?.address;
+  const adrLn1 = addr ? `${addr.strNo || ""} ${addr.strName}`.trim() : "NO ADR";
+  const adrLn2 = addr ? ` ${addr.strType || ""}`.trim() : "NO ADR";
 
   // 🎯 TACTICAL ERF FILTER: Uses 'filtered.erfs' from the Warehouse
   const filteredErfs = useMemo(() => {
@@ -66,7 +71,7 @@ export default function GeoCascadingSelector() {
 
   // ✈️ 3. ERF SELECTION & JUMP
   const selectErf = (erf) => {
-    console.log(`GeoCascadingSelector----erf`, erf);
+    // console.log(`GeoCascadingSelector----erf`, erf);
 
     setGeoState((prev) => ({ ...prev, selectedErf: erf }));
     setShowErfs(false);
@@ -83,7 +88,7 @@ export default function GeoCascadingSelector() {
     if (!activeLm) return;
     const lmEntry = all?.geoLibrary?.[activeLm.id] || activeLm;
     const coords = getSafeCoords(lmEntry.geometry || lmEntry);
-    if (coords.length > 0) flyTo(coords, 50); // Wider padding for LM
+    if (coords.length > 0) flyTo(coords, 100); // Wider padding for LM
   };
 
   // ✈️ 2. WARD SELECTION & JUMP
@@ -96,26 +101,43 @@ export default function GeoCascadingSelector() {
     const wardEntry = all?.geoLibrary?.[ward.id] || ward;
 
     const coords = getSafeCoords(wardEntry.geometry || wardEntry);
-    console.log(
-      `GeoCascadingSelector --selectWard() --coords?.length`,
-      coords?.length,
-    );
+    // console.log(
+    //   `GeoCascadingSelector --selectWard() --coords?.length`,
+    //   coords?.length,
+    // );
 
     if (coords.length > 0) flyTo(coords, 20); // Tighter padding for Ward
   };
 
   const selectPremise = (prem) => {
+    console.log(`GeoCascadingSelector ---selectMeter ---prem`, prem);
     setGeoState((prev) => ({ ...prev, selectedPremise: prem }));
     setShowPrems(false);
 
-    // Logic: If premise has coords, fly to them.
-    // Usually, we fly to the parent ERF if the premise has no geometry.
-    // if (prem.geometry || prem.coords) {
-    //   flyTo(getSafeCoords(prem.geometry || prem));
-    // }
+    const centroid = prem?.geometry?.centroid;
+
+    // 🏛️ THE TRANSFORMATION
+    if (centroid && Array.isArray(centroid) && centroid.length === 2) {
+      // 🎯 We turn [lat, lng] into [{ latitude, longitude }]
+      const formattedCoord = [
+        {
+          latitude: centroid[0],
+          longitude: centroid[1],
+        },
+      ];
+
+      console.log(
+        `✈️ Pilot: Reformatting Centroid for Flight...`,
+        formattedCoord,
+      );
+
+      // Now we fly. Coords.length will be 1, not 2!
+      flyTo(formattedCoord, 100);
+    }
   };
 
   const selectMeter = (meter) => {
+    console.log(`GeoCascadingSelector ---selectMeter ---meter`, meter);
     const gps = meter?.ast?.location?.gps;
 
     if (gps?.lat) {
@@ -137,7 +159,7 @@ export default function GeoCascadingSelector() {
 
     const query = searchQuery.toLowerCase();
     return all.prems.filter((p) => {
-      const addr = p.address;
+      const addr = p?.address;
       const searchString = `
       ${p.id} 
       ${addr?.strNo} 
@@ -147,7 +169,7 @@ export default function GeoCascadingSelector() {
 
       return searchString.includes(query);
     });
-  }, [searchQuery, all.prems]);
+  }, [searchQuery, all?.prems]);
 
   // Inside GeoCascadingSelector component
   const handleCenterOnMe = async () => {
@@ -187,7 +209,7 @@ export default function GeoCascadingSelector() {
   const rawWardName = selectedErf?.admin?.ward?.name || "";
   const wardNoDigits = rawWardName.replace(/\D/g, "");
   const erfLabelStr = selectedErf?.erfNo
-    ? `Erf ${selectedErf.erfNo}${wardNoDigits ? ` (W${wardNoDigits})` : ""}`
+    ? `${selectedErf.erfNo}${wardNoDigits ? ` (W${wardNoDigits})` : ""}`
     : "Erf";
 
   return (
@@ -255,7 +277,7 @@ export default function GeoCascadingSelector() {
               keyExtractor={(item, index) => `${item.id || index}`}
               style={{ maxHeight: 400 }}
               renderItem={({ item: p }) => {
-                const addr = p.address;
+                const addr = p?.address;
                 const formattedAddr = addr
                   ? `${addr.strNo} ${addr.strName} ${addr.strType}`
                   : "No Address";
@@ -263,7 +285,13 @@ export default function GeoCascadingSelector() {
                 return (
                   <TouchableOpacity
                     style={styles.wardItem}
-                    onPress={() => selectPremise(p)}
+                    onPress={() => {
+                      console.log(
+                        `GeoCascadingSelector ---selectMeter ---p`,
+                        p,
+                      );
+                      selectPremise(p);
+                    }}
                   >
                     <Text
                       style={styles.wardText}
@@ -359,6 +387,11 @@ export default function GeoCascadingSelector() {
                     style={styles.wardItem} // Reusing the same "Sexy" style
                     onPress={() => {
                       // ✈️ Trigger the Global Selection logic
+                      console.log(
+                        `GeoCascadingSelector ---selectMeter ---m`,
+                        m,
+                      );
+
                       selectMeter(m);
                       setShowMeters(false);
                     }}
@@ -460,7 +493,7 @@ export default function GeoCascadingSelector() {
             labelStyle={styles.labelText}
             contentStyle={styles.buttonContent}
           >
-            {premiseIdStr}
+            {adrLn1}
           </Button>
 
           <View style={{ width: 6 }} />

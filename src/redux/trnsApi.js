@@ -15,7 +15,6 @@ export const trnsApi = createApi({
   tagTypes: ["Trns"],
   endpoints: (builder) => ({
     // 🎯 THE MUTATION: All uploads go through here
-
     addTrn: builder.mutation({
       async queryFn(payload) {
         try {
@@ -65,52 +64,6 @@ export const trnsApi = createApi({
       },
     }),
 
-    // addTrn: builder.mutation({
-    //   async queryFn(payload) {
-    //     try {
-    //       const docRef = await addDoc(collection(db, "trns"), payload);
-    //       return { data: { id: docRef.id, ...payload } };
-    //     } catch (error) {
-    //       return { error };
-    //     }
-    //   },
-    //   invalidatesTags: ["Trns"],
-
-    //   async onQueryStarted(payload, { dispatch, queryFulfilled }) {
-    //     try {
-    //       await queryFulfilled;
-
-    //       // 🎯 THE FIX: Use the 'util' from premisesApi inside the function
-    //       // to avoid circular dependency at the top of the file
-    //       const { premisesApi } = await import("./premisesApi");
-
-    //       if (payload.trnType === "METER_DISCOVERY") {
-    //         dispatch(
-    //           premisesApi.util.updateQueryData(
-    //             "getPremisesByLmPcode",
-    //             { lmPcode: payload.metadata.lmPcode },
-    //             (draft) => {
-    //               // Find the specific premise in the RAM cache
-    //               const p = draft.find(
-    //                 (item) => item.id === payload.premise.id,
-    //               );
-    //               if (p) {
-    //                 // p.occupancy = {
-    //                 //   status: payload.premise.status,
-    //                 //   adverseCondition: payload.data.adverseCondition || false,
-    //                 // };
-    //                 p.metadata = payload.metadata; // Standard 2026-01-21
-    //               }
-    //             },
-    //           ),
-    //         );
-    //       }
-    //     } catch (err) {
-    //       console.error("onQueryStarted Error:", err);
-    //     }
-    //   },
-    // }),
-
     getTrnsByLmPcode: builder.query({
       async queryFn() {
         return { data: [] };
@@ -142,7 +95,49 @@ export const trnsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getTrnsByPremiseId: builder.query({
+      async queryFn() {
+        return { data: [] };
+      },
+      async onCacheEntryAdded(
+        { premiseId }, // 🎯 DESTRUCTURED OBJECT ARGUMENT
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        try {
+          await cacheDataLoaded;
+
+          // 🛡️ NATIVE GUARD: Ensure we don't start a ghost stream
+          if (!premiseId) return;
+
+          const q = query(
+            collection(db, "trns"),
+            where("accessData.premise.id", "==", premiseId),
+            orderBy("accessData.metadata.created.at", "desc"),
+          );
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData((draft) => {
+              return snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+            });
+          });
+        } catch (error) {
+          console.error("🛰️ Stream Error:", error);
+        }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
-export const { useAddTrnMutation, useGetTrnsByLmPcodeQuery } = trnsApi;
+export const {
+  useAddTrnMutation,
+  useGetTrnsByLmPcodeQuery,
+  useGetTrnsByPremiseIdQuery,
+} = trnsApi;

@@ -23,7 +23,7 @@ export const GeoProvider = ({ children }) => {
     const saved = geoKV.getString("geo_session");
     return saved ? JSON.parse(saved) : INITIAL_GEO;
   });
-  // console.log(`GeoProvider ----geoState`, geoState);
+  console.log(`GeoProvider ----geoState`, geoState);
   // console.log(`GeoProvider ----geoState?.selectedErf`, geoState?.selectedErf);
 
   // 🏛️ 2. The Law of the Land: Life and Death

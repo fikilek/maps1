@@ -1,25 +1,21 @@
-	Premise Schema						
-#	 Path	Type	default value	allowed valuees	Description	Design Story & Evolution	Validation
-1	id	string			uniquie identifier for each premise		required
-2	erfId	string			id of the premise parent  erf 		required
-3	erfNo	string			erfNo of the parent erf		required
-4	context	string		"township, suburb"			required
-5	address.strNo	string					required
-6	address.strName	string					required
-7	address.strType	string					required
-8	geometry.lat	number					required
-9	geometry.lng	number					required
-10	propertyType.type	string					required
-11	propertyType.unitName	string					required
-12	propertyType.unitNo	string					required
-13	services .waterMeters	array					required
-14	services .electricityMeters	array					required
-15	metadata.created.at	string					required
-16	metadata.created.byUid	string					required
-17	metadata.created.byUser	string					required
-18	metadata.updated.at	string					required
-19	metadata.updated.byUid	string					required
-20	metadata.updated.byUser	string					required
-21	parents.lmId	string					required
-22	parents.dmId	string					required
-23	parents.provinceId	string					required
+Form State		RESET	SUBMIT
+invalid	btn boundary	red	red
+	text color	red	red
+	icon color	red	red
+	spinner 	no	no
+	disabled	no	yes
+	backgroundColr	very light grey	light grey
+			
+valid	btn boundary	green	green
+	text color	green	green
+	icon color	green	green
+	spinner 	no	no
+	disabled	no	no
+	backgroundColr	very light grey	light grey
+			
+submitting	btn boundary	black	black
+	text color	green	green
+	icon color	green	green
+	spinner 	no	yes
+	disabled	yes	yes
+	backgroundColr	trnasparent	light grey

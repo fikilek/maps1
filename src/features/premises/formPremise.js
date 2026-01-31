@@ -1,38 +1,31 @@
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik } from "formik";
-import { get } from "lodash";
 import { useState } from "react";
 import {
   Dimensions,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
-import {
-  ActivityIndicator,
-  Divider,
-  List,
-  Modal,
-  Portal,
-  Surface,
-  Switch,
-} from "react-native-paper";
+import { Divider, Surface, Switch } from "react-native-paper";
 
 import * as Yup from "yup";
-import SovereignLocationPicker from "../../../components/maps/SovereignLocationPicker";
+import FormFooter from "../../../components/forms/FormFooter";
+import FormInput from "../../../components/forms/FormInput";
+import FormMapPositioner from "../../../components/forms/FormMapPositioner";
+import FormSelect from "../../../components/forms/FormSelect";
 import { useGeo } from "../../context/GeoContext";
-import { getSafeCoords } from "../../context/MapContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import { useAuth } from "../../hooks/useAuth";
 import { useAddPremiseMutation } from "../../redux/premisesApi";
 
 const { width, height } = Dimensions.get("window");
 
-const STREET_TYPES = [
+const streetTypeOptions = [
   "Select...",
   "Street",
   "Road",
@@ -44,13 +37,23 @@ const STREET_TYPES = [
   "Crescent",
   "Backroom",
 ];
-const PROPERTY_TYPES = [
+const propertyTypeOptions = [
   "Select...",
   "Residential",
   "Business",
   "Industrial",
   "Sectional Title",
   "Vacant Land",
+  "Flats",
+];
+
+const premiseOccupancySatusOptions = [
+  "Select...",
+  `Occupied`,
+  `Unoccupied`,
+  `Vandalised`,
+  `Under Construction`,
+  `Dilapidated`,
 ];
 
 // 🏛️ Schema Validation (Yup)
@@ -68,17 +71,41 @@ const PremiseSchema = Yup.object().shape({
       .required("Required"),
     // If type is "Sectional Title" (or Flats), name is mandatory
     name: Yup.string().when("type", {
-      is: (val) => val === "Sectional Title",
-      then: (schema) =>
-        schema.required("Estate/Block Name is mandatory for this type"),
+      // 🎯 Logic: Check if the value is either Flats or Sectional Title
+      is: (val) =>
+        val === "Flats" || val === "Sectional Title" || val === "Business",
+      then: (schema) => schema.required("Unit Name is mandatory"),
+      otherwise: (schema) => schema.optional(),
     }),
     // If type is "Sectional Title", unitNo must have at least one entry
-    unitNo: Yup.array().when("type", {
-      is: (val) => val === "Sectional Title",
-      then: (schema) => schema.min(1, "Unit Number is mandatory"),
+    unitNo: Yup.string().when("type", {
+      is: (val) => val === "Flats" || val === "Sectional Title",
+      then: (schema) => schema.required("Unit No is mandatory"),
+      otherwise: (schema) => schema.optional(),
     }),
   }),
-  isTownship: Yup.boolean().required(),
+  context: Yup.string()
+    .oneOf(["Township", "Suburb"], "Please select a valid category")
+    .required("Required"),
+  occupancy: Yup.object().shape({
+    status: Yup.string()
+      .oneOf(
+        [
+          "Occupied",
+          "Unoccupied",
+          "Vandalised",
+          "Under Consrtruction",
+          "Dilapidated",
+        ],
+        "Invalid Status",
+      )
+      .required("Required"),
+  }),
+  metadata: Yup.object().shape({
+    isGpsVerified: Yup.boolean()
+      .oneOf([true], "Field verification is mandatory")
+      .required("Required"),
+  }),
 });
 
 export default function FormPremise() {
@@ -86,49 +113,59 @@ export default function FormPremise() {
   console.log(`FormPremise ----mounted`);
 
   const { all } = useWarehouse();
+  console.log(`FormPremise ----all?.geoEntries`, all?.geoEntries);
   const router = useRouter();
   const { id } = useLocalSearchParams(); // This is the Erf ID
+  console.log(`FormPremise ----selectedErf?.erfId`, id);
+
   const { geoState } = useGeo();
   // console.log(`FormPremise ----geoState`, geoState);
   const { user } = useAuth();
 
+  /* LOCAL STATES */
   const [typeModal, setTypeModal] = useState(null);
   // console.log(`FormPremise ----typeModal`, typeModal);
   const [mapFullVisible, setMapFullVisible] = useState(false);
 
+  /* SELECTED ERF METADATA  */
+  const targetGeo = all?.geoEntries?.[id] || null;
   const selectedErf = geoState?.selectedErf || null;
+  console.log(`FormPremise ----selectedErf`, selectedErf);
   // console.log(`FormPremise ----selectedErf?.erfNo`, selectedErf?.erfNo);
-  const erfNo = selectedErf?.erfNo || "N/A";
 
-  const targetGeometry = geoState?.erfGeometries?.[id] || null;
-  // console.log(`FormPremise ----targetGeometry`, targetGeometry);
+  /* 🏛️ SOVEREIGN SOURCE: Extracting directly from the Erf Object */
+  const erfNo = selectedErf?.erfNo || "N/A"; // e.g. "214"
+  const safeErfNo = erfNo.replace(/\//g, "-");
 
-  const fallbackCentroid = [
-    geoState?.selectedLm?.centroid?.lat,
-    geoState?.selectedLm?.centroid?.lng,
-  ];
-  // console.log(`FormPremise ----fallbackCentroid`, fallbackCentroid);
-  const bestCentroid = selectedErf?.centroid
-    ? [
-        selectedErf.centroid.lat || selectedErf.centroid[0],
-        selectedErf.centroid.lng || selectedErf.centroid[1],
-      ]
-    : fallbackCentroid;
+  // 🎯 THE LOCK: Icon lands exactly on the Erf's Centroid
+  const erfCentroid = targetGeo?.centroid
+    ? [targetGeo.centroid.lat, targetGeo.centroid.lng]
+    : [-34.028, 23.076]; // 🛡️ Hard fallback to prevent 'undefined' crash
+  console.log(`FormPremise ----erfCentroid`, erfCentroid);
 
-  const safeErfNo = selectedErf?.erfNo.replace(/\//g, "-");
-
-  const erfCentroid = targetGeometry?.centroid || [
-    geoState?.selectedLm?.centroid?.lat,
-    geoState?.selectedLm?.centroid?.lng,
-  ];
+  // 🌍 REGIONAL HIERARCHY: Direct from the Erf's admin block
+  const admin = selectedErf?.admin;
+  const lmId = admin?.localMunicipality?.pcode; // e.g. "ZA1048"
+  const dmId = admin?.district?.pcode; // e.g. "ZA104"
+  const provinceId = admin?.province?.pcode; // e.g. "ZA1"
 
   const initialValues = {
     id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
     erfId: id,
-    erfNo: selectedErf?.erfNo || "",
-    // 🛠️ FIX: Lowercase 'address' and camelCase 'strName'
-    address: { strNo: "12", strName: "Google", strType: "Street" },
-    propertyType: { type: "Business", untiName: "", unitNo: "" },
+    erfNo: erfNo,
+
+    address: {
+      strNo: "",
+      strName: "",
+      strType: "",
+    },
+
+    propertyType: {
+      type: "",
+      name: "",
+      unitNo: "", // 🎯 String for individual identity
+    },
+
     metadata: {
       created: {
         byUser: user?.displayName || "Field Agent",
@@ -140,71 +177,56 @@ export default function FormPremise() {
         byUid: user?.uid || "field_agent",
         at: new Date().toISOString(),
       },
+      lmPcode: lmId,
+      isGpsVerified: false,
     },
+
     geometry: {
-      // centroid: targetGeometry?.centroid || fallbackCentroid,
-      centroid: erfCentroid,
+      centroid: erfCentroid, // premise inital geometry
     },
-    // Adding service placeholders to match Detail screen grid
+
     services: {
       electricityMeters: [],
       waterMeters: [],
     },
-    occupancy: { status: "OCCUPIED" },
-    isTownship: selectedErf?.isTownship || false,
+
+    occupancy: { status: "Occupied" },
+
+    // 🏙️ Context: "township" or "suburb" can be derived or toggled
+    context: selectedErf?.isTownship ? "Township" : "Suburb",
+
     parents: {
-      localMunicipalityId: geoState?.selectedLm?.id || null,
-      districtMunicipalityId: geoState?.selectedDm?.id || null,
-      provinceId: geoState?.selectedProv?.id || null,
+      lmId: lmId || null,
+      dmId: dmId || null,
+      provinceId: provinceId || null,
     },
   };
   // console.log(`FormPremise ----initialValues`, initialValues);
 
-  const handleTextChange = (setFieldValue, key, value) => {
-    const formattedValue = value.charAt(0).toUpperCase() + value.slice(1);
-    setFieldValue(key, formattedValue);
-  };
-
   const [addPremise] = useAddPremiseMutation();
 
-  const getLabelStyle = (fieldName, errors) => {
-    // Use lodash 'get' to find 'address.strNo' inside the objects
-    const hasError = get(errors, fieldName);
-
-    return {
-      color: hasError ? "#D32F2F" : "#000",
-      fontWeight: "bold",
-      marginBottom: 4,
-      fontSize: 12,
-    };
-  };
-
-  const handleSubmit = async (values, { setSubmitting, resetForm }) => {
-    console.log(`FormPremise ----values`, values);
-
-    // 1. We must add the lmPcode to metadata so the API can find the cache
-    const payload = {
-      ...values,
-      metadata: {
-        ...values.metadata,
-        lmPcode: values.parents.localMunicipalityId, // 🎯 CRITICAL ALIGNMENT
-      },
-    };
-    // console.log(`FormPremise ----payload`, payload);
+  const handleSubmit = async (values, { setSubmitting }) => {
+    console.log(`🚀 Mission Commencing: Submitting Premise ${values.id}`);
 
     try {
-      // 2. Just call the mutation.
-      // onQueryStarted will handle Vaulting (MMKV) and Injection (RAM)
-      const addPremiseResult = await addPremise(payload).unwrap();
-      // console.log(`FormPremise ----addPremiseResult`, addPremiseResult);
+      // 🛰️ 2. EXECUTE CLOUD MUTATION
+      // onQueryStarted (in your API slice) will handle the optimistic
+      // injection into the local RAM and MMKV Vault.
+      await addPremise(values).unwrap();
 
+      // 🏛️ 3. SUCCESS NAVIGATION
+      // Return to the Erf details screen - the new Premise will be
+      // waiting there thanks to the RTK Tag invalidation.
       router.replace(`/(tabs)/erfs/${values.erfId}`);
     } catch (err) {
-      // Even if it fails (Offline), the UI is already updated by onQueryStarted
-      console.log(`Error submitting premise`, err);
-      console.log(`FormPremise --handleSubmit--values`, values);
+      // 🛡️ 4. OFFLINE-FIRST RESILIENCE
+      // In iREPS, a network failure isn't a mission failure.
+      // We log it and still navigate, as the mutation will sync later.
+      console.warn(`🛰️ Signal Lost but Data Vaulted: ${err.message}`);
+      ToastAndroid.show("Saved Locally - Will sync when signal returns.");
       router.replace(`/(tabs)/erfs/${values.erfId}`);
     } finally {
+      // 🔒 5. RELEASE FORM LOCK
       setSubmitting(false);
     }
   };
@@ -216,27 +238,9 @@ export default function FormPremise() {
       validateOnMount={true}
       onSubmit={handleSubmit}
     >
-      {({
-        handleChange,
-        setFieldValue,
-        values,
-        handleSubmit,
-        resetForm,
-        errors,
-        touched,
-        isSubmitting,
-        isValid,
-      }) => {
-        // console.log(`FormPremise ----values`, values);
-        // console.log(`FormPremise ----errors`, errors);
-
-        // 🎯 2. Logic now lives inside the render function where 'values' is alive
-        const currentErfId = values.erfId;
-        const erfData =
-          all?.geoLibrary?.[currentErfId] || all?.geoEntries?.[currentErfId];
-
-        // 🏛️ 3. Compute the gold boundary for the picker
-        const erfBoundary = getSafeCoords(erfData?.geometry);
+      {({ setFieldValue, values, isSubmitting, errors }) => {
+        console.log(`FormPremise ----values`, values);
+        console.log(`FormPremise ----errors`, errors);
 
         return (
           <View style={styles.container}>
@@ -263,92 +267,8 @@ export default function FormPremise() {
               }}
             />
 
-            <Portal>
-              <Modal
-                visible={!!typeModal}
-                onDismiss={() => setTypeModal(null)}
-                contentContainerStyle={styles.modalContent}
-              >
-                <Text style={styles.modalTitle}>
-                  Select{" "}
-                  {typeModal === "street" ? "Street Type" : "Property Type"}
-                </Text>
-                <ScrollView>
-                  {(typeModal === "street" ? STREET_TYPES : PROPERTY_TYPES).map(
-                    (item) => (
-                      <List.Item
-                        key={item}
-                        title={item}
-                        onPress={() => {
-                          setFieldValue(
-                            typeModal === "street"
-                              ? "address.strType"
-                              : "propertyType.type",
-                            item,
-                          );
-                          setTypeModal(null);
-                        }}
-                      />
-                    ),
-                  )}
-                </ScrollView>
-              </Modal>
-
-              {/* <Modal
-                visible={mapFullVisible}
-                onDismiss={() => setMapFullVisible(false)}
-                contentContainerStyle={styles.fullMapModal}
-              >
-                <View style={styles.fullMapHeader}>
-                  <Text style={styles.modalTitle}>
-                    Drag Premise to Your Dot
-                  </Text>
-                  <TouchableOpacity onPress={() => setMapFullVisible(false)}>
-                    <MaterialCommunityIcons
-                      name="check-circle"
-                      size={32}
-                      color="#059669"
-                    />
-                  </TouchableOpacity>
-                </View>
-                <MapView
-                  style={styles.fullMap}
-                  showsUserLocation={true}
-                  initialRegion={{
-                    latitude: values.geometry.centroid[0],
-                    longitude: values.geometry.centroid[1],
-                    latitudeDelta: 0.002,
-                    longitudeDelta: 0.002,
-                  }}
-                >
-                  <Marker
-                    draggable
-                    coordinate={{
-                      latitude: values.geometry.centroid[0],
-                      longitude: values.geometry.centroid[1],
-                    }}
-                    onDragEnd={(e) =>
-                      setFieldValue("geometry.centroid", [
-                        e.nativeEvent.coordinate.latitude,
-                        e.nativeEvent.coordinate.longitude,
-                      ])
-                    }
-                  >
-                    <MaterialCommunityIcons
-                      name="home-map-marker"
-                      size={40}
-                      color="#0f172a"
-                    />
-                  </Marker>
-                </MapView>
-                <View style={styles.mapTip}>
-                  <Text style={styles.mapTipText}>Long-press icon to drag</Text>
-                </View>
-              </Modal> */}
-            </Portal>
-
             <ScrollView contentContainerStyle={styles.formScroll}>
-              {/* PROPERTY CLASSIFICATION */}
+              {/* Property Clasification */}
               <View style={styles.sectionHeader}>
                 <MaterialCommunityIcons
                   name="office-building-marker"
@@ -357,45 +277,73 @@ export default function FormPremise() {
                 />
                 <Text style={styles.sectionTitle}>PROPERTY CLASSIFICATION</Text>
               </View>
-
               <Surface style={styles.card} elevation={1}>
-                <TouchableOpacity
-                  style={[
-                    styles.selector,
-                    {
-                      // borderWidth: isValid ? 0 : 0.5,
-                      borderColor: isValid ? "transparent" : "red",
-                      padding: 5,
-                      borderRadius: 10,
-                    },
-                  ]}
-                  onPress={() => setTypeModal("property")}
-                >
-                  <View>
-                    <Text style={getLabelStyle("propertyType.type", errors)}>
-                      PROPERTY TYPE
-                    </Text>
-                    <Text style={styles.selectorValue}>
-                      {values.propertyType.type}
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons
-                    name="chevron-down"
-                    size={24}
-                    color="#64748b"
-                  />
-                </TouchableOpacity>
+                {/* PROPERTY CONTEXT [Township / Suburb] */}
+                <Surface style={styles.card} elevation={1}>
+                  {/* 🏙️ TOWNSHIP / SUBURB TOGGLE ROW */}
+                  <TouchableOpacity
+                    // 🛡️ Lock interaction if the form is in flight
+                    disabled={isSubmitting}
+                    style={styles.toggleRow}
+                    activeOpacity={0.7}
+                    onPress={() =>
+                      setFieldValue("isTownship", !values.isTownship)
+                    }
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.toggleLabel}>
+                        {values.isTownship ? "Township" : "Suburb"}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: "#94a3b8" }}>
+                        Tap row to toggle geographic context
+                      </Text>
+                    </View>
+
+                    <Switch
+                      value={values.isTownship}
+                      color="#059669"
+                      // Keep this for direct toggle hits
+                      onValueChange={(v) => setFieldValue("isTownship", v)}
+                      // 🛡️ Prevent the Switch from blocking the row tap on some Android versions
+                      pointerEvents="none"
+                    />
+                  </TouchableOpacity>
+                </Surface>
+                <FormSelect
+                  label="Property Type"
+                  name="occupancy.status"
+                  options={premiseOccupancySatusOptions}
+                  icon="office-building-marker"
+                />
+
                 <Divider style={styles.divider} />
-                <View style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>
-                    {values.isTownship ? "Township" : "Suburb"}
-                  </Text>
-                  <Switch
-                    value={values.isTownship}
-                    color="#059669"
-                    onValueChange={(v) => setFieldValue("isTownship", v)}
+
+                {/* PROPERTYTYPE type */}
+                <Surface style={styles.card} elevation={1}>
+                  <FormSelect
+                    label="Property Type"
+                    name="propertyType.type"
+                    options={propertyTypeOptions}
+                    icon="office-building-marker"
                   />
-                </View>
+
+                  <Divider style={styles.divider} />
+                  {/* PROPERTYTYPE unitName */}
+                  <FormInput
+                    label="Unit Name"
+                    name="propertyType.name"
+                    placeholder="Unit Name"
+                    keyboardType="default"
+                  />
+                  <Divider style={styles.divider} />
+                  {/* PROPERTYTYPE unitNo */}
+                  <FormInput
+                    label="Unit Number"
+                    name="propertyType.unitNo"
+                    placeholder="Unit Number"
+                    keyboardType="default"
+                  />
+                </Surface>
               </Surface>
 
               {/* STREET ADDRESS */}
@@ -408,229 +356,48 @@ export default function FormPremise() {
                 <Text style={styles.sectionTitle}>STREET ADDRESS</Text>
               </View>
               <Surface style={styles.card} elevation={1}>
-                <View style={styles.addressRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={getLabelStyle("address.strNo", errors)}>
-                      STR NO
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="123"
-                      value={values.address.strNo}
-                      onChangeText={handleChange("address.strNo")}
-                      editable={!isSubmitting}
-                      borderWidth={0.5}
-                      borderColor={!isValid ? "#fa0000" : "#fff"}
-                    />
-                  </View>
-                  <View style={{ flex: 2, marginLeft: 10 }}>
-                    <Text style={getLabelStyle("address.strName", errors)}>
-                      STR NAME
-                    </Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Main"
-                      value={values.address.strName}
-                      onChangeText={(v) =>
-                        handleTextChange(setFieldValue, "address.strName", v)
-                      }
-                      borderWidth={0.5}
-                      borderColor={!isValid ? "#fa0000" : "#fff"}
-                    />
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.selector}
-                  onPress={() => setTypeModal("street")}
-                >
-                  <View>
-                    <Text style={getLabelStyle("address.strType", errors)}>
-                      STREET TYPE
-                    </Text>
-                    <Text style={styles.selectorValue}>
-                      {values.address.strType}
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons
-                    name="form-select"
-                    size={22}
-                    color="#059669"
-                  />
-                </TouchableOpacity>
-
-                <Divider style={styles.divider} />
-                <Text style={styles.label}>GEOSPATIAL LOCATION</Text>
-
-                <SovereignLocationPicker
-                  label="Building Geospatial Location"
-                  name="geometry.centroid"
-                  icon="home-map-marker"
-                  referenceBoundary={erfBoundary} // 🏛️ Erf gold lines
-                  erfNo={erfNo} // 🏷️ The Erf Number
-                  erfCentroid={values.geometry.centroid} // 🎯 Initial center point
-                />
-
-                {/* <TouchableOpacity
-                  style={styles.miniMapWrapper}
-                  onPress={() => setMapFullVisible(true)}
-                >
-                  <MapView
-                    style={styles.miniMap}
-                    scrollEnabled={false}
-                    zoomEnabled={false}
-                    region={{
-                      latitude: values.geometry.centroid[0],
-                      longitude: values.geometry.centroid[1],
-                      latitudeDelta: 0.005,
-                      longitudeDelta: 0.005,
-                    }}
-                  >
-                    <Marker
-                      coordinate={{
-                        latitude: values.geometry.centroid[0],
-                        longitude: values.geometry.centroid[1],
-                      }}
-                    >
-                      <MaterialCommunityIcons
-                        name="home-map-marker"
-                        size={24}
-                        color="#0f172a"
+                <Surface style={styles.card} elevation={1}>
+                  <View style={{ flexDirection: "row" }}>
+                    <View style={{ flex: 1 }}>
+                      <FormInput
+                        label="STR NO"
+                        name="address.strNo"
+                        placeholder="Str No"
+                        keyboardType="default"
                       />
-                    </Marker>
-                  </MapView>
-                  <View style={styles.mapOverlay}>
-                    <MaterialCommunityIcons
-                      name="arrow-expand-all"
-                      size={20}
-                      color="#fff"
-                    />
-                    <Text style={styles.mapOverlayText}>
-                      Tap to Position Premise
-                    </Text>
+                    </View>
+                    <View style={{ flex: 2, marginLeft: 12 }}>
+                      <FormInput
+                        label="STR NAME"
+                        name="address.strName"
+                        placeholder="Str Name"
+                        autoCapitalize="words" // 🏛️ Auto-Title Case for Street Names
+                      />
+                    </View>
                   </View>
-                </TouchableOpacity> */}
+
+                  <FormSelect
+                    label="STREET TYPE"
+                    name="address.strType"
+                    options={streetTypeOptions}
+                  />
+                </Surface>
+
+                <Surface style={styles.card} elevation={1}>
+                  <FormMapPositioner
+                    label="Physical Premise Location"
+                    name="geometry.centroid"
+                    erfId={id}
+                    defaultLocation={erfCentroid}
+                  />
+                </Surface>
               </Surface>
 
-              {/* STRUCTURE MANIFEST */}
-              <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons
-                  name="office-building"
-                  size={18}
-                  color="#059669"
-                />
-                <Text style={styles.sectionTitle}>STRUCTURE MANIFEST</Text>
-              </View>
+              {/* 🎯 THE SOVEREIGN FOOTER */}
               <Surface style={styles.card} elevation={1}>
-                <Text style={styles.label}>PROPERTY / ESTATE NAME</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="e.g. Gemini-IO Estates"
-                  value={values.propertyType.name}
-                  onChangeText={(v) =>
-                    handleTextChange(setFieldValue, "propertyType.name", v)
-                  }
-                />
-                <Divider style={styles.divider} />
-                <View style={styles.toggleRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.toggleLabel}>
-                      Multi-Unit / Sectional Title
-                    </Text>
-                    <Text style={styles.toggleSubLabel}>
-                      Enable for flats, malls, or blocks
-                    </Text>
-                  </View>
-                  <Switch
-                    value={values.isSectionalTitle}
-                    color="#059669"
-                    onValueChange={(v) => setFieldValue("isSectionalTitle", v)}
-                  />
-                </View>
-
-                {values.isSectionalTitle && (
-                  <View style={styles.multiUnitBox}>
-                    <Divider style={styles.divider} />
-                    <View style={styles.row}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.label}>BLOCK NAME</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="Block A"
-                          value={values.blockName}
-                          onChangeText={(v) =>
-                            handleTextChange(setFieldValue, "blockName", v)
-                          }
-                        />
-                      </View>
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={styles.label}>UNIT NUMBER</Text>
-                        <TextInput
-                          style={styles.input}
-                          placeholder="101"
-                          onChangeText={(v) =>
-                            setFieldValue("propertyType.unitNo", [v])
-                          }
-                        />
-                      </View>
-                    </View>
-                  </View>
-                )}
+                <FormFooter />
               </Surface>
 
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={styles.resetBtn}
-                  onPress={() => resetForm()}
-                >
-                  <MaterialCommunityIcons
-                    name="refresh"
-                    size={20}
-                    color="#64748b"
-                  />
-                  <Text style={styles.resetBtnText}>RESET</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  // Keep it always visible, but logic handles tap-ability
-                  disabled={!isValid || isSubmitting}
-                  style={[
-                    styles.submitBtn, // Using your existing submitBtn style
-                    (!isValid || isSubmitting) && styles.btnDisabled, // Override with disabled looks
-                  ]}
-                  onPress={handleSubmit}
-                >
-                  {isSubmitting ? (
-                    <ActivityIndicator color="#FFF" />
-                  ) : (
-                    <View
-                      style={{ flexDirection: "row", alignItems: "center" }}
-                    >
-                      {/* <MaterialCommunityIcons
-                      name="check-bold"
-                      size={20}
-                      // Change icon color based on validity
-                      color={!isValid ? "#fa0000" : "#fff"}
-                    /> */}
-                      <Feather
-                        name={!isValid ? "x" : "check"}
-                        size={24}
-                        color={!isValid ? "#fa0000" : "#03ff5b"}
-                      />
-                      <Text
-                        style={[
-                          styles.submitBtnText,
-                          !isValid && {
-                            color: !isValid ? "#fa0000" : "#03ff5b",
-                          }, // Change text color based on validity
-                        ]}
-                      >
-                        SUBMIT
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              </View>
               <View style={{ height: 40 }} />
             </ScrollView>
           </View>

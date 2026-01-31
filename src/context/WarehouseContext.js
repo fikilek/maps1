@@ -39,6 +39,11 @@ export const WarehouseProvider = ({ children }) => {
     { lmPcode },
     { skip: !lmPcode },
   );
+  // console.log(`WarehouseProvider----erfStore`, erfStore);
+  // console.log(
+  //   `WarehouseProvider----erfStore.geoEntries.W048C039000500000214000000`,
+  //   erfStore?.geoEntries?.W048C039000500000214000000,
+  // );
 
   const { data: cloudPrems, isLoading: premsLoading } =
     useGetPremisesByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });

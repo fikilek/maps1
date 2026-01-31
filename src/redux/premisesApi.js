@@ -31,7 +31,7 @@ export const premisesApi = createApi({
           const { lmPcode } = arg; // ✅ Extract from object
           const q = query(
             collection(db, "premises"),
-            where("parents.localMunicipalityId", "==", lmPcode),
+            where("parents.lmId", "==", lmPcode),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {

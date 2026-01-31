@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Badge, Surface } from "react-native-paper";
 import { useGeo } from "../../../src/context/GeoContext";
-import { premiseMemory } from "../../../src/storage/premiseMemory";
+import { useGetPremisesByLmPcodeQuery } from "../../../src/redux/premisesApi";
 
 // 🎨 Derive color based on occupancy status
 const getStatusColor = (status) => {
@@ -171,6 +171,7 @@ export default function ErfDetailScreen() {
   const router = useRouter();
 
   const { geoState } = useGeo();
+
   // console.log(
   //   `PremiseDetailScreen ----geoState?.selectedErf`,
   //   geoState?.selectedErf,
@@ -179,45 +180,122 @@ export default function ErfDetailScreen() {
   // const { premises, isRestockingPremises } = useWarehouse();
   // 🎯 Pull from Vault immediately on mount/render
 
+  // const premises = useMemo(() => {
+  //   const activeErfId = id || geoState?.selectedErf?.id;
+  //   const lmPcode = geoState?.selectedLm?.id;
+
+  //   if (!activeErfId || !lmPcode) return [];
+
+  //   const localVault = premiseMemory.getLmList(lmPcode) || [];
+
+  //   // 🎯 THE FIX: Cloud items are IDs (strings). We only need the full objects from the vault.
+  //   // In your architecture, the 'localVault' is the "Master Truth" because
+  //   // RTK Query/MMKV ensures every cloud item is also saved locally.
+  //   const objectMap = new Map();
+
+  //   // 1. Process the Vault (which contains both synced and unsynced items)
+  //   localVault.forEach((item) => {
+  //     // 🛡️ Forensic Check: Ensure the item belongs to THIS Erf
+  //     if (item && item.erfId === activeErfId) {
+  //       objectMap.set(item.id, item);
+  //     }
+  //   });
+
+  //   // 2. Convert to Array and Sort using the correct "Frozen" paths
+  //   return Array.from(objectMap.values()).sort((a, b) => {
+  //     // 🏛️ Path Correction: a.metadata.updated.at (ISO String)
+  //     const timeA = new Date(
+  //       a.metadata?.updated?.at || a.metadata?.created?.at || 0,
+  //     ).getTime();
+
+  //     const timeB = new Date(
+  //       b.metadata?.updated?.at || b.metadata?.created?.at || 0,
+  //     ).getTime();
+
+  //     // Latest mission first
+  //     return timeB - timeA;
+  //   });
+  // }, [id, geoState?.selectedErf?.premises, geoState?.selectedLm]);
+
+  // const premises = useMemo(() => {
+  //   const activeErfId = id || geoState?.selectedErf?.id;
+  //   const lmPcode = geoState?.selectedLm?.id;
+
+  //   if (!activeErfId || !lmPcode) return [];
+
+  //   const localVault = premiseMemory.getLmList(lmPcode) || [];
+  //   console.log(
+  //     `PremiseDetailScreen ----localVault?.length`,
+  //     localVault?.length,
+  //   );
+
+  //   const objectMap = new Map();
+
+  //   const cloudItems = geoState?.selectedErf?.premises || [];
+  //   console.log(
+  //     `PremiseDetailScreen ----cloudItems?.length`,
+  //     cloudItems?.length,
+  //   );
+
+  //   // 1. Merge Cloud and Local (Standard: Objects only)
+  //   [...cloudItems, ...localVault].forEach((item) => {
+  //     if (item && typeof item === "object" && item.erfId === activeErfId) {
+  //       objectMap.set(item.id, item);
+  //     }
+  //   });
+
+  //   console.log(`PremiseDetailScreen ----objectMap`, objectMap);
+  //   // 2. Convert to Array and Sort by updatedAt.timestamp
+  //   return Array.from(objectMap.values()).sort((a, b) => {
+  //     // Use updatedAt if available, fallback to createdAt, fallback to 0
+  //     const dateA = new Date(
+  //       a.metadata?.updatedAt?.timestamp ||
+  //         a.metadata?.createdAt?.timestamp ||
+  //         0,
+  //     ).getTime();
+
+  //     const dateB = new Date(
+  //       b.metadata?.updatedAt?.timestamp ||
+  //         b.metadata?.createdAt?.timestamp ||
+  //         0,
+  //     ).getTime();
+
+  //     // Descending order (Latest timestamp at index 0)
+  //     return dateB - dateA;
+  //   });
+  // }, [id, geoState?.selectedErf, geoState?.selectedLm]);
+
+  // 🛰️ 1. Call the Sovereign Query (Ensure this is in your component)
+
+  const { data: premisesData } = useGetPremisesByLmPcodeQuery({
+    lmPcode: geoState?.selectedLm?.id,
+  });
+  // console.log(`PremiseDetailScreen ----premisesData`, premisesData);
+  // console.log(
+  //   `PremiseDetailScreen ----premisesData?.length`,
+  //   premisesData?.length,
+  // );
+
+  // 🏛️ 2. The Filtered Resolver
   const premises = useMemo(() => {
     const activeErfId = id || geoState?.selectedErf?.id;
-    const lmPcode = geoState?.selectedLm?.id;
 
-    if (!activeErfId || !lmPcode) return [];
+    // If the query hasn't returned data yet, return empty
+    if (!premisesData || !activeErfId) return [];
 
-    const localVault = premiseMemory.getLmList(lmPcode) || [];
-    const objectMap = new Map();
+    // 🎯 THE DIRECT HIT: Filter the RTK Cache directly
+    // We look for any premise where erfId matches our current target
+    return premisesData
+      .filter((p) => p.erfId === activeErfId)
+      .sort((a, b) => {
+        // 🏛️ Path Correction for the new Sovereign timestamps
+        const dateA = new Date(a.metadata?.updated?.at || 0).getTime();
+        const dateB = new Date(b.metadata?.updated?.at || 0).getTime();
+        return dateB - dateA; // Latest first
+      });
+  }, [id, premisesData, geoState?.selectedErf?.id]);
 
-    const cloudItems = geoState?.selectedErf?.premises || [];
-
-    // 1. Merge Cloud and Local (Standard: Objects only)
-    [...cloudItems, ...localVault].forEach((item) => {
-      if (item && typeof item === "object" && item.erfId === activeErfId) {
-        objectMap.set(item.id, item);
-      }
-    });
-
-    // 2. Convert to Array and Sort by updatedAt.timestamp
-    return Array.from(objectMap.values()).sort((a, b) => {
-      // Use updatedAt if available, fallback to createdAt, fallback to 0
-      const dateA = new Date(
-        a.metadata?.updatedAt?.timestamp ||
-          a.metadata?.createdAt?.timestamp ||
-          0,
-      ).getTime();
-
-      const dateB = new Date(
-        b.metadata?.updatedAt?.timestamp ||
-          b.metadata?.createdAt?.timestamp ||
-          0,
-      ).getTime();
-
-      // Descending order (Latest timestamp at index 0)
-      return dateB - dateA;
-    });
-  }, [id, geoState?.selectedErf, geoState?.selectedLm]);
-
-  console.log(`PremiseDetailScreen ----premises?.length`, premises?.length);
+  // console.log(`PremiseDetailScreen ----premises?.length`, premises?.length);
   // console.log(`PremiseDetailScreen ----premises`, premises);
 
   // 🎯 Filter to only show premises for this specific Erf Anchor

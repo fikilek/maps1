@@ -7,7 +7,7 @@ import { geoMemory } from "../storage/geoMemory";
 import { premiseMemory } from "../storage/premiseMemory";
 
 export const HandleNuclearReset = () => {
-  const { updateGeo } = useGeo();
+  const { setGeoState } = useGeo();
   const router = useRouter();
 
   const handleNuclearReset = () => {
@@ -23,7 +23,7 @@ export const HandleNuclearReset = () => {
             erfMemory.clearAll();
             geoMemory.clearAll();
             premiseMemory.clearAll();
-            updateGeo({
+            setGeoState({
               selectedLm: null,
               selectedWard: null,
               selectedErf: null,

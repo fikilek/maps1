@@ -16,17 +16,24 @@ import { useWarehouse } from "../../../src/context/WarehouseContext";
 // 🏛️ CONTEXTS
 
 // 🎯 THE NEW STANDARDIZED PREMISE CARD
+
 const PremiseItem = memo(function PremiseItem({
   item,
   onMapPress,
   onDiscover,
   onInstall,
   onDetailPress,
+  onNaPress, // 🛰️ New prop for the Step 3 Modal trigger
 }) {
   const addressStr =
     `${item?.address?.strNo || ""} ${item?.address?.strName || ""} ${item?.address?.strType || ""}`.trim();
   const propertyTypeStr = `${item?.propertyType?.type || "Residential"}`;
   const erfIdStr = `${item?.erfId || item?.erfNo || "N/A"}`;
+
+  // 🎯 Forensic Logic: Count the failures
+  const naCount = Array.isArray(item?.metadata?.naCount)
+    ? item.metadata.naCount.length
+    : 0;
 
   return (
     <TouchableOpacity
@@ -45,7 +52,6 @@ const PremiseItem = memo(function PremiseItem({
           </Text>
         </View>
 
-        {/* 🗺️ Standardized Map Icon (Matches ErfItem) */}
         <TouchableOpacity
           style={styles.mapAction}
           onPress={() => onMapPress(item)}
@@ -61,20 +67,35 @@ const PremiseItem = memo(function PremiseItem({
         </TouchableOpacity>
       </View>
 
-      {/* 🎯 ROW 2: INFRASTRUCTURE ANCHOR (ERF + METERS) */}
+      {/* 🎯 ROW 2: INFRASTRUCTURE ANCHOR (ERF + METERS + NA) */}
       <View style={styles.anchorRow}>
-        <View style={styles.erfBadge}>
-          <MaterialCommunityIcons
-            name="layers-outline"
-            size={14}
-            color="#64748b"
-          />
-          {/* <Text style={styles.erfLabel}>ERF {item?.erfId || "N/A"}</Text> */}
-          <Text style={styles.erfLabel}>{`ERF ${erfIdStr}`}</Text>
+        <View style={styles.leftMeta}>
+          {/* <View style={styles.erfBadge}>
+            <MaterialCommunityIcons
+              name="layers-outline"
+              size={14}
+              color="#64748b"
+            />
+            <Text style={styles.erfLabel}>{`ERF ${erfIdStr}`}</Text>
+          </View> */}
+
+          {/* 🛡️ THE NO ACCESS BADGE: Only appears if friction exists */}
+          {naCount > 0 && (
+            <TouchableOpacity
+              style={styles.naBadge}
+              onPress={() => onNaPress?.(item)}
+            >
+              <MaterialCommunityIcons
+                name="shield-alert-outline"
+                size={14}
+                color="#EA580C"
+              />
+              <Text style={styles.naCountText}>{naCount} NA</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.meterStats}>
-          {/* ⚡ Electricity Count */}
           <View style={styles.statItem}>
             <MaterialCommunityIcons
               name="lightning-bolt"
@@ -82,20 +103,17 @@ const PremiseItem = memo(function PremiseItem({
               color="#EAB308"
             />
             <Text style={styles.statCount}>
-              {/* 🎯 Count the IDs in the array, default to 0 if empty/missing */}
               {Array.isArray(item?.services?.electricityMeters)
-                ? item?.services?.electricityMeters?.length
+                ? item.services.electricityMeters.length
                 : 0}
             </Text>
           </View>
 
-          {/* 💧 Water Count */}
           <View style={[styles.statItem, { marginLeft: 12 }]}>
             <MaterialCommunityIcons name="water" size={16} color="#3B82F6" />
             <Text style={styles.statCount}>
-              {/* 🎯 Count the IDs in the array, default to 0 if empty/missing */}
               {Array.isArray(item?.services?.waterMeters)
-                ? item?.services?.waterMeters?.length
+                ? item.services.waterMeters.length
                 : 0}
             </Text>
           </View>
@@ -132,14 +150,131 @@ const PremiseItem = memo(function PremiseItem({
   );
 });
 
+// const PremiseItem = memo(function PremiseItem({
+//   item,
+//   onMapPress,
+//   onDiscover,
+//   onInstall,
+//   onDetailPress,
+// }) {
+//   const addressStr =
+//     `${item?.address?.strNo || ""} ${item?.address?.strName || ""} ${item?.address?.strType || ""}`.trim();
+//   const propertyTypeStr = `${item?.propertyType?.type || "Residential"}`;
+//   const erfIdStr = `${item?.erfId || item?.erfNo || "N/A"}`;
+
+//   return (
+//     <TouchableOpacity
+//       style={styles.card}
+//       onPress={() => onDetailPress(item)}
+//       activeOpacity={0.9}
+//     >
+//       {/* 🎯 ROW 1: ADDRESS & MAP PORTAL */}
+//       <View style={styles.cardHeader}>
+//         <View style={styles.addressSection}>
+//           <Text style={styles.addressText} numberOfLines={1}>
+//             {addressStr || "No Address Found"}
+//           </Text>
+//           <Text style={styles.propertyTypeText}>
+//             {`${propertyTypeStr}${item?.propertyType?.name ? ` • ${item?.propertyType.name}` : ""}`}
+//           </Text>
+//         </View>
+
+//         {/* 🗺️ Standardized Map Icon (Matches ErfItem) */}
+//         <TouchableOpacity
+//           style={styles.mapAction}
+//           onPress={() => onMapPress(item)}
+//         >
+//           <View style={styles.iconCircle}>
+//             <MaterialCommunityIcons
+//               name="map-search"
+//               size={22}
+//               color="#00BFFF"
+//             />
+//           </View>
+//           <Text style={styles.mapLabel}>MAP</Text>
+//         </TouchableOpacity>
+//       </View>
+
+//       {/* 🎯 ROW 2: INFRASTRUCTURE ANCHOR (ERF + METERS) */}
+//       <View style={styles.anchorRow}>
+//         <View style={styles.erfBadge}>
+//           <MaterialCommunityIcons
+//             name="layers-outline"
+//             size={14}
+//             color="#64748b"
+//           />
+//           {/* <Text style={styles.erfLabel}>ERF {item?.erfId || "N/A"}</Text> */}
+//           <Text style={styles.erfLabel}>{`ERF ${erfIdStr}`}</Text>
+//         </View>
+
+//         <View style={styles.meterStats}>
+//           {/* ⚡ Electricity Count */}
+//           <View style={styles.statItem}>
+//             <MaterialCommunityIcons
+//               name="lightning-bolt"
+//               size={16}
+//               color="#EAB308"
+//             />
+//             <Text style={styles.statCount}>
+//               {/* 🎯 Count the IDs in the array, default to 0 if empty/missing */}
+//               {Array.isArray(item?.services?.electricityMeters)
+//                 ? item?.services?.electricityMeters?.length
+//                 : 0}
+//             </Text>
+//           </View>
+
+//           {/* 💧 Water Count */}
+//           <View style={[styles.statItem, { marginLeft: 12 }]}>
+//             <MaterialCommunityIcons name="water" size={16} color="#3B82F6" />
+//             <Text style={styles.statCount}>
+//               {/* 🎯 Count the IDs in the array, default to 0 if empty/missing */}
+//               {Array.isArray(item?.services?.waterMeters)
+//                 ? item?.services?.waterMeters?.length
+//                 : 0}
+//             </Text>
+//           </View>
+//         </View>
+//       </View>
+
+//       {/* 🎯 ROW 3: METER WORKFLOW BUTTONS */}
+//       <View style={styles.actionRow}>
+//         <TouchableOpacity
+//           style={[styles.btn, styles.btnDiscover]}
+//           onPress={() => onDiscover(item)}
+//         >
+//           <MaterialCommunityIcons
+//             name="magnify-scan"
+//             size={18}
+//             color="#1E293B"
+//           />
+//           <Text style={styles.btnText}>Discover</Text>
+//         </TouchableOpacity>
+
+//         <TouchableOpacity
+//           style={[styles.btn, styles.btnInstall]}
+//           onPress={() => onInstall(item)}
+//         >
+//           <MaterialCommunityIcons
+//             name="plus-circle-outline"
+//             size={18}
+//             color="#FFF"
+//           />
+//           <Text style={[styles.btnText, { color: "#FFF" }]}>Install</Text>
+//         </TouchableOpacity>
+//       </View>
+//     </TouchableOpacity>
+//   );
+// });
+
 PremiseItem.displayName = "PremiseItem";
 
 export default function PremisesScreen() {
+  console.log(`PremisesScreen ---mounted`);
   const router = useRouter();
-  const { filtered, loading } = useWarehouse();
+  const { all, filtered, loading } = useWarehouse();
   // console.log(`GeoProvider ----filtered`, filtered);
 
-  const { geoState, updateGeo } = useGeo();
+  const { geoState, setGeoState } = useGeo();
 
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedPremise, setSelectedPremise] = useState(null);
@@ -230,11 +365,33 @@ export default function PremisesScreen() {
             item={item}
             onDetailPress={(p) => router.push(`/erfs/${p?.erfId}`)}
             onMapPress={(p) => {
-              updateGeo({ selectedErf: { id: p?.erfId, erfNo: p?.erfId } });
+              // 🏛️ 1. ACCESS THE WAREHOUSE:
+              // We need the full Erf data (Geo + Meta) for the map to work.
+              const fullErf = all?.metaEntries?.find((e) => e.id === p?.erfId);
+
+              // 🛡️ 2. THE SOVEREIGN UPDATE
+              setGeoState((prev) => ({
+                ...prev,
+                selectedErf: fullErf || { id: p?.erfId, erfNo: p?.erfNo }, // Fallback to basic info
+                selectedPremise: p, // 🎯 Highlight this specific premise on the map
+              }));
+
+              // 🚀 3. THE JUMP
               router.push("/(tabs)/maps");
             }}
             onDiscover={(p) => handleOpenDiscovery(p)}
             onInstall={(p) => console.log("Installing meter for:", p?.id)}
+            onNaPress={(premise) => {
+              console.log(
+                `📡 Pilot: Diverting to No Access Ledger for Premise: ${premise.id}`,
+              );
+
+              // 🚀 NAVIGATE: We pass the ID so NaScreen can fetch the relevant stream
+              router.push({
+                pathname: "/premises/NaScreen", // 🎯 Path to your new file
+                params: { premiseId: premise.id },
+              });
+            }}
           />
         )}
       />
@@ -441,5 +598,27 @@ const styles = StyleSheet.create({
   confirmButton: {
     marginTop: 10,
     borderRadius: 8,
+  },
+
+  leftMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  naBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFEDD5", // Light Orange
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FED7AA",
+    marginLeft: 8,
+  },
+  naCountText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#EA580C", // Deep Warning Orange
+    marginLeft: 4,
   },
 });
