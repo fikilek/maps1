@@ -1,7 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik } from "formik";
-import { useState } from "react";
 import {
   Dimensions,
   ScrollView,
@@ -13,15 +12,19 @@ import {
 } from "react-native";
 import { Divider, Surface, Switch } from "react-native-paper";
 
+import { useMemo } from "react";
 import * as Yup from "yup";
-import FormFooter from "../../../components/forms/FormFooter";
 import FormInput from "../../../components/forms/FormInput";
 import FormMapPositioner from "../../../components/forms/FormMapPositioner";
 import FormSelect from "../../../components/forms/FormSelect";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import { useAuth } from "../../hooks/useAuth";
-import { useAddPremiseMutation } from "../../redux/premisesApi";
+import {
+  useAddPremiseMutation,
+  useUpdatePremiseMutation,
+} from "../../redux/premisesApi";
+import { ForensicFooter } from "../meters/ForensicFooter";
 
 const { width, height } = Dimensions.get("window");
 
@@ -96,6 +99,7 @@ const PremiseSchema = Yup.object().shape({
           "Vandalised",
           "Under Consrtruction",
           "Dilapidated",
+          "Accessed",
         ],
         "Invalid Status",
       )
@@ -109,23 +113,30 @@ const PremiseSchema = Yup.object().shape({
 });
 
 export default function FormPremise() {
-  console.log(` `);
-  console.log(`FormPremise ----mounted`);
+  // console.log(`FormPremise ----mounted`);
 
   const { all } = useWarehouse();
-  console.log(`FormPremise ----all?.geoEntries`, all?.geoEntries);
   const router = useRouter();
-  const { id } = useLocalSearchParams(); // This is the Erf ID
-  console.log(`FormPremise ----selectedErf?.erfId`, id);
+
+  const { id, premiseId, duplicateId } = useLocalSearchParams();
+
+  // 🕵️ 2. DETERMINE MISSION MODE
+  const isEdit = !!premiseId;
+  // console.log(`FormPremise ----isEdit`, isEdit);
+  const isDuplicate = !!duplicateId;
+  // console.log(`FormPremise ----isDuplicate`, isDuplicate);
+
+  // 🏛️ 3. RESOLVE SOURCE DATA FROM WAREHOUSE
+  const sourcePremise = useMemo(() => {
+    const targetId = premiseId || duplicateId; // Look for either the target or the template
+    if (!targetId) return null;
+    return all?.prems?.find((p) => p.id === targetId);
+  }, [premiseId, duplicateId, all?.prems]);
+
+  const { authState } = useAuth();
 
   const { geoState } = useGeo();
   // console.log(`FormPremise ----geoState`, geoState);
-  const { user } = useAuth();
-
-  /* LOCAL STATES */
-  const [typeModal, setTypeModal] = useState(null);
-  // console.log(`FormPremise ----typeModal`, typeModal);
-  const [mapFullVisible, setMapFullVisible] = useState(false);
 
   /* SELECTED ERF METADATA  */
   const targetGeo = all?.geoEntries?.[id] || null;
@@ -138,95 +149,157 @@ export default function FormPremise() {
   const safeErfNo = erfNo.replace(/\//g, "-");
 
   // 🎯 THE LOCK: Icon lands exactly on the Erf's Centroid
-  const erfCentroid = targetGeo?.centroid
-    ? [targetGeo.centroid.lat, targetGeo.centroid.lng]
-    : [-34.028, 23.076]; // 🛡️ Hard fallback to prevent 'undefined' crash
-  console.log(`FormPremise ----erfCentroid`, erfCentroid);
+
+  /* 🛰️ GEOMETRY RESOLVER: Tiered Fallback */
+  const erfCentroid = useMemo(() => {
+    // 🎯 TIER 1: The Erf's actual SG/GIS Centroid (High Precision)
+    if (targetGeo?.centroid) {
+      return [targetGeo.centroid.lat, targetGeo.centroid.lng];
+    }
+
+    // 🎯 TIER 3: The LM's Centroid (Municipal Center)
+    // Pulling from the warehouse metadata
+    if (all?.meta?.centroid) {
+      return [all.meta.centroid.lat, all.meta.centroid.lng];
+    }
+
+    // 🛡️ LAST RESORT: Safe Municipal Default (Knysna area)
+    return [-34.035, 23.048];
+  }, [targetGeo, geoState?.userLocation, all?.meta?.centroid]);
 
   // 🌍 REGIONAL HIERARCHY: Direct from the Erf's admin block
   const admin = selectedErf?.admin;
   const lmId = admin?.localMunicipality?.pcode; // e.g. "ZA1048"
   const dmId = admin?.district?.pcode; // e.g. "ZA104"
   const provinceId = admin?.province?.pcode; // e.g. "ZA1"
+  const countryId = admin?.country?.pcode; // e.g. "ZA1"
 
-  const initialValues = {
-    id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
-    erfId: id,
-    erfNo: erfNo,
+  // 🎯 THE INTELLIGENCE RESOLVER
 
-    address: {
-      strNo: "",
-      strName: "",
-      strType: "",
-    },
+  const initialValues = useMemo(() => {
+    const timestamp = new Date().toISOString();
+    const agentStamp = {
+      at: timestamp,
+      byUser: authState?.user?.displayName || "Field Agent",
+      byUid: authState?.user?.uid || "unknown_uid",
+    };
 
-    propertyType: {
-      type: "",
-      name: "",
-      unitNo: "", // 🎯 String for individual identity
-    },
+    // 🛡️ MODE A: THE EDIT (Preserve Identity & History)
+    if (isEdit && sourcePremise) {
+      return {
+        ...sourcePremise,
+        metadata: {
+          ...sourcePremise.metadata,
+          updated: agentStamp, // Only the update pulse changes
+        },
+      };
+    }
 
-    metadata: {
-      created: {
-        byUser: user?.displayName || "Field Agent",
-        byUid: user?.uid || "field_agent",
-        at: new Date().toISOString(),
+    // 👯 MODE B: THE DUPLICATE (Selective Cloning)
+    if (isDuplicate && sourcePremise) {
+      return {
+        ...sourcePremise,
+        // 🎯 NEW IDENTITY
+        id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
+
+        // 🎯 FRESH START: Wipe Meters & Specific Unit Number
+        services: { electricityMeters: [], waterMeters: [] },
+        propertyType: { ...sourcePremise.propertyType, unitNo: "" },
+
+        metadata: {
+          ...sourcePremise.metadata,
+          // 🛡️ THE NA RESET: The new twin has no visit history
+          naCount: [],
+
+          // 🏛️ AUDIT TRAIL: New birth event
+          created: agentStamp,
+          updated: agentStamp,
+          isGpsVerified: true, // We trust the parent structure's location
+        },
+      };
+    }
+
+    return {
+      id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
+      erfId: id,
+      erfNo: erfNo,
+      address: { strNo: "", strName: "", strType: "" },
+      propertyType: { type: "", name: "", unitNo: "" },
+      metadata: {
+        created: agentStamp,
+        updated: agentStamp,
+        lmPcode: lmId,
+        isGpsVerified: false,
       },
-      updated: {
-        byUser: user?.displayName || "Field Agent",
-        byUid: user?.uid || "field_agent",
-        at: new Date().toISOString(),
+      geometry: { centroid: erfCentroid },
+      services: { electricityMeters: [], waterMeters: [] },
+      occupancy: { status: "Occupied" },
+      context: selectedErf?.isTownship ? "Township" : "Suburb",
+      parents: {
+        lmId: lmId || null,
+        dmId: dmId || null,
+        provinceId: provinceId || null,
+        countryId: countryId || null,
       },
-      lmPcode: lmId,
-      isGpsVerified: false,
-    },
+    };
+  }, [
+    isEdit,
+    isDuplicate,
+    sourcePremise,
+    id,
+    erfNo,
+    safeErfNo,
+    erfCentroid,
+    lmId,
+    dmId,
+    provinceId,
+    authState?.user,
+  ]);
 
-    geometry: {
-      centroid: erfCentroid, // premise inital geometry
-    },
-
-    services: {
-      electricityMeters: [],
-      waterMeters: [],
-    },
-
-    occupancy: { status: "Occupied" },
-
-    // 🏙️ Context: "township" or "suburb" can be derived or toggled
-    context: selectedErf?.isTownship ? "Township" : "Suburb",
-
-    parents: {
-      lmId: lmId || null,
-      dmId: dmId || null,
-      provinceId: provinceId || null,
-    },
-  };
   // console.log(`FormPremise ----initialValues`, initialValues);
+  // console.log(`FormPremise ---sourcePremise`, sourcePremise);
 
   const [addPremise] = useAddPremiseMutation();
+  const [updatePremise] = useUpdatePremiseMutation(); // 🎯 Ensure this is in your API slice
 
   const handleSubmit = async (values, { setSubmitting }) => {
-    console.log(`🚀 Mission Commencing: Submitting Premise ${values.id}`);
+    // 🕵️ Determine if this is an Edit or a New Capture
+    const isEdit = !!values?.id;
 
     try {
-      // 🛰️ 2. EXECUTE CLOUD MUTATION
-      // onQueryStarted (in your API slice) will handle the optimistic
-      // injection into the local RAM and MMKV Vault.
-      await addPremise(values).unwrap();
+      // 🛰️ 1. PREPARE SOVEREIGN METADATA
+      // We ensure the 'updated' block follows the nested standard: { at, byUser, byUid }
+      const finalValues = {
+        ...values,
+        metadata: {
+          ...values.metadata,
+          updated: {
+            at: new Date().toISOString(),
+            byUser: authState?.user?.displayName || "Field Agent",
+            byUid: authState?.user?.uid || "unknown_uid",
+          },
+        },
+      };
+
+      // 🛰️ 2. EXECUTE THE CORRECT MUTATION
+      if (isEdit) {
+        // console.log(`FormPremise ---EDIT FORM ---finalValues`, finalValues);
+        await updatePremise(finalValues).unwrap();
+      } else {
+        // console.log(`FormPremise ---NEW FORM ---finalValues`, finalValues);
+        await addPremise(finalValues).unwrap();
+      }
 
       // 🏛️ 3. SUCCESS NAVIGATION
-      // Return to the Erf details screen - the new Premise will be
-      // waiting there thanks to the RTK Tag invalidation.
-      router.replace(`/(tabs)/erfs/${values.erfId}`);
+      // Tactical retreat to the Erf details screen to view the updated stack
+      router.replace(`/(tabs)/erfs/${values?.erfId}`);
     } catch (err) {
       // 🛡️ 4. OFFLINE-FIRST RESILIENCE
-      // In iREPS, a network failure isn't a mission failure.
-      // We log it and still navigate, as the mutation will sync later.
-      console.warn(`🛰️ Signal Lost but Data Vaulted: ${err.message}`);
+      // console.warn(`🛰️ Signal Lost but Data Vaulted: ${err.message}`);
+
       ToastAndroid.show("Saved Locally - Will sync when signal returns.");
-      router.replace(`/(tabs)/erfs/${values.erfId}`);
+      router.replace(`/(tabs)/erfs/${values?.erfId}`);
     } finally {
-      // 🔒 5. RELEASE FORM LOCK
       setSubmitting(false);
     }
   };
@@ -239,9 +312,6 @@ export default function FormPremise() {
       onSubmit={handleSubmit}
     >
       {({ setFieldValue, values, isSubmitting, errors }) => {
-        console.log(`FormPremise ----values`, values);
-        console.log(`FormPremise ----errors`, errors);
-
         return (
           <View style={styles.container}>
             <Stack.Screen
@@ -310,7 +380,7 @@ export default function FormPremise() {
                   </TouchableOpacity>
                 </Surface>
                 <FormSelect
-                  label="Property Type"
+                  label="Property Status"
                   name="occupancy.status"
                   options={premiseOccupancySatusOptions}
                   icon="office-building-marker"
@@ -329,20 +399,25 @@ export default function FormPremise() {
 
                   <Divider style={styles.divider} />
                   {/* PROPERTYTYPE unitName */}
-                  <FormInput
-                    label="Unit Name"
-                    name="propertyType.name"
-                    placeholder="Unit Name"
-                    keyboardType="default"
-                  />
-                  <Divider style={styles.divider} />
-                  {/* PROPERTYTYPE unitNo */}
-                  <FormInput
-                    label="Unit Number"
-                    name="propertyType.unitNo"
-                    placeholder="Unit Number"
-                    keyboardType="default"
-                  />
+                  {values?.propertyType?.type !== "Residential" &&
+                    values?.propertyType?.type !== "Vacant Land" && (
+                      <>
+                        <FormInput
+                          label="Unit Name"
+                          name="propertyType.name"
+                          placeholder="Unit Name"
+                          keyboardType="default"
+                        />
+                        <Divider style={styles.divider} />
+                        {/* PROPERTYTYPE unitNo */}
+                        <FormInput
+                          label="Unit Number"
+                          name="propertyType.unitNo"
+                          placeholder="Unit Number"
+                          keyboardType="default"
+                        />
+                      </>
+                    )}
                 </Surface>
               </Surface>
 
@@ -394,9 +469,10 @@ export default function FormPremise() {
               </Surface>
 
               {/* 🎯 THE SOVEREIGN FOOTER */}
-              <Surface style={styles.card} elevation={1}>
+              {/* <Surface style={styles.card} elevation={1}>
                 <FormFooter />
-              </Surface>
+              </Surface> */}
+              <ForensicFooter />
 
               <View style={{ height: 40 }} />
             </ScrollView>

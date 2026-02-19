@@ -87,7 +87,6 @@ export const premisesApi = createApi({
       },
     }),
 
-    // 🎯 THE SMART MUTATION (Handles Updates & Adds)
     addPremise: builder.mutation({
       async queryFn(newPremise) {
         try {
@@ -159,24 +158,24 @@ export const premisesApi = createApi({
             ),
           );
 
-          // 4. 📍 SYNC ERF RAM TO DISK (After Firestore Success)
+          // 🎯 4. 📍 META-ONLY DISK SYNC (Respecting Domain Isolation)
+          // 🎯 4. SAFE DISK SYNC
           await queryFulfilled;
           const state = getState();
           const result =
             erfsApi.endpoints.getErfsByLmPcode.select(queryArg)(state);
           const latestErfRam = result?.data;
 
-          if (latestErfRam?.metaEntries?.length > 0) {
-            const cleanData = {
+          // 🛡️ THE SOVEREIGN GUARD: Only save if RAM is actually populated (e.g., > 1 Erf)
+          if (latestErfRam?.metaEntries?.length > 1) {
+            const metaUpdate = {
               metaEntries: [...latestErfRam.metaEntries],
-              geoEntries: latestErfRam.geoEntries
-                ? { ...latestErfRam.geoEntries }
-                : {},
               wards: latestErfRam.wards ? [...latestErfRam.wards] : [],
+              // 🚫 WE DO NOT TOUCH GEO HERE
             };
-            erfMemory.saveErfsMetaList(lmPcode, cleanData);
+            erfMemory.saveErfsMetaList(lmPcode, metaUpdate);
             console.log(
-              `💾 [DISK SYNC]: Premise ${premiseId} committed to Erf Meta.`,
+              `✅ [STABLE SYNC]: Premise linked. No refetch triggered.`,
             );
           }
         } catch (err) {
@@ -185,126 +184,103 @@ export const premisesApi = createApi({
       },
     }),
 
-    // addPremise: builder.mutation({
-    //   async queryFn(newPremise) {
-    //     try {
-    //       const docRef = doc(db, "premises", newPremise.id);
-    //       await setDoc(docRef, newPremise);
-    //       return { data: newPremise };
-    //     } catch (error) {
-    //       return { error: error.message };
-    //     }
-    //   },
+    updatePremise: builder.mutation({
+      async queryFn(updatedPremise) {
+        try {
+          const docRef = doc(db, "premises", updatedPremise.id);
+          // 🛡️ Use merge: true to protect existing fields like 'services' or 'naCount'
+          await setDoc(docRef, updatedPremise, { merge: true });
+          return { data: updatedPremise };
+        } catch (error) {
+          return { error: error.message };
+        }
+      },
 
-    //   async onQueryStarted(newPremise, { dispatch, queryFulfilled, getState }) {
-    //     const { erfId, id: premiseId, metadata } = newPremise;
-    //     const lmPcode = metadata?.lmPcode;
+      async onQueryStarted(
+        updatedPremise,
+        { dispatch, queryFulfilled, getState },
+      ) {
+        const { id: premiseId, metadata } = updatedPremise;
+        const lmPcode = metadata?.lmPcode;
+        const queryArg = { lmPcode };
 
-    //     // 🎯 THE CONTRACT: Everything uses the Object key now
-    //     const queryArg = { lmPcode };
+        try {
+          // 1. 💾 DISK PATCH (Optimistic)
+          const currentDiskPrems = premiseMemory.getLmList(lmPcode) || [];
+          const updatedDiskList = currentDiskPrems.map((p) =>
+            p.id === premiseId ? { ...p, ...updatedPremise } : p,
+          );
+          premiseMemory.saveLmList(lmPcode, updatedDiskList);
 
-    //     try {
-    //       // 1. 💾 DISK: Premise Vault
-    //       const currentDiskPrems = premiseMemory.getLmList(lmPcode) || [];
-    //       premiseMemory.saveLmList(lmPcode, [...currentDiskPrems, newPremise]);
+          // 2. 💉 RAM PATCH (Optimistic)
+          dispatch(
+            premisesApi.util.updateQueryData(
+              "getPremisesByLmPcode",
+              queryArg,
+              (draft) => {
+                const index = draft.findIndex((p) => p.id === premiseId);
+                if (index !== -1) {
+                  // 🎯 Merge the update into the existing record in RAM
+                  draft[index] = { ...draft[index], ...updatedPremise };
+                }
+              },
+            ),
+          );
 
-    //       // 2. 💉 RAM PATCH: Premise List
-    //       dispatch(
-    //         premisesApi.util.updateQueryData(
-    //           "getPremisesByLmPcode",
-    //           queryArg,
-    //           (draft) => {
-    //             if (Array.isArray(draft)) {
-    //               if (!draft.find((p) => p.id === premiseId)) {
-    //                 draft.push(newPremise);
-    //               }
-    //             }
-    //           },
-    //         ),
-    //       );
+          // 3. 🏁 WAIT FOR CLOUD CONFIRMATION
+          await queryFulfilled;
+          console.log(
+            `✅ [CLOUD SYNC]: Premise ${premiseId} updated successfully.`,
+          );
+        } catch (err) {
+          console.error("❌ [UPDATE FAILED]:", err);
+          // 🛡️ Note: In a production "Nuclear" fail, you would trigger a refetch here
+        }
+      },
+    }),
 
-    //       // 3. 💉 RAM PATCH: Erf Link
-    //       const { erfsApi } = require("./erfsApi");
+    getPremisesByCountryCode: builder.query({
+      async queryFn() {
+        return { data: [] };
+      },
+      async onCacheEntryAdded(
+        { id }, // 🎯 THE SOVEREIGN OBJECT ARGUMENT
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        try {
+          await cacheDataLoaded;
+          if (!id) return;
 
-    //       dispatch(
-    //         erfsApi.util.updateQueryData(
-    //           "getErfsByLmPcode",
-    //           queryArg,
-    //           (draft) => {
-    //             const targetErf = draft?.metaEntries?.find(
-    //               (e) => e.id === erfId,
-    //             );
-    //             if (targetErf) {
-    //               if (!targetErf.premises) targetErf.premises = [];
-    //               if (!targetErf.premises.includes(premiseId)) {
-    //                 targetErf.premises.push(premiseId);
-    //               }
-    //             }
-    //           },
-    //         ),
-    //       );
+          // 🛡️ Guard: Querying by National Hierarchy
+          const q = query(
+            collection(db, "premises"),
+            where("parents.countryId", "==", id),
+          );
 
-    //       // 4. 📍 SYNC ERF RAM TO DISK
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData(() => {
+              return snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+            });
+          });
+        } catch (error) {
+          console.error("❌ [NATIONAL PREMISE ERROR]:", error);
+        }
 
-    //       // 4. 📍 SYNC ERF RAM TO DISK
-    //       // 4. 📍 SYNC ERF RAM TO DISK
-    //       await queryFulfilled;
-    //       const state = getState();
-
-    //       const result =
-    //         erfsApi.endpoints.getErfsByLmPcode.select(queryArg)(state);
-    //       const latestErfRam = result?.data;
-
-    //       // 🎯 ONLY PROCEED IF WE HAVE THE ACTUAL DATA
-    //       if (
-    //         latestErfRam &&
-    //         Array.isArray(latestErfRam.metaEntries) &&
-    //         latestErfRam.metaEntries.length > 0
-    //       ) {
-    //         // Create a clean, flat POJO (Plain Old JavaScript Object)
-    //         const cleanData = {
-    //           metaEntries: [...latestErfRam.metaEntries],
-    //           geoEntries: latestErfRam.geoEntries
-    //             ? { ...latestErfRam.geoEntries }
-    //             : {},
-    //           wards: latestErfRam.wards ? [...latestErfRam.wards] : [],
-    //         };
-
-    //         console.log(
-    //           `💾 [DISK SYNC]: Committing ${cleanData.metaEntries.length} items to Disk...`,
-    //         );
-
-    //         // Send the CLEAN object
-    //         erfMemory.saveErfsMetaList(lmPcode, cleanData);
-    //       } else {
-    //         console.warn(
-    //           "⚠️ [SYNC ABORTED]: RAM data was empty or invalid. Disk remains untouched.",
-    //         );
-    //       }
-
-    //       // await queryFulfilled;
-    //       // const state = getState();
-    //       // console.log(" ");
-    //       // console.log(`addPremise----onQueryStarted----state`, state);
-    //       // const latestErfRam =
-    //       //   erfsApi.endpoints.getErfsByLmPcode.select(queryArg)(state)?.data;
-    //       // console.log(
-    //       //   `addPremise----onQueryStarted----latestErfRam?.length`,
-    //       //   latestErfRam?.length,
-    //       // );
-    //       // if (latestErfRam) {
-    //       //   erfMemory.saveErfsMetaList(lmPcode, latestErfRam);
-    //       // }
-    //     } catch (err) {
-    //       console.error("❌ ERROR:", err);
-    //     }
-    //   },
-    // }),
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
 export const {
   useGetPremisesByLmPcodeQuery,
+  useGetPremisesByCountryCodeQuery,
   useSyncPremiseMutation, // The one for raw syncing
   useAddPremiseMutation, // 🎯 THE SMART ONE (Change your Form to use this!)
+  useUpdatePremiseMutation,
 } = premisesApi;

@@ -30,6 +30,7 @@ export const geoApi = createApi({
     "LocalMunicipality",
     "Town",
     "Ward", // 🔥 ADD THIS
+    "LMs",
   ],
   endpoints: (builder) => ({
     /* =========================
@@ -213,6 +214,60 @@ export const geoApi = createApi({
         }
       },
     }),
+
+    /* =========================
+       LOCAL MUNICIPALITIES (BY COUNTRY)
+    ========================= */
+
+    // 🌍 THE GLOBAL LM REGISTRY
+    getLmsByCountry: builder.query({
+      async queryFn() {
+        // Initial empty load – actual data is streamed via onCacheEntryAdded
+        return { data: [] };
+      },
+
+      async onCacheEntryAdded(
+        countryId,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        try {
+          await cacheDataLoaded;
+
+          console.log(`🛰️ LM REGISTRY START: Scoping to [${countryId}]`);
+
+          // 🎯 Target the 'parents.countryId' based on your Firestore doc structure
+          const q = query(
+            collection(db, "lms"),
+            where("parents.countryId", "==", countryId),
+          );
+
+          unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+              const lmsList = snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+
+              // Update the cache with the live list
+              updateCachedData(() => lmsList);
+            },
+            (error) => {
+              console.error("geoApi snapshot error:", error);
+            },
+          );
+        } catch (error) {
+          console.error("🛰️ Stream Error:", error);
+        }
+
+        await cacheEntryRemoved;
+        console.log("🛰️ LM REGISTRY STOP");
+        unsubscribe();
+      },
+      providesTags: ["LMs"],
+    }),
+
     /* =========================
        TOWNS
     ========================= */
@@ -355,6 +410,7 @@ export const {
   useGetCountriesQuery,
   useGetProvincesQuery,
   useGetDistrictsQuery,
+  useGetLmsByCountryQuery,
   useGetLocalMunicipalitiesQuery,
   useGetLocalMunicipalityByIdQuery, // 🔥 NEW
   useGetTownsQuery,

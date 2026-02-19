@@ -9,7 +9,6 @@ import { reduxStorage } from "./reduxStorage";
 // Example future slices (if/when you add them)
 import { astsApi } from "./astsApi";
 import { erfsApi } from "./erfsApi";
-import { metersApi } from "./metersApi";
 import offlineReducer from "./offlineSlice";
 import { premisesApi } from "./premisesApi";
 import { settingsApi } from "./settingsApi";
@@ -31,7 +30,6 @@ const rootReducer = combineReducers({
   [premisesApi.reducerPath]: premisesApi.reducer,
   [trnsApi.reducerPath]: trnsApi.reducer,
   [settingsApi.reducerPath]: settingsApi.reducer,
-  [metersApi.reducerPath]: metersApi.reducer,
   [astsApi.reducerPath]: astsApi.reducer,
   // App-level slices (example)
   offline: offlineReducer,
@@ -58,7 +56,6 @@ const persistConfig = {
     premisesApi.reducerPath,
     trnsApi.reducerPath,
     settingsApi.reducerPath,
-    metersApi.reducerPath,
     astsApi.reducerPath,
   ],
 };
@@ -86,7 +83,6 @@ export const store = configureStore({
       premisesApi.middleware,
       trnsApi.middleware,
       settingsApi.middleware,
-      metersApi.middleware,
       astsApi.middleware,
     ),
 });

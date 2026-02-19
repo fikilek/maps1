@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useFormikContext } from "formik";
+import { getIn, useFormikContext } from "formik";
 import { useState } from "react";
 import {
   Image,
@@ -12,34 +12,54 @@ import {
 } from "react-native";
 import { IrepsCamera } from "./IrepsCamera";
 
-export const IrepsMedia = ({ tag, agentName, agentUid }) => {
-  const { values, setFieldValue } = useFormikContext();
-  const [isPreviewVisible, setIsPreviewVisible] = useState(false); // 🎯 State for full-screen toggle
+// 🎯 1. Accept the 'name' prop
+export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
+  const { values, errors, setFieldValue } = useFormikContext();
+  const [isPreviewVisible, setIsPreviewVisible] = useState(false);
 
-  const capturedPhoto = (values?.accessData?.media || []).find(
-    (m) => m?.tag === tag,
-  );
+  // 🎯 2. Use getIn to find the array based on the name prop
+  // This will now find 'values.media' correctly
+  const mediaArray = getIn(values, name) || [];
+  const capturedPhoto = mediaArray.find((m) => m?.tag === tag);
+
+  // 🎯 3. Sync the error lookup
+  const mediaError = getIn(errors, name);
+
+  const isTargetedError =
+    (tag === "astNoPhoto" && mediaError?.includes("Meter")) ||
+    (tag === "anomalyPhoto" && mediaError?.includes("Anomaly")) ||
+    (tag === "noAccessPhoto" && mediaError?.includes("No Access")) ||
+    (tag === "keypadPhoto" && mediaError?.includes("Keypad")) ||
+    (tag === "astCbPhoto" && mediaError?.includes("Circuit Breaker")) ||
+    (tag === "ogsPhoto" && mediaError?.includes("Off Grid Supply")) ||
+    (tag === "normalisationPhoto" && mediaError?.includes("Normalisation"));
+
+  const hasError = !!mediaError && isTargetedError && !capturedPhoto;
 
   const removeImage = () => {
-    const newMedia = (values?.accessData?.media || []).filter(
-      (m) => m?.tag !== tag,
-    );
-    setFieldValue("accessData.media", newMedia);
+    const newMedia = mediaArray.filter((m) => m?.tag !== tag);
+    setFieldValue(name, newMedia); // 🎯 Use the name prop here too!
   };
 
   return (
-    <View style={styles.container}>
-      {/* LEFT: The Camera Button */}
+    <View style={[styles.container, hasError && styles.containerError]}>
       <View style={styles.cameraBox}>
-        <IrepsCamera tag={tag} agentName={agentName} agentUid={agentUid} />
+        {/* 🎯 4. PASS THE NAME TO THE CAMERA */}
+        <IrepsCamera
+          name={name}
+          tag={tag}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
       </View>
+      {/* ... rest of your UI code remains the same ... */}
 
       {/* RIGHT: The Forensic Ribbon */}
       <View style={styles.ribbonSlot}>
         {capturedPhoto ? (
           <TouchableOpacity
             style={styles.photoContainer}
-            onPress={() => setIsPreviewVisible(true)} // 🎯 Open Full Screen
+            onPress={() => setIsPreviewVisible(true)}
             activeOpacity={0.8}
           >
             <Image
@@ -70,9 +90,14 @@ export const IrepsMedia = ({ tag, agentName, agentUid }) => {
             </TouchableOpacity>
           </TouchableOpacity>
         ) : (
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>
-              NO {tag?.toUpperCase()} CAPTURED
+          <View
+            style={[styles.placeholder, hasError && styles.placeholderError]}
+          >
+            <Text
+              style={[styles.placeholderText, hasError && { color: "#ef4444" }]}
+            >
+              {hasError ? "📸 CAPTURE REQUIRED: " : "NO "}
+              {tag?.toUpperCase()} {hasError ? "MISSING" : "CAPTURED"}
             </Text>
           </View>
         )}
@@ -107,6 +132,18 @@ export const IrepsMedia = ({ tag, agentName, agentUid }) => {
 };
 
 const styles = StyleSheet.create({
+  containerError: {
+    borderColor: "#ef4444",
+    borderLeftWidth: 8, // 🎯 Extra emphasis for forensic gaps
+    backgroundColor: "#fff1f2",
+  },
+  placeholderError: {
+    borderColor: "#ef4444",
+    borderWidth: 2,
+    borderStyle: "solid", // 🎯 Change from dashed to solid for urgent errors
+    backgroundColor: "#ffe4e6",
+  },
+
   // ... existing styles for container, cameraBox, etc. ...
   container: {
     flexDirection: "row",

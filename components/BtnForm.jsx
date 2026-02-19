@@ -4,8 +4,8 @@ const BtnForm = (props) => {
   const {
     // TochableOpacity props
     backgroundColor = "indigo",
-    height = 30,
-    width = 60,
+    height = 60,
+    width = 90,
     isLoading = false,
     // Text props
     fontSize = 14,
@@ -24,6 +24,9 @@ const BtnForm = (props) => {
         borderRadius: 5,
         opacity: isLoading ? 0.2 : 1,
         disabled: isLoading,
+        // padding: 5,
+        justifyContent: "center",
+        alignItems: "center",
       }}
       onPress={handlePress}
     >

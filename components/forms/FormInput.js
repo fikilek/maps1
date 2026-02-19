@@ -5,31 +5,30 @@ const FormInput = ({
   label,
   name,
   placeholder,
-  autoCapitalize = "none",
+  autoCapitalize = "words",
   ...props
 }) => {
-  const { values, errors, touched, setFieldValue, handleBlur, isSubmitting } =
+  const { values, errors, setFieldValue, handleBlur, isSubmitting } =
     useFormikContext();
 
   const value = getIn(values, name);
   const error = getIn(errors, name);
-  const isTouched = getIn(touched, name);
 
   // 🎯 Visual logic: Show error if touched OR if form validated on mount
   const hasError = !!error;
 
   const handleTextChange = (text) => {
-    const capitalizedSentence = capitalizeWords(text);
-    setFieldValue(name, capitalizedSentence);
+    // const capitalizedSentence = capitalizeWords(text);
+    // setFieldValue(name, capitalizedSentence);
+    setFieldValue(name, text);
   };
 
-  // const handleTextChange = (text) => {
-  //   let formattedText = text;
-  //   if (autoCapitalize === "words") {
-  //     formattedText = text.replace(/\b\w/g, (l) => l.toUpperCase());
-  //   }
-  //   setFieldValue(name, formattedText);
-  // };
+  const handleFinalize = (e) => {
+    // 🏛️ Clean up the casing ONLY when they leave the field
+    const formatted = capitalizeWords(value || "");
+    setFieldValue(name, formatted, true);
+    handleBlur(name)(e);
+  };
 
   return (
     <View style={styles.container}>
@@ -45,8 +44,9 @@ const FormInput = ({
         placeholder={placeholder}
         value={value}
         onChangeText={handleTextChange}
-        onBlur={handleBlur(name)}
+        // onBlur={handleBlur(name)}
         editable={!isSubmitting} // 🛡️ Freeze on submit
+        onBlur={handleFinalize} // 🎯 Format on exit
         autoCapitalize={autoCapitalize}
         placeholderTextColor="#94a3b8"
         {...props}

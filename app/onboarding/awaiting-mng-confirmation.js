@@ -5,7 +5,7 @@ import { Avatar, Button, Card, Text } from "react-native-paper";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useSignoutMutation } from "../../src/redux/authApi";
 
-export default function PendingSPConfirmation() {
+export default function AwaitingMngConfirmation() {
   const [signout, { isLoading }] = useSignoutMutation();
 
   const router = useRouter();
@@ -29,7 +29,7 @@ export default function PendingSPConfirmation() {
           </Text>
           <Text style={styles.subtext}>
             Your Manager (MNG) needs to approve your account and assign your
-            Municipalities before you can access the map.
+            Municipalities before you can access iREPS.
           </Text>
         </Card.Content>
         <Card.Actions>

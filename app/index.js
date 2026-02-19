@@ -50,7 +50,9 @@ export default function Welcome() {
             <Button
               color="orange"
               title="View Approval Progress"
-              onPress={() => router.push("/onboarding/pending-sp-confirmation")}
+              onPress={() =>
+                router.push("/onboarding/awaiting-mng-confirmation")
+              }
             />
           )}
 

@@ -1,179 +1,159 @@
 import { useRouter } from "expo-router";
 import { Formik } from "formik";
-import {
-  Alert,
-  Button,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { TextInput } from "react-native-paper";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Button, Divider, TextInput } from "react-native-paper";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { adminInitValues } from "../../../../src/features/admin/adminInitValues";
-import { createAdminSchema } from "../../../../src/features/admin/createAdminSchema";
-import { useCreateAdminUserMutation } from "../../../../src/redux/authApi";
+// 🎯 Using the specific ADM mutation
+import { useInviteAdminMutation } from "../../../../src/redux/authApi";
 
 export default function CreateAdminScreen() {
   const router = useRouter();
-  const [createAdminUser, { isLoading }] = useCreateAdminUserMutation();
+  const [inviteAdmin, { isLoading: isInviting }] = useInviteAdminMutation();
 
-  const handleSubmit = async (values, { resetForm }) => {
-    console.log("CreateAdminScreen ----handleSubmit ----values", values);
+  const handleSubmit = async (values) => {
+    // 🛡️ FORM VALIDATION
+    if (!values.email || !values.name || !values.surname) {
+      return Alert.alert("Hold!", "All identity fields are required.");
+    }
 
     try {
-      const result = await createAdminUser({
-        email: values.email,
+      // 🚀 THE SOVEREIGN STRIKE
+      // Cloud function handles 'smars' and 'ALL' assignment behind the scenes
+      await inviteAdmin({
+        email: values.email.toLowerCase().trim(),
         name: values.name,
         surname: values.surname,
       }).unwrap();
 
-      console.log("CreateAdminScreen ----handleSubmit ----result", result);
-
       Alert.alert(
-        "Admin Created",
-        "Admin account created successfully.\nThe user will complete onboarding after signing in.",
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              resetForm();
-              router.back();
-            },
-          },
-        ]
+        "Mission Confirmed",
+        `Administrator ${values.name} appointed to smars.`,
       );
+      router.back();
     } catch (err) {
       Alert.alert(
-        "Creation Failed",
-        err?.message || "Unable to create admin user"
+        "Command Error",
+        err?.message || "Could not appoint administrator",
       );
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.sovereignLabel}>Appoint Administrator (ADM)</Text>
+
         <Formik
-          initialValues={adminInitValues}
-          validationSchema={createAdminSchema}
+          initialValues={{ email: "", name: "", surname: "" }}
           onSubmit={handleSubmit}
         >
-          {({
-            handleChange,
-            handleBlur,
-            handleSubmit: submitForm,
-            values,
-            errors,
-            touched,
-            resetForm,
-          }) => {
-            console.log("FORM ERRORS", errors);
-            return (
-              <>
-                {/* EMAIL */}
-                <TextInput
-                  label="Email"
-                  value={values.email}
-                  onChangeText={handleChange("email")}
-                  onBlur={handleBlur("email")}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  style={styles.input}
-                  error={touched.email && !!errors.email}
-                />
-                {touched.email && errors.email && (
-                  <Text style={styles.error}>{errors.email}</Text>
-                )}
+          {({ handleChange, handleSubmit, values }) => (
+            <View style={styles.form}>
+              {/* IDENTITY INPUTS */}
+              <TextInput
+                label="Email Address"
+                value={values.email}
+                onChangeText={handleChange("email")}
+                mode="outlined"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                style={styles.input}
+              />
 
-                {/* NAME */}
+              <View style={styles.row}>
                 <TextInput
-                  label="Name"
+                  label="First Name"
                   value={values.name}
                   onChangeText={handleChange("name")}
-                  onBlur={handleBlur("name")}
-                  style={styles.input}
-                  error={touched.name && !!errors.name}
+                  mode="outlined"
+                  style={[styles.input, { flex: 1 }]}
                 />
-                {touched.name && errors.name && (
-                  <Text style={styles.error}>{errors.name}</Text>
-                )}
-
-                {/* SURNAME */}
                 <TextInput
                   label="Surname"
                   value={values.surname}
                   onChangeText={handleChange("surname")}
-                  onBlur={handleBlur("surname")}
-                  style={styles.input}
-                  error={touched.surname && !!errors.surname}
+                  mode="outlined"
+                  style={[styles.input, { flex: 1 }]}
                 />
-                {touched.surname && errors.surname && (
-                  <Text style={styles.error}>{errors.surname}</Text>
-                )}
+              </View>
 
-                <View style={styles.formButtons}>
-                  <View style={styles.buttonWrapper}>
-                    <Button
-                      style={styles.button}
-                      title="Reset"
-                      color="#999"
-                      onPress={() => resetForm()}
-                      disabled={isLoading}
-                    />
-                  </View>
+              <Divider style={styles.divider} />
 
-                  <View style={styles.buttonWrapper}>
-                    <Button
-                      style={{ width: 60 }}
-                      title={isLoading ? "Submitting..." : "Submit"}
-                      onPress={() => submitForm()}
-                      disabled={isLoading}
-                    />
-                  </View>
+              {/* 🏛️ FIXED PRIVILEGE CARD */}
+              <View style={styles.privilegeBox}>
+                <Text style={styles.boxLabel}>Operational Jurisdiction</Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoText}>GLOBAL ACCESS (ALL LMs)</Text>
                 </View>
-              </>
-            );
-          }}
+
+                <Text style={[styles.boxLabel, { marginTop: 12 }]}>
+                  Assigned Entity
+                </Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoText}>SMARS (OWNER)</Text>
+                </View>
+              </View>
+
+              <Button
+                mode="contained"
+                onPress={handleSubmit}
+                loading={isInviting}
+                style={styles.submitBtn}
+                labelStyle={{ fontWeight: "900" }}
+              >
+                APPOINT TO SMARS
+              </Button>
+            </View>
+          )}
         </Formik>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 16,
-    backgroundColor: "#fff",
+  safe: { flex: 1, backgroundColor: "#fff" },
+  container: { padding: 24 },
+  sovereignLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#2563eb",
+    textTransform: "uppercase",
+    marginBottom: 24,
+    letterSpacing: 1,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    marginBottom: 20,
+  form: { gap: 12 },
+  row: { flexDirection: "row", gap: 10 },
+  input: { backgroundColor: "#f8fafc" },
+  divider: { marginVertical: 8, backgroundColor: "transparent" },
+  privilegeBox: {
+    padding: 20,
+    backgroundColor: "#eff6ff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
   },
-  input: {
-    marginBottom: 8,
+  boxLabel: {
+    fontSize: 9,
+    fontWeight: "900",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
-  error: {
-    color: "red",
-    fontSize: 12,
-    marginBottom: 8,
+  infoRow: {
+    marginTop: 4,
   },
-  button: {
-    marginTop: 16,
-    width: 60,
+  infoText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#1e40af",
   },
-  formButtons: {
-    flexDirection: "row",
-    justifyContent: "space-evenly",
+  submitBtn: {
+    marginTop: 20,
+    borderRadius: 12,
+    backgroundColor: "#2563eb", // 🎯 Admin Blue
+    height: 50,
+    justifyContent: "center",
   },
 });

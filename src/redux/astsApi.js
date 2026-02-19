@@ -21,7 +21,7 @@ export const astsApi = createApi({
         let unsubscribe = () => {};
         try {
           await cacheDataLoaded;
-          console.log(`getAstsByLmPcode----arg`, arg);
+          // console.log(`getAstsByLmPcode----arg`, arg);
 
           // 🎯 The Real-Time Stream
           const q = query(
@@ -46,7 +46,42 @@ export const astsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getAstsByCountryCode: builder.query({
+      async queryFn() {
+        return { data: [] };
+      },
+      async onCacheEntryAdded(
+        { id }, // 🎯 THE SOVEREIGN OBJECT ARGUMENT
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        try {
+          await cacheDataLoaded;
+          if (!id) return;
+          const q = query(
+            collection(db, "asts"),
+            where("accessData.metadata.countryId", "==", id),
+          );
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData(() => {
+              return snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+            });
+          });
+        } catch (error) {
+          console.error("❌ [NATIONAL ASSET ERROR]:", error);
+        }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
-export const { useGetAstsByLmPcodeQuery } = astsApi;
+export const { useGetAstsByLmPcodeQuery, useGetAstsByCountryCodeQuery } =
+  astsApi;

@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 
-const FormSubmitButton = () => {
+const FormSubmitButton = ({ inProgress, setInProgress }) => {
   const { handleSubmit, isSubmitting, isValid } = useFormikContext();
 
   // 🎨 Rule-based styling from Excel Forge
@@ -45,8 +45,13 @@ const FormSubmitButton = () => {
 
   return (
     <TouchableOpacity
-      disabled={config.disabled}
-      onPress={handleSubmit}
+      disabled={inProgress}
+      onPress={() => {
+        console.log(`submittng form`);
+        console.log(`setting inProgrress to true`, inProgress);
+        handleSubmit();
+        setInProgress(true);
+      }}
       style={[
         styles.btn,
         { borderColor: config.border, backgroundColor: config.bg },

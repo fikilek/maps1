@@ -1,123 +1,173 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
-import {
-  Button,
-  Dialog,
-  List,
-  Portal,
-  RadioButton,
-  Searchbar,
-  Surface,
-  Text,
-} from "react-native-paper";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Button, Dialog, Portal, Surface } from "react-native-paper";
 
 const ErfFilterHeader = ({
-  search,
-  setSearch,
   selectedWard,
   setSelectedWard,
   availableWards,
   filteredCount,
   totalCount,
+  selectedErf, // 🎯 Pass the selection in
+  onScrollToSelected, // 🎯 Pass the scroll action in
+  // 🎯 NEW PROPS FOR SORTING
+  sortOrder = "DESC",
+  onToggleSort,
 }) => {
   const [visible, setVisible] = useState(false);
-
   const showDialog = () => setVisible(true);
   const hideDialog = () => setVisible(false);
 
-  // 🛡️ TACTICAL SANITIZER: Ensure we are showing a string label
-  // If selectedWard is the "ALL" string, use it. If it's an object, use the name.
+  // console.log(`ErfFilterHeader ----filteredCount`, filteredCount);
+  // console.log(`ErfFilterHeader ----totalCount`, totalCount);
+  // console.log(`ErfFilterHeader ----selectedErf`, selectedErf);
+
   const displayWardName =
-    typeof selectedWard === "string"
-      ? selectedWard
-      : selectedWard?.name || selectedWard?.code || "Select Ward";
+    selectedWard === "ALL" || !selectedWard
+      ? "All Wards"
+      : selectedWard?.name || selectedWard?.code || "Ward";
 
   return (
-    <Surface style={styles.header} elevation={2}>
+    <Surface style={styles.header} elevation={1}>
       <View style={styles.row}>
-        <Searchbar
-          placeholder="Search"
-          onChangeText={setSearch}
-          value={`${search}`} // 🛡️ Force string
-          style={styles.searchBar}
-          placeholderTextColor="#888"
-        />
-        <View style={styles.statsBar}>
-          <View>
+        {/* 🎯 LEFT: WARD SELECTION */}
+        <View style={styles.leftCol}>
+          {/* <Text style={styles.label}>Active Ward</Text> */}
+          <Button
+            mode="outlined"
+            onPress={showDialog}
+            style={styles.wardButton}
+            icon="filter-variant"
+            contentStyle={styles.buttonContent}
+            labelStyle={styles.buttonLabel}
+            compact
+          >
+            {displayWardName}
+          </Button>
+        </View>
+
+        {/* Sort Btn  - Sort by upadatedAt descening andascending order */}
+        {/* 🚀 NEW: SORT TOGGLE (Between Ward and Center) */}
+        {/* <TouchableOpacity
+          style={styles.sortCol}
+          onPress={onToggleSort}
+          activeOpacity={0.6}
+        >
+          <MaterialCommunityIcons
+            name={
+              sortOrder === "DESC"
+                ? "sort-calendar-descending"
+                : "sort-calendar-ascending"
+            }
+            size={26}
+            color="#2563eb"
+          />
+          <Text style={styles.sortText}>{sortOrder}</Text>
+        </TouchableOpacity> */}
+
+        {/* 🎯 CENTER: THE TARGET LOCATOR (SelectedErfBtn) */}
+        {selectedErf && (
+          <View style={styles.centerCol}>
+            <TouchableOpacity
+              style={styles.targetBtn}
+              onPress={onScrollToSelected}
+              activeOpacity={0.7}
+            >
+              <View
+                style={{
+                  width: "70%",
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ fontSize: 10 }}>Selected Erf</Text>
+                <Text
+                  style={styles.targetText}
+                >{`ERF ${selectedErf?.erfNo}`}</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 📊 RIGHT: TACTICAL STATS */}
+        <View style={styles.rightCol}>
+          <View style={styles.statsBox}>
             <Text style={styles.statsText}>
-              {/* 🛡️ SANITIZED */}
-              {`${displayWardName} Erfs `}
-              <Text style={styles.boldText}>{`${filteredCount}`}</Text>
+              {`${displayWardName} Erfs: `}
+              <Text style={styles.boldText}>{filteredCount}</Text>
             </Text>
+            <View style={styles.divider} />
             <Text style={styles.statsText}>
-              {`LM Erfs: `}
-              <Text style={styles.boldText}>{`${totalCount}`}</Text>
+              {`LM Total Erfs: `}
+              <Text style={styles.boldText}>{totalCount}</Text>
             </Text>
           </View>
         </View>
-
-        <Button
-          mode="outlined"
-          onPress={showDialog}
-          style={styles.wardButton}
-          icon="filter-variant"
-          contentStyle={styles.buttonContent}
-          labelStyle={styles.buttonLabel}
-        >
-          {/* 🛡️ SANITIZED */}
-          {`${displayWardName}`}
-        </Button>
       </View>
 
       <Portal>
         <Dialog visible={visible} onDismiss={hideDialog} style={styles.dialog}>
-          <Dialog.Title>Select Ward</Dialog.Title>
+          <Dialog.Title style={styles.modalTitle}>Select Ward</Dialog.Title>
+
           <Dialog.ScrollArea
-            style={[styles.scrollArea, { paddingHorizontal: 0, height: 300 }]}
+            style={[styles.scrollArea, { paddingHorizontal: 0 }]}
           >
             <FlashList
-              data={availableWards}
-              // 🛡️ Ensure key is a string ID
+              data={["ALL", ...(availableWards || [])]}
               keyExtractor={(item, index) => `${item?.id || item || index}`}
               estimatedItemSize={60}
               renderItem={({ item }) => {
-                // 🛡️ Handle "ALL" string vs Ward object
                 const isAll = item === "ALL";
-                const itemLabel = isAll
-                  ? "All Wards"
-                  : `${item?.name || item?.code || "Ward"}`;
-                const itemValue = isAll ? "ALL" : item?.id || item;
-
-                // Determine if checked (comparing strings or IDs)
-                const isChecked = isAll
-                  ? selectedWard === "ALL"
+                const isSelected = isAll
+                  ? selectedWard === "ALL" || !selectedWard
                   : selectedWard?.id === item?.id;
 
+                const label = isAll
+                  ? "All Wards (Reset)"
+                  : `${item?.name || item?.code || "Ward"}`;
+
                 return (
-                  <List.Item
-                    title={`${itemLabel}`}
+                  <TouchableOpacity
+                    style={[
+                      styles.wardItem,
+                      isSelected && { backgroundColor: "#eff6ff" }, // Light blue highlight
+                    ]}
                     onPress={() => {
-                      setSelectedWard(item);
+                      setSelectedWard(isAll ? null : item);
                       hideDialog();
                     }}
-                    left={() => (
-                      <RadioButton
-                        value={`${itemValue}`}
-                        status={isChecked ? "checked" : "unchecked"}
-                        onPress={() => {
-                          setSelectedWard(item);
-                          hideDialog();
-                        }}
-                      />
-                    )}
-                  />
+                  >
+                    <View style={styles.itemInner}>
+                      <Text
+                        style={[
+                          styles.wardText,
+                          isAll && { color: "#6366f1", fontWeight: "900" }, // Indigo for "ALL"
+                          isSelected &&
+                            !isAll && { color: "#2563eb", fontWeight: "bold" },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+
+                      {isSelected && (
+                        <MaterialCommunityIcons
+                          name="check-circle"
+                          size={20}
+                          color={isAll ? "#6366f1" : "#2563eb"}
+                        />
+                      )}
+                    </View>
+                  </TouchableOpacity>
                 );
               }}
             />
           </Dialog.ScrollArea>
+
           <Dialog.Actions>
-            <Button onPress={hideDialog}>Cancel</Button>
+            <Button onPress={hideDialog} textColor="#94a3b8">
+              CLOSE
+            </Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -125,163 +175,151 @@ const ErfFilterHeader = ({
   );
 };
 
-// const ErfFilterHeader = ({
-//   search,
-//   setSearch,
-//   selectedWard,
-//   setSelectedWard,
-//   availableWards,
-//   filteredCount,
-//   totalCount,
-// }) => {
-//   const [visible, setVisible] = useState(false);
-//   // console.log(`ErfFilterHeader ----availableWards`, availableWards);
-//   // console.log(`ErfFilterHeader ----selectedWard`, selectedWard);
-
-//   const showDialog = () => setVisible(true);
-//   const hideDialog = () => setVisible(false);
-
-//   // Helper for the button label
-//   // const wardLabel = selectedWard === "ALL" ? "All Wards" : selectedWard;
-
-//   return (
-//     <Surface style={styles.header} elevation={2}>
-//       {/* --- UNIFORM ROW --- */}
-//       <View style={styles.row}>
-//         <Searchbar
-//           placeholder="Search"
-//           onChangeText={setSearch}
-//           value={search}
-//           style={styles.searchBar}
-//           placeholderTextColor="#888" // Custom placeholder color
-//         />
-//         <View style={styles.statsBar}>
-//           <View>
-//             <Text style={styles.statsText}>
-//               {selectedWard} Erfs
-//               <Text style={styles.boldText}>{filteredCount}</Text>
-//             </Text>
-//             <Text style={styles.statsText}>
-//               LM Erfs: <Text style={styles.boldText}>{totalCount}</Text>
-//             </Text>
-//           </View>
-
-//           {search !== "" && (
-//             <TouchableOpacity
-//               onPress={() => setSearch("")}
-//               style={styles.clearBtn}
-//             >
-//               <Text style={styles.clearSearchText}>Clear Search</Text>
-//             </TouchableOpacity>
-//           )}
-//         </View>
-
-//         <Button
-//           mode="outlined"
-//           onPress={showDialog}
-//           style={styles.wardButton}
-//           icon="filter-variant"
-//           contentStyle={styles.buttonContent}
-//           labelStyle={styles.buttonLabel}
-//         >
-//           {selectedWard}
-//         </Button>
-//       </View>
-
-//       {/* --- WARD SELECTION MODAL --- */}
-//       {/* --- WARD SELECTION MODAL --- */}
-//       <Portal>
-//         <Dialog visible={visible} onDismiss={hideDialog} style={styles.dialog}>
-//           <Dialog.Title>Select Ward</Dialog.Title>
-
-//           {/* 1. Add paddingHorizontal: 0 and a fixed height or flex to ScrollArea */}
-//           <Dialog.ScrollArea
-//             style={[styles.scrollArea, { paddingHorizontal: 0, height: 300 }]}
-//           >
-//             <FlashList
-//               data={availableWards}
-//               keyExtractor={(item) => item}
-//               // 2. FlashList MUST have an estimatedItemSize for the first render
-//               estimatedItemSize={60}
-//               renderItem={({ item }) => (
-//                 <List.Item
-//                   title={
-//                     item === "ALL" ? "All Wards" : `Ward ${item.slice(-2)}`
-//                   }
-//                   onPress={() => {
-//                     setSelectedWard(item);
-//                     hideDialog();
-//                   }}
-//                   left={() => (
-//                     <RadioButton
-//                       value={item}
-//                       status={selectedWard === item ? "checked" : "unchecked"}
-//                       onPress={() => {
-//                         setSelectedWard(item);
-//                         hideDialog();
-//                       }}
-//                     />
-//                   )}
-//                 />
-//               )}
-//             />
-//           </Dialog.ScrollArea>
-
-//           <Dialog.Actions>
-//             <Button onPress={hideDialog}>Cancel</Button>
-//           </Dialog.Actions>
-//         </Dialog>
-//       </Portal>
-//     </Surface>
-//   );
-// };
-
 export default ErfFilterHeader;
 
 const styles = StyleSheet.create({
-  header: {
-    padding: 10,
-    backgroundColor: "white",
-  },
-  row: {
+  targetBtn: {
+    backgroundColor: "#00BFFF", // Deep Sky Blue
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    // paddingVertical: 6,
+    paddingHorizontal: 2,
+    borderRadius: 5,
+    shadowColor: "#00BFFF",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    height: "100%",
   },
-  searchBar: {
-    flex: 2, // Search takes more space
-    height: 48,
-    backgroundColor: "#f5f5f5",
-    elevation: 0,
+  targetText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+    marginLeft: 4,
+  },
+  description: {
+    color: "gray", // Change description color
+    fontSize: 14, // Change description font size
+    fontStyle: "italic", // Make description italic
+  },
+  header: {
+    padding: 12,
+    backgroundColor: "white",
+    borderBottomWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  row: {
+    // flex: 1,
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    height: 40,
+  },
+
+  label: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#94a3b8",
+    marginBottom: 4,
+    textTransform: "uppercase",
   },
   wardButton: {
-    flex: 1, // Button takes less space
-    height: 48,
-    justifyContent: "center",
-    borderColor: "#ccc",
+    borderColor: "#cbd5e1",
     borderRadius: 8,
+    // flex: 1,
   },
   buttonContent: {
-    height: 48,
+    height: 36,
   },
   buttonLabel: {
     fontSize: 12,
+    fontWeight: "800",
   },
-  scrollArea: {
-    paddingHorizontal: 0,
-    maxHeight: 400, // Keep modal from covering whole screen
-  },
-  dialog: {
-    borderRadius: 12,
+  statsBox: {
+    backgroundColor: "#f8fafc",
+    // padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#f1f5f9",
+    // width: "100%",
   },
   statsText: {
-    color: "#939393ff",
-  },
-  subStatsText: {
-    color: "#939393ff",
+    fontSize: 11,
+    color: "#64748b",
+    textAlign: "right",
   },
   boldText: {
-    color: "#413694ff",
+    color: "#413694",
     fontWeight: "900",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#e2e8f0",
+    // marginVertical: 4,
+  },
+
+  dialog: {
+    borderRadius: 20,
+    backgroundColor: "white",
+    overflow: "hidden",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#1e293b",
+    textAlign: "center",
+    paddingVertical: 10,
+  },
+  scrollArea: {
+    height: 350,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#f1f5f9",
+  },
+  wardItem: {
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f8fafc",
+  },
+  itemInner: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  wardText: {
+    fontSize: 15,
+    color: "#334155",
+    fontWeight: "500",
+  },
+  sortText: {
+    fontSize: 6,
+    fontWeight: "900",
+    color: "#2563eb",
+    marginTop: -2,
+  },
+  sortCol: {
+    // flex: 0.1,
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: "#f1f5f9",
+    // marginHorizontal: 4,
+  },
+  centerCol: {
+    flex: 0.3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  leftCol: {
+    flex: 0.25,
+    justifyContent: "center",
+  },
+  rightCol: {
+    flex: 0.4,
   },
 });

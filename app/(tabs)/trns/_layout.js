@@ -7,7 +7,6 @@ export default function TrnsLayout() {
   const { geoState } = useGeo();
   const lmPcode = geoState?.selectedLm?.id;
 
-  // 🎯 Live counter for Transactions
   const { data: trns } = useGetTrnsByLmPcodeQuery(
     { lmPcode },
     { skip: !lmPcode },
@@ -16,6 +15,7 @@ export default function TrnsLayout() {
 
   return (
     <Stack>
+      {/* 🏛️ THE MAIN LIST SCREEN */}
       <Stack.Screen
         name="index"
         options={{
@@ -24,13 +24,22 @@ export default function TrnsLayout() {
           headerLeft: () => (
             <View style={styles.titleContainer}>
               <Text style={styles.headerTitle}>TRNS</Text>
-              {/* 🎯 The Live Counter Badge */}
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{totalTrns}</Text>
               </View>
             </View>
           ),
-          headerTitle: "", // Hide default center title
+          headerTitle: "",
+        }}
+      />
+
+      {/* 🛡️ THE DISMISSIBLE REPORT MODAL */}
+      <Stack.Screen
+        name="[id]"
+        options={{
+          presentation: "transparentModal", // 🎯 Ensures background is visible (for the overlay feel)
+          headerShown: false, // We will build our own custom header inside the modal
+          animation: "fade",
         }}
       />
     </Stack>

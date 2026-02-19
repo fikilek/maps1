@@ -1,6 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
 import { useFormikContext } from "formik";
-import { useEffect } from "react";
 // 🎯 ADDED: Alert and MaterialCommunityIcons
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
@@ -13,17 +11,10 @@ import {
 import { Button } from "react-native-paper";
 
 export const ForensicFooter = ({ isTrnLoading, isSuccess }) => {
-  const navigation = useNavigation();
+  // const navigation = useNavigation();
   // const { handleSubmit, isValid, dirty, resetForm } = useFormikContext();
   const { handleSubmit, isValid, dirty, resetForm, isSubmitting } =
     useFormikContext();
-
-  useEffect(() => {
-    if (isSuccess) {
-      resetForm();
-      navigation.navigate("Premises");
-    }
-  }, [isSuccess]);
 
   // 🎯 The Magic Combination: Local State || API State
   const loading = isSubmitting || isTrnLoading;
@@ -40,14 +31,7 @@ export const ForensicFooter = ({ isTrnLoading, isSuccess }) => {
         icon: "loading",
       };
     }
-    // if (isTrnLoading) {
-    //   return {
-    //     text: "IS SUBMITTING...",
-    //     color: "#22C55E", // Green text
-    //     bg: "#FEF08A", // Yellow Background
-    //     icon: "loading",
-    //   };
-    // }
+
     if (isFormReady) {
       return {
         text: "SUBMIT",

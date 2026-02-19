@@ -1,26 +1,32 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { getIn, useFormikContext } from "formik";
 import { useState } from "react";
-import { Alert, Keyboard, StyleSheet, View } from "react-native";
 import {
-  Button,
-  IconButton,
-  Modal,
-  Portal,
+  Alert,
+  Keyboard,
+  StyleSheet,
   Text,
   TextInput,
-} from "react-native-paper";
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Button, Modal, Portal } from "react-native-paper";
 import { useWarehouse } from "../../context/WarehouseContext";
 
-const FormInputMeterNo = ({ label, name, disabled, onCameraPress }) => {
-  const { setFieldValue, values } = useFormikContext();
+const FormInputMeterNo = ({ label, name, disabled }) => {
+  const { setFieldValue, values, errors, handleBlur, isSubmitting } =
+    useFormikContext();
   const { all } = useWarehouse();
 
   const [scannerVisible, setScannerVisible] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
 
-  // Get current value to determine icon state
+  // 🎯 Formik State Extraction
   const currentValue = getIn(values, name);
+  const error = getIn(errors, name);
+  // const isTouched = getIn(touched, name);
+  const hasError = !!error;
 
   const validateMeterNo = (val) => {
     const cleanedVal = val.trim().toUpperCase();
@@ -61,53 +67,62 @@ const FormInputMeterNo = ({ label, name, disabled, onCameraPress }) => {
     setScannerVisible(true);
   };
 
-  // 🗑️ Clear Function
-  const handleClear = () => {
-    setFieldValue(name, "");
-  };
-
   const onBarCodeScanned = ({ data }) => {
     setScannerVisible(false);
     validateMeterNo(data);
   };
-  const CustomLabel = <Text style={{ color: "grey" }}>Meter Number</Text>;
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: "row", backgroundColor: "#fff" }}>
-        {/* <View style={styles.inputWrapper}> */}
-        <TextInput
-          label={CustomLabel}
-          value={currentValue || ""}
-          onChangeText={validateMeterNo}
-          disabled={disabled}
-          mode="outlined"
-          // theme={customTheme}
-          // autoCapitalize="characters"
-          style={{ flex: 1, backgroundColor: "white" }} // 🎯 Added style
-          // dense // 🎯 Makes it more compact
-        />
-        {/* </View> */}
+    <View style={styles.container}>
+      {/* 🏷️ THE SOVEREIGN LABEL */}
+      <Text style={[styles.label, hasError && { color: "#ef4444" }]}>
+        {label}
+      </Text>
 
-        {/* 🔄 DYNAMIC ICON: SCAN vs DELETE */}
-        <IconButton
-          icon={currentValue ? "close-circle" : "barcode-scan"}
-          mode="contained"
-          containerColor={currentValue ? "#EF4444" : "#3B82F6"}
-          iconColor="white"
-          onPress={currentValue ? handleClear : handleOpenScanner}
-          disabled={disabled}
-          size={24} // 🎯 Controlled size
-          style={styles.inlineBtn}
-        />
+      <View style={styles.inputRow}>
+        <View style={styles.inputWrapper}>
+          <TextInput
+            style={[
+              styles.input,
+              hasError && styles.inputError, // 🎯 Sexy Red Left Border
+              (disabled || isSubmitting) && styles.disabledInput,
+            ]}
+            value={currentValue || ""}
+            onChangeText={validateMeterNo}
+            onBlur={handleBlur(name)}
+            editable={!disabled && !isSubmitting}
+            autoCapitalize="characters"
+            placeholder="Enter or Scan Meter No"
+            placeholderTextColor="#94a3b8"
+          />
+
+          {/* 🔄 DYNAMIC ICON OVERLAY */}
+          <View style={styles.iconOverlay}>
+            <TouchableOpacity
+              onPress={
+                currentValue ? () => setFieldValue(name, "") : handleOpenScanner
+              }
+              disabled={disabled || isSubmitting}
+            >
+              <MaterialCommunityIcons
+                name={currentValue ? "close-circle" : "barcode-scan"}
+                size={22}
+                color={currentValue ? "#ef4444" : "#3b82f6"}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
+
+      {/* 🚨 ERROR MESSAGE */}
+      {hasError && <Text style={styles.errorText}>{error}</Text>}
 
       {/* PORTAL SCANNER MODAL */}
       <Portal>
         <Modal
           visible={scannerVisible}
           onDismiss={() => setScannerVisible(false)}
-          contentContainerStyle={styles.modal}
+          contentContainerStyle={styles.scannerModal}
         >
           <CameraView
             style={StyleSheet.absoluteFill}
@@ -121,7 +136,7 @@ const FormInputMeterNo = ({ label, name, disabled, onCameraPress }) => {
             mode="contained"
             onPress={() => setScannerVisible(false)}
             style={styles.cancelBtn}
-            buttonColor="red"
+            buttonColor="#ef4444"
           >
             CANCEL
           </Button>
@@ -132,47 +147,74 @@ const FormInputMeterNo = ({ label, name, disabled, onCameraPress }) => {
 };
 
 const styles = StyleSheet.create({
-  // row: { flexDirection: "row", alignItems: "center", gap: 5 },
-  // inlineBtn: { margin: 0, height: 50, width: 50, borderRadius: 8 },
-  // modal: { flex: 1, backgroundColor: "blue" },
-  overlay: { flex: 1, justifyContent: "center", alignItems: "center" },
-  reticle: {
-    width: 250,
-    height: 150,
-    borderWidth: 2,
-    borderColor: "#00FF00",
-    borderRadius: 10,
+  container: { marginBottom: 12, width: "100%" },
+  label: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#64748b",
+    marginBottom: 4,
+    textTransform: "uppercase",
   },
-  scanText: { color: "white", marginTop: 15, fontWeight: "bold" },
-  cancelBtn: { position: "absolute", bottom: 40, alignSelf: "center" },
-
-  outerContainer: {
-    marginVertical: 4, // 🎯 Give the whole field some air
-  },
-  row: {
+  inputRow: {
     flexDirection: "row",
-    // alignItems: "center", // 🎯 Center button with the input body
-    // justifyContent: "center",
+    alignItems: "center",
   },
   inputWrapper: {
     flex: 1,
+    position: "relative", // 🎯 For the icon overlay
+    justifyContent: "center",
   },
-  inputField: {
-    backgroundColor: "white",
-    height: 50, // 🎯 Explicit height to match button
-  },
-  inlineBtn: {
-    margin: 0,
-    marginLeft: 8, // 🎯 Clean gap
-    height: 50,
-    width: 54,
+  input: {
+    backgroundColor: "#f8fafc",
+    padding: 12,
+    paddingRight: 45, // 🎯 Leave room for the scan icon
     borderRadius: 8,
-    // 🎯 Ensures the button aligns even if the label pushes the input down
-    marginTop: 6,
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    color: "#1e293b",
+    fontWeight: "600",
+    height: 50,
   },
-  modal: {
-    flex: 1,
-    backgroundColor: "black", // 🎯 Changed from blue to black for better camera contrast
+  inputError: {
+    borderLeftWidth: 5,
+    borderLeftColor: "#ef4444",
+    backgroundColor: "#fff1f2",
+  },
+  iconOverlay: {
+    position: "absolute",
+    right: 12,
+  },
+  errorText: {
+    fontSize: 10,
+    color: "#ef4444",
+    marginTop: 2,
+    fontWeight: "700",
+  },
+  disabledInput: { opacity: 0.5, backgroundColor: "#e2e8f0" },
+
+  // SCANNER STYLES
+  scannerModal: { flex: 1, backgroundColor: "black" },
+  overlay: { flex: 1, justifyContent: "center", alignItems: "center" },
+  reticle: {
+    width: 280,
+    height: 150,
+    borderWidth: 2,
+    borderColor: "#4CD964",
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.1)",
+  },
+  scanText: {
+    color: "white",
+    marginTop: 20,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  cancelBtn: {
+    position: "absolute",
+    bottom: 50,
+    alignSelf: "center",
+    paddingHorizontal: 20,
   },
 });
 

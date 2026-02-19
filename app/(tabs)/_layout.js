@@ -9,8 +9,8 @@ export default function TabsLayout() {
   const titles = {
     maps: "Maps",
     erfs: "ERFs",
-    trns: "Transactions",
-    asts: "Assets",
+    trns: "Trns",
+    asts: "Meters",
     dashboard: "Dashboard",
     admin: "Admin",
     premises: "Premises",

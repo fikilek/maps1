@@ -5,77 +5,73 @@ import { geoKV } from "../redux/mmkv";
 
 export const GeoContext = createContext();
 
+// 🎯 INITIAL STATE: Now includes the Flight Signal
 const INITIAL_GEO = {
   selectedLm: null, // Full LM Doc
   selectedWard: null, // Full Ward Doc
   selectedErf: null, // Full Erf Doc
   selectedPremise: null, // Full Premise Doc
   selectedMeter: null, // Full Meter Doc
+  // flightSignal: 0, // 🔔 The trigger for forced flights
+  lastSelectionType: "LM",
+  flightSignal: Date.now(),
 };
 
 export const GeoProvider = ({ children }) => {
-  const { profile } = useAuth(); // 🎯 The Life Support (useAuth)
+  // console.log(`GeoProvider ---mounted`);
+  const { profile } = useAuth();
   const workbaseId = profile?.access?.activeWorkbase?.id;
-  // console.log(`GeoProvider ----workbaseId`, workbaseId);
 
   // 🏛️ 1. State initialization from Disk
   const [geoState, setGeoState] = useState(() => {
     const saved = geoKV.getString("geo_session");
-    return saved ? JSON.parse(saved) : INITIAL_GEO;
+    // Ensure that even old saved sessions get a flightSignal if they didn't have one
+    return saved ? { ...INITIAL_GEO, ...JSON.parse(saved) } : INITIAL_GEO;
   });
-  console.log(`GeoProvider ----geoState`, geoState);
-  // console.log(`GeoProvider ----geoState?.selectedErf`, geoState?.selectedErf);
+  // console.log(`GeoProvider ----geoState`, geoState);
+  // console.log(`GeoProvider ----geoState?.selectedLm`, geoState?.selectedLm);
 
-  // 🏛️ 2. The Law of the Land: Life and Death
-
+  // 🏛️ 2. The Law of the Land (Login/Logout Logic)
   useEffect(() => {
-    // RULE 2: User signed out - GOC dead
     if (!profile) {
-      console.log("💀 [GOC]: User logged out. Killing session...");
+      console.log("💀 [GOC]: User logged out. Wiping session...");
 
-      // Reset RAM
+      // 1. Reset RAM immediately
       setGeoState(INITIAL_GEO);
 
-      // Reset DISK (The safe way)
+      // 2. Reset DISK safely
       try {
-        if (geoKV && typeof geoKV.delete === "function") {
-          geoKV.delete("geo_session");
-          console.log("💀 [GOC]: geo_sessionUser logged out. 'geo_session' ");
-        } else {
-          // Fallback if your geoKV wrapper is restricted
-          geoKV.set("geo_session", "");
-          console.log(
-            "💀 [GOC]: geo_sessionUser logged out. 'geo_session' cleared",
-          );
+        if (geoKV) {
+          // 🎯 Check which method exists to avoid the TypeError
+          if (typeof geoKV.delete === "function") {
+            geoKV.delete("geo_session");
+          } else {
+            // Fallback: Setting to an empty string or null effectively clears it
+            geoKV.set("geo_session", "");
+          }
+          // console.log("✅ [GOC]: Disk session cleared.");
         }
       } catch (e) {
         console.warn("⚠️ [GOC]: Disk clear failed, but RAM is wiped.", e);
       }
       return;
     }
-    // RULE 1: User signed in - GOC Breath
-    // If we have a profile but the workbase changed, we must re-hydrate
-    if (workbaseId && geoState.selectedLm?.id !== workbaseId) {
-      console.log(
-        "🫁 [GOC]: Breathing... aligning with activeWorkbase:",
-        workbaseId,
-      );
 
+    if (workbaseId && geoState.selectedLm?.id !== workbaseId) {
       const saved = geoKV.getString("geo_session");
       const parsedSaved = saved ? JSON.parse(saved) : null;
 
-      // If the saved session matches the new workbase, use it!
       if (parsedSaved && parsedSaved.selectedLm?.id === workbaseId) {
-        console.log("💾 [GOC]: Restored existing session for:", workbaseId);
-        setGeoState(parsedSaved);
-      } else {
-        // Otherwise, it's a brand new town. Start fresh.
-        console.log(
-          "✨ [GOC]: New Workbase detected. Starting clean slate for:",
-          workbaseId,
-        );
-        setGeoState({ ...INITIAL_GEO, selectedLm: { id: workbaseId } });
+        setGeoState({
+          ...INITIAL_GEO,
+          ...parsedSaved,
+          flightSignal: Date.now(),
+        });
       }
+      // else {
+      //   // console.log("✨ [GOC]: New Workbase detected:", workbaseId);
+      //   setGeoState({ ...INITIAL_GEO, selectedLm: { id: workbaseId } });
+      // }
     }
   }, [profile, workbaseId, geoState.selectedLm?.id]);
 
@@ -84,23 +80,38 @@ export const GeoProvider = ({ children }) => {
     skip: !workbaseId,
   });
 
+  // 🏛️ 3. Automatic Hydration from API
   useEffect(() => {
-    // If the API returns a doc that doesn't match our state, force an update
     if (remoteLmDoc && geoState.selectedLm?.id !== remoteLmDoc.id) {
-      updateGeo({ selectedLm: remoteLmDoc });
-    }
-  }, [remoteLmDoc, geoState.selectedLm?.id]);
+      console.log(
+        `🌍 [GEO]: Teleporting to ${remoteLmDoc.name}. Resetting state.`,
+      );
 
-  // 🏛️ 4. Persistent Mirror (Flight Recorder)
+      setGeoState({
+        ...INITIAL_GEO, // 🎯 Start with a 100% clean slate
+        selectedLm: remoteLmDoc, // 📍 Immediately set the NEW jurisdiction
+        flightSignal: Date.now(), // 🔔 Ring the bell for the map to fly
+      });
+    }
+  }, [remoteLmDoc]);
+
+  // 🏛️ 4. Persistent Mirror
   useEffect(() => {
     if (profile) {
       geoKV.set("geo_session", JSON.stringify(geoState));
     }
   }, [geoState, profile]);
 
+  // 🎯 5. THE SOVEREIGN UPDATE (Internal Utility)
+  // This helper ensures that if you update one part of the state,
+  // we clean up the levels below and potentially "ring the bell".
   const updateGeo = (updates) => {
     setGeoState((prev) => {
-      let newState = { ...prev, ...updates };
+      let newState = {
+        ...prev,
+        ...updates,
+        flightSignal: Date.now(),
+      };
 
       // 🏛️ THE RULE OF THE DESCENT (Cascading Clears)
       if (updates.selectedLm) {
@@ -124,7 +135,7 @@ export const GeoProvider = ({ children }) => {
   };
 
   return (
-    <GeoContext.Provider value={{ geoState, setGeoState }}>
+    <GeoContext.Provider value={{ geoState, updateGeo }}>
       {children}
     </GeoContext.Provider>
   );

@@ -32,11 +32,14 @@ export default {
         "ACCESS_FINE_LOCATION",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
-        "CAMERA", // 🎯 ADD THIS for the Barcode Scanner!
+        "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES", // 🎯 ADD THIS for Android 13+ support
+        "READ_MEDIA_VIDEO",
       ],
     },
+
     plugins: [
       "expo-router",
       "expo-camera",
@@ -47,26 +50,32 @@ export default {
           imageWidth: 200,
           resizeMode: "contain",
           backgroundColor: "#ffffff",
-          dark: {
-            backgroundColor: "#000000",
-          },
+          dark: { backgroundColor: "#000000" },
         },
       ],
-
       [
         "expo-location",
         {
           locationAlwaysAndWhenInUsePermission:
-            "Allow maps1 to access your location",
+            "Allow iREPS to access your location for infrastructure mapping.",
         },
       ],
       [
         "expo-image-picker",
         {
           photosPermission:
-            "The app accesses your photos to let you share them with your friends.",
+            "Allow iREPS to access photos for infrastructure reporting.",
           cameraPermission:
-            "Allow $(PRODUCT_NAME) to open the camera to take photos of meters.",
+            "Allow iREPS to open the camera for meter inspections.",
+        },
+      ],
+      [
+        "expo-media-library",
+        {
+          photosPermission:
+            "Allow iREPS to save infrastructure reports to your device.",
+          savePhotosPermission: "Allow iREPS to save captured meter photos.",
+          isAccessMediaLocationEnabled: true,
         },
       ],
     ],

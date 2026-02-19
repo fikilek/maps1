@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useGetAuthStateQuery } from "../redux/authApi";
 
 export default function AuthBootstrap() {
-  // console.log("AuthBootstrap ---- START");
+  // console.log("AuthBootstrap ----monting");
 
   const { data, isSuccess } = useGetAuthStateQuery(undefined, {
     refetchOnMountOrArgChange: false,

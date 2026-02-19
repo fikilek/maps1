@@ -11,7 +11,14 @@ import {
 import { Divider, List, Modal, Portal, Surface } from "react-native-paper";
 
 const FormSelect = ({ label, name, options, icon = "form-select" }) => {
-  const { values, setFieldValue, errors, isSubmitting } = useFormikContext();
+  const {
+    values,
+    setFieldValue,
+    validateField,
+    setFieldTouched,
+    errors,
+    isSubmitting,
+  } = useFormikContext();
   const [visible, setVisible] = useState(false);
 
   const value = getIn(values, name);
@@ -57,7 +64,13 @@ const FormSelect = ({ label, name, options, icon = "form-select" }) => {
                   key={opt}
                   title={opt}
                   onPress={() => {
-                    setFieldValue(name, opt);
+                    // 1. Set value and trigger validation immediately
+                    setFieldValue(name, opt, true);
+
+                    // 2. Mark as touched so forensic red disappears/appears
+                    setFieldTouched(name, true, false);
+
+                    // 3. Close modal
                     setVisible(false);
                   }}
                   right={(p) =>

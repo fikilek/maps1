@@ -7,7 +7,8 @@ export default function UsersLayout() {
         name="index"
         options={{
           title: "Users",
-          headerShown: false,
+          presentation: "card",
+          headerShown: true,
         }}
       />
 
@@ -16,6 +17,7 @@ export default function UsersLayout() {
         options={{
           title: "Create Admin User",
           presentation: "card",
+          headerShown: true,
         }}
       />
     </Stack>

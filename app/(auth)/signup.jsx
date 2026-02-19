@@ -1,7 +1,7 @@
 import { Ionicons, MaterialIcons, Octicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Formik } from "formik";
-import { useState } from "react";
+import { useMemo, useState } from "react"; // 🎯 Added useMemo
 import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
 
 import BtnForm from "../../components/BtnForm";
@@ -19,29 +19,32 @@ import ServiceProviderSelect, {
 } from "../../src/features/userHelper";
 import { auth } from "../../src/firebase";
 import { useSignupGstMutation } from "../../src/redux/authApi";
-
-// ⚠️ TEMP: replace with real SP query later
-const serviceProviders = [
-  { id: "sp1", name: "Thabang" },
-  { id: "sp2", name: "Elsa" },
-  { id: "sp3", name: "Lefu Meters" },
-  { id: "sp4", name: "Thato" },
-  { id: "sp5", name: "Rste" },
-];
+import { useGetServiceProvidersQuery } from "../../src/redux/spApi"; // 🛰️ Added
 
 const Signup = () => {
   const router = useRouter();
   const [signupGst, { isLoading: isMutationLoading }] = useSignupGstMutation();
   const [showPassword, setShowPassword] = useState(false);
 
-  const [isRedirecting, setIsRedirecting] = useState(false); // New state
-  // Combine them for the UI
-  const isLoading = isMutationLoading || isRedirecting;
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // 🛰️ LIVE REGISTRY FETCH
+  const { data: sps, isLoading: isSpLoading } = useGetServiceProvidersQuery();
+  // console.log(`Signup --sps`, sps);
+
+  // 🎯 Map the Firestore 'profile.name' to the dropdown 'name'
+  const serviceProviders = useMemo(() => {
+    return (sps || []).map((sp) => ({
+      id: sp.id,
+      name: sp.profile?.tradingName?.trim() || "Unknown SP",
+    }));
+  }, [sps]);
+
+  const isLoading = isMutationLoading || isRedirecting || isSpLoading;
 
   const handleSubmit = async (values, { resetForm }) => {
-    // console.log(`Signup ----handleSubmit ----values`, values);
     try {
-      setIsRedirecting(true); // Start the spinner
+      setIsRedirecting(true);
       const result = await signupGst({
         email: values.email.toLowerCase().trim(),
         password: values.password,
@@ -51,14 +54,26 @@ const Signup = () => {
       });
 
       if (result.data) {
-        await auth.currentUser.getIdToken(true); // 🔑 force refresh
-        const tokenResult = await auth.currentUser.getIdTokenResult();
-        // console.log(`Signup ----handleSubmit ----tokenResult`, tokenResult);
-        // console.log(
-        //   `Signup ----handleSubmit ----AUTH CLAIMS:tokenResult.claims`,
-        //   tokenResult.claims
-        // );
-        resetForm();
+        if (auth.currentUser) {
+          await auth.currentUser.getIdToken(true);
+        }
+
+        // 🛡️ The Redirection Strike
+        Alert.alert(
+          "Enlistment Successful",
+          "Awaiting Manager authorization.",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                resetForm();
+                setIsRedirecting(false);
+                // 🚀 Force AuthGate to evaluate the new user status
+                router.replace("/");
+              },
+            },
+          ],
+        );
       } else {
         setIsRedirecting(false);
         Alert.alert("Sign Up Failed", "Please try again.");
@@ -159,6 +174,7 @@ const Signup = () => {
                   <Octicons
                     name={showPassword ? "eye" : "eye-closed"}
                     size={22}
+                    color="#aaa"
                     onPress={() => setShowPassword((p) => !p)}
                   />
                   <FormErrorText
@@ -182,6 +198,7 @@ const Signup = () => {
                   <Octicons
                     name={showPassword ? "eye" : "eye-closed"}
                     size={22}
+                    color="#aaa"
                     onPress={() => setShowPassword((p) => !p)}
                   />
                   <FormErrorText
@@ -191,17 +208,35 @@ const Signup = () => {
                 </FormControlWrappper>
 
                 {/* Service Provider Selector */}
-
-                <ServiceProviderSelect
-                  value={values.serviceProvider}
-                  options={serviceProviders} // from Firestore / RTK Query
-                  disabled={isLoading}
-                  onSelect={(sp) => setFieldValue("serviceProvider", sp)}
-                />
-                <FormErrorText
-                  touched={touched.serviceProvider}
-                  error={errors.serviceProvider}
-                />
+                <View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 10,
+                      marginBottom: 5,
+                    }}
+                  >
+                    <Text
+                      style={{ fontSize: 12, fontWeight: "700", color: "gray" }}
+                    >
+                      Service Provider
+                    </Text>
+                    {isSpLoading && (
+                      <ActivityIndicator size="small" color="#2563eb" />
+                    )}
+                  </View>
+                  <ServiceProviderSelect
+                    value={values.serviceProvider}
+                    options={serviceProviders} // 🚀 LIVE FROM SP_API
+                    disabled={isLoading}
+                    onSelect={(sp) => setFieldValue("serviceProvider", sp)}
+                  />
+                  <FormErrorText
+                    touched={touched.serviceProvider}
+                    error={errors.serviceProvider}
+                  />
+                </View>
 
                 {/* Buttons */}
                 <View
@@ -212,7 +247,7 @@ const Signup = () => {
                 >
                   <BtnForm title="Reset" handlePress={resetForm} />
                   {isLoading ? (
-                    <ActivityIndicator />
+                    <ActivityIndicator size="large" color="black" />
                   ) : (
                     <BtnForm title="Submit" handlePress={handleSubmit} />
                   )}

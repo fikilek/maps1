@@ -1,246 +1,380 @@
+import { useIsFocused } from "@react-navigation/native";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
 
 // 🏛️ SOVEREIGN CONTEXTS ONLY
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
+import ErfFilterHeader from "./erfFilterHeader";
+import { ErfReport } from "./ErfReport";
+import ErfsBottomSearch from "./ErfsBottomSearch";
+
 import { HandleNuclearReset } from "../../test/mmkvNuclearReset";
 import StealthAuditor from "../../test/premisesDiagnosis";
-import ErfFilterHeader from "./erfFilterHeader";
-
-// function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
-//   const premiseCount = `${item?.totals?.premises ?? item?.premises?.length ?? 0}`;
-//   const summaryIcon = `${item?.summaryIcon || "home-city-outline"}`;
-
-//   return (
-//     <View style={[styles?.itemWrapper, isActive && styles?.activeItemWrapper]}>
-//       <View style={styles?.itemContainer}>
-//         <TouchableOpacity
-//           style={styles?.infoSection}
-//           onPress={() => onSelect(item?.id)}
-//           activeOpacity={0.7}
-//         >
-//           <View style={styles?.row}>
-//             <Text style={[styles?.parcelText, isActive && styles?.activeText]}>
-//               {/* 🛡️ FORCE STRING */}
-//               {`ERF ${item?.erfNo || "N/A"}`}
-//             </Text>
-//           </View>
-
-//           {/* 🎯 THE CRASH ZONE: Force Ward name to string */}
-//           <Text style={styles?.wardText}>
-//             {`${item?.admin?.ward?.name || item?.ward || "Unknown Ward"}`}
-//           </Text>
-
-//           {/* 🛡️ FORCE STRING */}
-//           <Text style={styles?.idText}>{`${item?.id || "N/Av"}`}</Text>
-//         </TouchableOpacity>
-
-//         {/* ... rest of the component ... */}
-//         <View style={styles.dashboardCol}>
-//           <Text style={styles.bigCountText}>{premiseCount}</Text>
-//         </View>
-//       </View>
-//     </View>
-//   );
-// }
-
-function ErfItem({ item, isActive, onSelect, onMapPress, onErfDetailPress }) {
-  // 🎯 Extract just what we need.
-  // We use item?.premises?.length as a fallback if totals isn't calculated yet.
-  const premiseCount = item?.totals?.premises ?? item?.premises?.length ?? 0;
-  const summaryIcon = item?.summaryIcon || "home-city-outline";
-
-  return (
-    <View style={[styles?.itemWrapper, isActive && styles?.activeItemWrapper]}>
-      <View style={styles?.itemContainer}>
-        {/* 🎯 PILLAR 1: SELECTION & INFO (LEFT) */}
-        <TouchableOpacity
-          style={styles?.infoSection}
-          onPress={() => onSelect(item?.id)}
-          activeOpacity={0.7}
-        >
-          <View style={styles?.row}>
-            <Text style={[styles?.parcelText, isActive && styles?.activeText]}>
-              ERF {item?.erfNo || "N/A"}
-            </Text>
-          </View>
-          {/* <Text style={styles?.wardText}>{item?.admin?.ward?.name}</Text> */}
-          <Text style={styles?.idText}>{item?.id || "N/Av"}</Text>
-        </TouchableOpacity>
-
-        {/* 🎯 PILLAR 2: PREMISE DASHBOARD (CENTER) - Simplified */}
-        <TouchableOpacity
-          style={styles.premiseSection}
-          onPress={() => onErfDetailPress(item)}
-        >
-          <View style={styles.dashboardRowCentric}>
-            <View style={styles.dashboardCol}>
-              <MaterialCommunityIcons
-                name={summaryIcon}
-                size={22}
-                color={isActive ? "#4CAF50" : "#455a64"}
-              />
-            </View>
-            <View style={styles.dashboardCol}>
-              <Text style={styles.bigCountText}>{premiseCount}</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-
-        {/* 🎯 PILLAR 3: MAP TRANSITION (RIGHT) */}
-        <TouchableOpacity
-          style={styles?.actionSection}
-          onPress={() => onMapPress(item?.id)}
-        >
-          <View
-            style={[styles?.iconCircle, isActive && styles?.activeIconCircle]}
-          >
-            <MaterialCommunityIcons
-              name="map-search"
-              size={24}
-              color={isActive ? "#4CAF50" : "#00BFFF"}
-            />
-          </View>
-          <Text style={[styles?.mapLinkText, isActive && { color: "#4CAF50" }]}>
-            {isActive ? "GO TO" : "MAP"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
+import { ErfItem } from "./erfItem";
 
 export default function ErfsScreen() {
-  // console.log(``);
-  // console.log(`ErfsScreen ----mounting `);
+  const isFocused = useIsFocused();
+  const lastScrolledIdRef = useRef(null);
   const flatListRef = useRef(null);
   const router = useRouter();
 
-  // 🏛️ Now these will work because of the 'export' fix!
-  const { geoState, setGeoState } = useGeo();
-  // console.log(`ErfsScreen ----geoState?.selectedWard`, geoState?.selectedWard);
+  const { geoState, updateGeo } = useGeo();
+  const { all, filtered } = useWarehouse();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [reportVisible, setReportVisible] = useState(false);
 
-  const { all, filtered, loading } = useWarehouse();
-  // console.log(`ErfsScreen ----filtered`, filtered);
+  // 1. 🎯 THE DATA POOL: Memoized for stability
+  const filteredErfs = useMemo(() => {
+    let sectorPool = [...(filtered?.erfs || [])];
 
-  const erfs = filtered.erfs;
-  const wards = filtered.wards;
-
-  useEffect(() => {
-    if (erfs?.length > 0) {
-      console.log(
-        `🔎 [SCAN COMPLETE]: Found ${erfs?.length} Filtered Erfs in ErfsScreen .`,
-      );
-      console.log(
-        `🔎 [SCAN COMPLETE]: Found ${wards?.length} Filtered Wards in ErfsScreen .`,
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      sectorPool = sectorPool.filter(
+        (e) =>
+          e?.erfNo?.toLowerCase().includes(q) ||
+          e.id?.toLowerCase().includes(q),
       );
     }
-  }, [erfs]);
+    return sectorPool;
+  }, [searchQuery, filtered?.erfs]);
+
+  // Inside ErfsScreen.js
+
+  const scrollToTarget = useCallback(() => {
+    const targetId = geoState?.selectedErf?.id;
+
+    // 🛡️ Safety check: No target or no list? Stand down.
+    if (!targetId || !flatListRef.current || filteredErfs.length === 0) return;
+
+    const index = filteredErfs.findIndex((e) => e.id === targetId);
+
+    if (index !== -1) {
+      console.log(
+        `🚀 [SCROLL SENTINEL]: Index ${index} located. Executing jump.`,
+      );
+
+      // 🎯 We use requestAnimationFrame to ensure the A06
+      // has finished its "Render Cycle" before we move the list.
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToIndex({
+          index,
+          animated: true,
+          viewPosition: 0, // 📍 Keeps it comfortably visible below the header
+        });
+        lastScrolledIdRef.current = targetId; // Mark mission success
+      });
+    }
+  }, [geoState?.selectedErf?.id, filteredErfs]);
+
+  // 🛰️ AUTO-JUMP: When user selects from Map and lands here
+  useEffect(() => {
+    if (isFocused && geoState?.selectedErf?.id) {
+      // Give the screen 300ms to "settle" before the first jump
+      const timer = setTimeout(scrollToTarget, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, geoState?.selectedErf?.id, scrollToTarget]);
 
   return (
     <View style={styles.container}>
-      {/* FOR TESTING ONLY - DO NOT DELETE */}
+      {/* Testing & Diagnostics */}
       <View>
         <HandleNuclearReset />
         <StealthAuditor />
       </View>
 
       <ErfFilterHeader
-        search={""}
-        setSearch={() => {}}
-        // 🛡️ Pass the object as is
         selectedWard={geoState.selectedWard}
-        // 🎯 THE FIX: Rename the argument to 'ward' to reflect reality
-        // and ensure we are passing the whole object to the state
-        setSelectedWard={(ward) => {
-          console.log("📡 [GOC]: Updating Ward to:", ward?.name || ward);
-          // setGeoState({ selectedWard: ward });
-          setGeoState((prev) => ({ ...prev, selectedWard: ward }));
-        }}
+        setSelectedWard={(w) =>
+          updateGeo({ selectedWard: w, lastSelectionType: "WARD" })
+        }
         availableWards={all?.wards}
-        filteredCount={erfs?.length || 0}
-        totalCount={erfs?.length || 0}
+        filteredCount={filteredErfs.length}
+        totalCount={all?.erfs?.length || 0}
+        selectedErf={geoState.selectedErf}
+        onScrollToSelected={scrollToTarget}
       />
 
       <FlashList
         ref={flatListRef}
-        data={erfs || []}
+        data={filteredErfs}
         keyExtractor={(item) => item?.id}
-        extraData={geoState?.selectedErf?.id}
+        extraData={geoState?.selectedErf?.id} // 🎯 Crucial for highlighting
         estimatedItemSize={106}
+        onScrollToIndexFailed={(info) => {
+          // A06 Fallback: Sometimes the item isn't rendered yet
+          flatListRef.current?.scrollToOffset({
+            offset: info.averageItemLength * info.index,
+            animated: false,
+          });
+          setTimeout(() => scrollToTarget(), 100);
+        }}
         renderItem={({ item }) => (
           <ErfItem
             item={item}
             isActive={item?.id === geoState?.selectedErf?.id}
             onSelect={() => {
-              const isAlreadySelected = geoState?.selectedErf?.id === item.id;
-
-              if (isAlreadySelected) {
-                // 🛡️ FIX: Spread the previous state to keep LM/Ward!
-                setGeoState((prev) => ({ ...prev, selectedErf: null }));
-                console.log("📴 [DESELECTED]: Filter cleared.");
-              } else {
-                // 🛡️ FIX: Spread the previous state!
-                setGeoState((prev) => ({ ...prev, selectedErf: item }));
-                console.log(`🎯 [SELECTED]: Erf ${item.erfNo}`);
-              }
+              const isSame = geoState?.selectedErf?.id === item.id;
+              updateGeo({
+                selectedErf: isSame ? null : item,
+                lastSelectionType: isSame ? null : "ERF",
+              });
             }}
             onMapPress={() => {
-              // 🛡️ FIX: Spread the previous state!
-              setGeoState((prev) => ({ ...prev, selectedErf: item }));
+              updateGeo({ selectedErf: item, lastSelectionType: "ERF" });
               router.push("/(tabs)/maps");
             }}
             onErfDetailPress={(item) => {
-              // 🛡️ FIX: Spread the previous state!
-              setGeoState((prev) => ({ ...prev, selectedErf: item }));
-              router.push(`/erfs/${item.id}`);
+              updateGeo({ selectedErf: item, lastSelectionType: "ERF" });
+              router.push(`/erfs/${item?.id}`);
             }}
           />
         )}
       />
 
-      {/* <FlashList
-        ref={flatListRef}
-        data={erfs || []}
-        keyExtractor={(item) => item?.id}
-        extraData={geoState?.selectedErf?.id}
-        estimatedItemSize={106}
-        renderItem={({ item }) => (
-          <ErfItem
-            item={item}
-            isActive={item?.id === geoState?.selectedErf?.id}
-            onSelect={() => {
-              // 🎯 THE TOGGLE LOGIC:
-              const isAlreadySelected = geoState?.selectedErf?.id === item.id;
+      <ErfsBottomSearch
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        count={filteredErfs.length}
+      />
 
-              if (isAlreadySelected) {
-                // If tapping the same one, clear it (deselect)
-                setGeoState({ selectedErf: null });
-                console.log("📴 [DESELECTED]: Filter cleared.");
-              } else {
-                // Otherwise, select it
-                setGeoState({ selectedErf: item });
-                console.log(`🎯 [SELECTED]: Erf ${item.erfNo}`);
-              }
-            }}
-            onMapPress={() => {
-              setGeoState({ selectedErf: item });
-              router.push("/(tabs)/maps");
-            }}
-            onErfDetailPress={(item) => {
-              setGeoState({ selectedErf: item });
-              router.push(`/erfs/${item.id}`);
-            }}
-          />
-        )}
-      /> */}
+      <ErfReport
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        erf={geoState.selectedErf}
+      />
     </View>
   );
 }
+
+// export default function ErfsScreen() {
+//   // console.log(`ErfsScreen ----mounted`);
+//   const isFocused = useIsFocused(); //
+//   const lastScrolledIdRef = useRef(null);
+//   const { geoState, updateGeo } = useGeo();
+//   const flatListRef = useRef(null);
+//   const router = useRouter();
+
+//   const [reportVisible, setReportVisible] = useState(false);
+//   // const [sortOrder, setSortOrder] = useState("DESC"); // Default: Newest first
+
+//   // const toggleSort = () => {
+//   //   setSortOrder((prev) => (prev === "DESC" ? "ASC" : "DESC"));
+//   // };
+
+//   useEffect(() => {
+//     const targetId = geoState?.selectedErf?.id;
+
+//     // 🛡️ THE MISSION RULES:
+//     // 1. Only run if the screen is focused (isFocused)
+//     // 2. Only run if we actually have a target (targetId)
+//     // 3. Only run if this ID is DIFFERENT from the last jump (Ref check)
+//     if (isFocused && targetId && targetId !== lastScrolledIdRef.current) {
+//       const timer = setTimeout(() => {
+//         scrollToTarget();
+//         lastScrolledIdRef.current = targetId; // 🎯 Mark this ID as "Handled"
+//       }, 400);
+
+//       return () => clearTimeout(timer);
+//     }
+//   }, [isFocused, geoState?.selectedErf?.id]); // 🛰️ Watch only focus and the ID
+
+//   const { all, filtered } = useWarehouse();
+//   const [searchQuery, setSearchQuery] = useState("");
+
+//   const filteredErfs = useMemo(() => {
+//     // 1. Start with a shallow copy to prevent mutating the warehouse source
+//     let sectorPool = [...(filtered?.erfs || [])];
+
+//     // 2. Pass 1: SEARCH FILTERING
+//     if (searchQuery) {
+//       const q = searchQuery.toLowerCase();
+//       sectorPool = sectorPool.filter(
+//         (e) =>
+//           e?.erfNo?.toLowerCase().includes(q) ||
+//           e.id?.toLowerCase().includes(q),
+//       );
+//     }
+
+//     // // 3. Pass 2: CHRONOS SORTING (metadata.updatedAt)
+//     // sectorPool.sort((a, b) => {
+//     //   // Use 0 as fallback for items without timestamps
+//     //   const dateA = new Date(a.metadata?.updatedAt || 0).getTime();
+//     //   const dateB = new Date(b.metadata?.updatedAt || 0).getTime();
+
+//     //   return sortOrder === "DESC" ? dateB - dateA : dateA - dateB;
+//     // });
+
+//     return sectorPool;
+//   }, [searchQuery, filtered?.erfs]);
+
+//   // const erfs = filtered.erfs;
+
+//   const scrollToTarget = useCallback(() => {
+//     if (!geoState.selectedErf || !erfs) return;
+
+//     const index = erfs.findIndex((e) => e.id === geoState.selectedErf.id);
+
+//     if (index !== -1 && flatListRef.current) {
+//       // 🔇 Tactical Log: Small and fast
+//       console.log(`🚀 [LOCATOR]: Centering Index ${index}`);
+//       flatListRef.current.scrollToIndex({
+//         index,
+//         animated: true,
+//         viewPosition: 0.1,
+//       });
+//     }
+//   }, [geoState.selectedErf, erfs]);
+
+//   // 2. The Unified Handler
+//   const handleTargetPress = useCallback(() => {
+//     // 🎯 Action A: Scroll the list in the background
+//     // scrollToTarget();
+
+//     // 🎯 Action B: Open the ErfReport Dossier
+//     setReportVisible(true);
+//   }, [scrollToTarget]);
+
+//   useEffect(() => {
+//     if (geoState.selectedErf) {
+//       const timer = setTimeout(scrollToTarget, 300);
+//       return () => clearTimeout(timer);
+//     }
+//   }, [geoState.selectedErf?.id]); // Only refire if the ID changes
+
+//   return (
+//     <View style={styles.container}>
+//       {/* FOR TESTING ONLY - DO NOT DELETE */}
+//       <View>
+//         <HandleNuclearReset />
+//         <StealthAuditor />
+//       </View>
+
+//       <ErfFilterHeader
+//         selectedWard={geoState.selectedWard}
+//         setSelectedWard={(w) =>
+//           updateGeo({
+//             selectedWard: w,
+//             lastSelectionType: "WARD",
+//           })
+//         }
+//         availableWards={all?.wards}
+//         // filteredCount={erfs?.length || 0}
+//         filteredCount={filteredErfs.length}
+//         totalCount={all?.erfs?.length || 0}
+//         selectedErf={geoState.selectedErf} // 🎯 Passing target info
+//         // onScrollToSelected={handleTargetPress}
+//         // sortOrder={sortOrder}
+//         // onToggleSort={toggleSort}
+//       />
+
+//       <FlashList
+//         ref={flatListRef}
+//         data={filteredErfs}
+//         keyExtractor={(item) => item?.id}
+//         // extraData={geoState?.selectedErf?.id}
+//         extraData={{
+//           selectedId: geoState?.selectedErf?.id,
+//           count: filteredErfs.length,
+//           // sort: sortOrder,
+//         }}
+//         estimatedItemSize={106}
+//         maxToRenderPerBatch={10}
+//         onScrollToIndexFailed={(info) => {
+//           // 🛡️ Fallback if FlashList hasn't rendered the index yet
+//           flatListRef.current?.scrollToOffset({
+//             offset: info.averageItemLength * info.index,
+//             animated: true,
+//           });
+//         }}
+//         renderItem={({ item }) => (
+//           <ErfItem
+//             item={item}
+//             isActive={item?.id === geoState?.selectedErf?.id}
+//             onSelect={() => {
+//               const isAlreadySelected = geoState?.selectedErf?.id === item.id;
+
+//               if (isAlreadySelected) {
+//                 updateGeo({
+//                   selectedErf: null,
+//                   lastSelectionType: null,
+//                 });
+//               } else {
+//                 // 🎯 Find Parent Ward for context
+//                 const parentWardId = item?.admin?.ward?.id;
+//                 const parentWard = all?.wards?.find(
+//                   (w) => w.id === parentWardId,
+//                 );
+
+//                 // 🚀 DOUBLE-TAP: Ward then Erf
+//                 updateGeo({
+//                   selectedWard: parentWard || null,
+//                   lastSelectionType: "WARD",
+//                 });
+
+//                 updateGeo({
+//                   selectedErf: item,
+//                   lastSelectionType: "ERF",
+//                 });
+//               }
+//             }}
+//             onMapPress={() => {
+//               const parentWardId = item?.admin?.ward?.id;
+//               const parentWard = all?.wards?.find((w) => w.id === parentWardId);
+
+//               // 🎯 TAP 1: Ward Context
+//               updateGeo({
+//                 selectedWard: parentWard || null,
+//                 lastSelectionType: "WARD",
+//               });
+
+//               // 🎯 TAP 2: Erf Target
+//               updateGeo({
+//                 selectedErf: item,
+//                 lastSelectionType: "ERF",
+//               });
+
+//               router.push("/(tabs)/maps");
+//             }}
+//             onErfDetailPress={(item) => {
+//               const parentWardId = item?.admin?.ward?.id;
+//               const parentWard = all?.wards?.find((w) => w.id === parentWardId);
+
+//               updateGeo({
+//                 selectedWard: parentWard || null,
+//                 lastSelectionType: "WARD",
+//               });
+
+//               updateGeo({
+//                 selectedErf: item,
+//                 lastSelectionType: "ERF",
+//               });
+
+//               router.push(`/erfs/${item?.id}`);
+//             }}
+//           />
+//         )}
+//       />
+
+//       {/* 🚀 THE THUMB ZONE: Search at the bottom */}
+//       <ErfsBottomSearch
+//         searchQuery={searchQuery}
+//         setSearchQuery={setSearchQuery}
+//         count={filteredErfs.length}
+//       />
+
+//       <ErfReport
+//         visible={reportVisible}
+//         onClose={() => setReportVisible(false)}
+//         erf={geoState.selectedErf}
+//       />
+//     </View>
+//   );
+// }
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8f9fa" },
   itemWrapper: {
@@ -257,14 +391,6 @@ const styles = StyleSheet.create({
   },
   itemContainer: { flexDirection: "row", alignItems: "center", padding: 12 },
   infoSection: { flex: 1.5 },
-  // premiseSection: {
-  //   flex: 1,
-  //   alignItems: "center",
-  //   borderLeftWidth: 1,
-  //   borderRightWidth: 1,
-  //   borderColor: "#eee",
-  //   paddingHorizontal: 8,
-  // },
   actionSection: { flex: 0.5, alignItems: "center" },
   iconCircle: {
     width: 44,
@@ -330,5 +456,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     color: "#546e7a",
+  },
+
+  timeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    gap: 3,
+  },
+  timeText: {
+    fontSize: 9,
+    color: "#94a3b8",
+    fontWeight: "600",
+    textTransform: "uppercase",
   },
 });

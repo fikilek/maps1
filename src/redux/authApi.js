@@ -19,6 +19,7 @@ import {
 import {
   doc,
   getDoc,
+  onSnapshot,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -27,18 +28,6 @@ import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../firebase";
 import { clearAuthState } from "./authStorage";
 // import { geoApi } from "./geoApi";
-
-/*
-  Auth cache shape (ALWAYS consistent):
-
-  {
-    auth: { uid, email } | null,
-    profile: FirestoreUser | null,
-    claims: {},
-    isAuthenticated: boolean,
-    ready: boolean
-  }
-*/
 
 export const authApi = createApi({
   reducerPath: "authApi",
@@ -49,11 +38,10 @@ export const authApi = createApi({
        AUTH STATE (BOOTSTRAP + REALTIME LISTENERS)
        ===================================================== */
     getAuthState: builder.query({
-      // 🔒 NEVER remove this query from cache
       keepUnusedDataFor: Infinity,
       queryFn: () => ({
         data: {
-          ready: true,
+          ready: false, // Start as not ready
           isAuthenticated: false,
           auth: null,
           profile: null,
@@ -62,8 +50,12 @@ export const authApi = createApi({
       }),
 
       async onCacheEntryAdded(_, { updateCachedData, cacheEntryRemoved }) {
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
-          // 🔐 AUTH STATE RESOLVED (no user)
+        let profileUnsubscribe = null;
+
+        const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
+          // 🛡️ Clean up old profile listener if user changes
+          if (profileUnsubscribe) profileUnsubscribe();
+
           if (!user) {
             updateCachedData(() => ({
               ready: true,
@@ -75,51 +67,106 @@ export const authApi = createApi({
             return;
           }
 
-          try {
-            // Load user profile
-            const userRef = doc(db, "users", user.uid);
-            const snap = await getDoc(userRef);
-
-            // Load claims
+          // 🛰️ 1. Start Profile Stream (Real-time)
+          const userRef = doc(db, "users", user.uid);
+          profileUnsubscribe = onSnapshot(userRef, async (snap) => {
+            // 🛰️ 2. Load claims (needed for role-based logic)
             const tokenResult = await user.getIdTokenResult(true);
 
-            updateCachedData(() => ({
-              ready: true,
-              isAuthenticated: true,
+            updateCachedData((draft) => {
+              draft.ready = true;
+              draft.isAuthenticated = true;
+              draft.auth = { uid: user.uid, email: user.email };
+              draft.profile = snap.exists() ? snap.data() : null;
+              draft.claims = tokenResult.claims;
+            });
 
-              auth: {
-                uid: user.uid,
-                email: user.email,
-              },
-
-              profile: snap.exists() ? snap.data() : null,
-
-              claims: tokenResult.claims,
-            }));
-          } catch (error) {
-            // 🧯 Fail-safe: still mark auth as resolved
-            updateCachedData(() => ({
-              ready: true,
-              isAuthenticated: true,
-              auth: {
-                uid: user.uid,
-                email: user.email,
-              },
-              profile: null,
-              claims: null,
-            }));
-          }
+            console.log(
+              "📡 [AUTH STREAM]: Profile synchronized for",
+              user.email,
+            );
+          });
         });
 
         await cacheEntryRemoved;
-        unsubscribe();
+        authUnsubscribe();
+        if (profileUnsubscribe) profileUnsubscribe();
       },
     }),
+
+    // getAuthState: builder.query({
+    //   // 🔒 NEVER remove this query from cache
+    //   keepUnusedDataFor: Infinity,
+    //   queryFn: () => ({
+    //     data: {
+    //       ready: true,
+    //       isAuthenticated: false,
+    //       auth: null,
+    //       profile: null,
+    //       claims: null,
+    //     },
+    //   }),
+
+    //   async onCacheEntryAdded(_, { updateCachedData, cacheEntryRemoved }) {
+    //     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    //       // 🔐 AUTH STATE RESOLVED (no user)
+    //       if (!user) {
+    //         updateCachedData(() => ({
+    //           ready: true,
+    //           isAuthenticated: false,
+    //           auth: null,
+    //           profile: null,
+    //           claims: null,
+    //         }));
+    //         return;
+    //       }
+
+    //       try {
+    //         // Load user profile
+    //         const userRef = doc(db, "users", user.uid);
+    //         const snap = await getDoc(userRef);
+
+    //         // Load claims
+    //         const tokenResult = await user.getIdTokenResult(true);
+
+    //         updateCachedData(() => ({
+    //           ready: true,
+    //           isAuthenticated: true,
+
+    //           auth: {
+    //             uid: user.uid,
+    //             email: user.email,
+    //           },
+
+    //           profile: snap.exists() ? snap.data() : null,
+
+    //           claims: tokenResult.claims,
+    //         }));
+    //       } catch (error) {
+    //         // 🧯 Fail-safe: still mark auth as resolved
+    //         updateCachedData(() => ({
+    //           ready: true,
+    //           isAuthenticated: true,
+    //           auth: {
+    //             uid: user.uid,
+    //             email: user.email,
+    //           },
+    //           profile: null,
+    //           claims: null,
+    //         }));
+    //       }
+    //     });
+
+    //     await cacheEntryRemoved;
+    //     unsubscribe();
+    //   },
+    // }),
     /* =====================================================
         SIGN UP GST (Locked to Guest Role)
       ===================================================== */
+
     signupGst: builder.mutation({
-      async queryFn({ email, password, name, surname, serviceProvider }) {
+      async queryFn({ email, password, name, surname, serviceProvider, role }) {
         try {
           const cred = await createUserWithEmailAndPassword(
             auth,
@@ -130,31 +177,35 @@ export const authApi = createApi({
 
           await setDoc(doc(db, "users", uid), {
             uid,
-            identity: { email, name, surname },
+            // 🛡️ Aligned to Schema v0.2 (Master Switch)
+            accountStatus: "DISABLED",
             employment: {
-              // 🛡️ LOCKED: All public signups start as GST
-              role: "GST",
+              // 🛡️ Reflect the operative's selected role so Zamo can see it
+              role: role || "GST",
               serviceProvider: {
                 id: serviceProvider.id,
                 name: serviceProvider.name,
               },
+              level: role === "SPV" ? 4 : 2, // Default levels for SPV (4) and FWR (2)
             },
             access: {
               workbases: [],
               activeWorkbase: null,
             },
             onboarding: {
-              // 🛑 LOCKED: Must wait for manual confirmation
-              status: "AWAITING_SP_CONFIRMATION",
-              steps: {
-                signupCompleted: true,
-                spConfirmed: false,
-                workbasesAssigned: false,
-                activeWorkbaseSelected: false,
-              },
+              // 🛑 Aligned to the Onboarding Matrix state
+              status: "AWAITING-MNG-CONFIRMATION",
+            },
+            profile: {
+              displayName: `${name} ${surname}`,
+              email: email.toLowerCase().trim(),
+              name: name.trim(),
+              surname: surname.trim(),
             },
             metadata: {
               createdAt: serverTimestamp(),
+              createdByUid: uid, // Self-created
+              createdByUser: `${surname} ${name}`,
               updatedAt: serverTimestamp(),
             },
           });
@@ -165,6 +216,7 @@ export const authApi = createApi({
         }
       },
     }),
+
     /* =====================================================
        SIGN IN
        ===================================================== */
@@ -210,18 +262,17 @@ export const authApi = createApi({
     }),
 
     /* =====================================================
-       UPDATE PROFILE (SAFE PARTIAL UPDATE)
-       ===================================================== */
+        UPDATE PROFILE (SAFE PARTIAL UPDATE)
+        ===================================================== */
+
     updateProfile: builder.mutation({
-      async queryFn({ uid, updates }) {
+      async queryFn({ uid, update }) {
+        // 🎯 Matches the component: { uid, update }
         try {
           const userRef = doc(db, "users", uid);
 
-          await updateDoc(userRef, {
-            ...updates,
-            "metadata.updatedAt": serverTimestamp(),
-            "metadata.updatedByUid": uid,
-          });
+          // We use the values passed from the handleAuthorize function
+          await updateDoc(userRef, update);
 
           return { data: true };
         } catch (error) {
@@ -229,6 +280,58 @@ export const authApi = createApi({
         }
       },
     }),
+
+    // updateProfile: builder.mutation({
+    //   async queryFn({ uid, updates }) {
+    //     try {
+    //       const userRef = doc(db, "users", uid);
+
+    //       await updateDoc(userRef, {
+    //         ...updates,
+    //         "metadata.updatedAt": serverTimestamp(),
+    //         "metadata.updatedByUid": uid,
+    //       });
+
+    //       return { data: true };
+    //     } catch (error) {
+    //       return { error };
+    //     }
+    //   },
+
+    //   // 🚀 THE RERENDER TRIGGER: Manually sync the local RAM cache
+    //   async onQueryStarted({ uid, updates }, { dispatch, queryFulfilled }) {
+    //     try {
+    //       await queryFulfilled; // Wait for Firestore success
+
+    //       dispatch(
+    //         authApi.util.updateQueryData("getAuthState", undefined, (draft) => {
+    //           // 🎯 Update the local profile object so useAuth() reacts immediately
+    //           if (draft.profile && draft.auth?.uid === uid) {
+    //             // Handle the "access.activeWorkbase" dot notation specifically
+    //             if (updates["access.activeWorkbase"]) {
+    //               draft.profile.access.activeWorkbase =
+    //                 updates["access.activeWorkbase"];
+    //             }
+
+    //             // Handle other potential updates
+    //             Object.entries(updates).forEach(([key, value]) => {
+    //               if (key !== "access.activeWorkbase") {
+    //                 draft.profile[key] = value;
+    //               }
+    //             });
+
+    //             console.log(
+    //               "🧠 [CACHE SYNC]: Local profile updated to",
+    //               updates["access.activeWorkbase"]?.name,
+    //             );
+    //           }
+    //         }),
+    //       );
+    //     } catch (err) {
+    //       console.error("Cache Sync Failed:", err);
+    //     }
+    //   },
+    // }),
 
     /* =====================================================
    SET / SWITCH ACTIVE WORKBASE
@@ -450,6 +553,61 @@ export const authApi = createApi({
       },
       invalidatesTags: ["Admin", "User"],
     }),
+
+    /* =====================================================
+       INVITE MNG (SPU ONLY)
+       ===================================================== */
+    // src/redux/authApi.js
+    inviteMng: builder.mutation({
+      async queryFn({ email, name, surname, mnc, workbases }) {
+        try {
+          const fn = httpsCallable(functions, "inviteManagerUser");
+          const res = await fn({
+            email,
+            name,
+            surname,
+            mnc, // Single object: { id: 'SP_RSTE_01', name: 'RSTE' }
+            workbases, // Array of LMs: [{ id: 'ZA1048', name: 'Knysna LM' }, { id: 'WC048', name: 'Bitou' }]
+          });
+
+          return { data: res.data };
+        } catch (error) {
+          return { error: { message: error.message } };
+        }
+      },
+      invalidatesTags: ["User"],
+    }),
+
+    /* =====================================================
+        INVITE ADMIN (SPU ONLY)
+       ===================================================== */
+    inviteAdmin: builder.mutation({
+      async queryFn({ email, name, surname }) {
+        try {
+          // 🎯 ALIGNMENT: Must match the deployed function name exactly
+          const fn = httpsCallable(functions, "inviteAdminUser");
+
+          const res = await fn({
+            email,
+            name,
+            surname,
+          });
+
+          return { data: res.data };
+        } catch (error) {
+          console.error("❌ [AUTH API]: Admin Invite Failed", error);
+          return {
+            error: {
+              status: "CUSTOM_ERROR",
+              message: error?.message || "Admin appointment failed",
+            },
+          };
+        }
+      },
+      // 🚀 THE FRESHNESS TRIGGER:
+      // This tells Redux to refetch the users list so the new ADM appears immediately.
+      invalidatesTags: ["User"],
+    }),
   }),
 });
 
@@ -470,4 +628,6 @@ export const {
   useConfirmPhoneOtpMutation,
   useUpdatePasswordMutation,
   useCreateAdminUserMutation,
+  useInviteMngMutation,
+  useInviteAdminMutation,
 } = authApi;
