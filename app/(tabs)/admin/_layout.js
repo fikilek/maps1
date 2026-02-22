@@ -34,6 +34,14 @@ export default function AdminLayout() {
         options={{ title: "Users", headerShown: true }}
       />
       <Stack.Screen
+        name="reports/normalisation-report"
+        options={{ title: "Normalisation Report", headerShown: true }}
+      />
+      <Stack.Screen
+        name="reports/anomaly-report"
+        options={{ title: "Anomaly Report", headerShown: true }}
+      />
+      <Stack.Screen
         name="user"
         options={{ title: "User", headerShown: true }}
         screenOptions={{

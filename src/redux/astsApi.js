@@ -1,6 +1,7 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
+  doc,
   onSnapshot,
   orderBy,
   query,
@@ -80,8 +81,41 @@ export const astsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getAstById: builder.query({
+      queryFn: () => ({ data: null }),
+      async onCacheEntryAdded(
+        id, // This is the docId passed from your router.push
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        try {
+          await cacheDataLoaded;
+          if (!id) return;
+
+          // 🛰️ Direct link to the specific Asset Document
+          const docRef = doc(db, "asts", id);
+
+          unsubscribe = onSnapshot(docRef, (docSnap) => {
+            updateCachedData((draft) => {
+              if (docSnap.exists()) {
+                return { id: docSnap.id, ...docSnap.data() };
+              }
+              return null;
+            });
+          });
+        } catch (error) {
+          console.error("❌ [AST DOCUMENT ERROR]:", error);
+        }
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
-export const { useGetAstsByLmPcodeQuery, useGetAstsByCountryCodeQuery } =
-  astsApi;
+export const {
+  useGetAstsByLmPcodeQuery,
+  useGetAstsByCountryCodeQuery,
+  useGetAstByIdQuery,
+} = astsApi;

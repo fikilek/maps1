@@ -11,6 +11,7 @@ import { astsApi } from "./astsApi";
 import { erfsApi } from "./erfsApi";
 import offlineReducer from "./offlineSlice";
 import { premisesApi } from "./premisesApi";
+import { salesApi } from "./salesApi";
 import { settingsApi } from "./settingsApi";
 import { spApi } from "./spApi";
 import { trnsApi } from "./trnsApi";
@@ -31,6 +32,7 @@ const rootReducer = combineReducers({
   [trnsApi.reducerPath]: trnsApi.reducer,
   [settingsApi.reducerPath]: settingsApi.reducer,
   [astsApi.reducerPath]: astsApi.reducer,
+  [salesApi.reducerPath]: salesApi.reducer,
   // App-level slices (example)
   offline: offlineReducer,
   // ui: uiReducer,
@@ -57,6 +59,7 @@ const persistConfig = {
     trnsApi.reducerPath,
     settingsApi.reducerPath,
     astsApi.reducerPath,
+    salesApi.reducerPath,
   ],
 };
 
@@ -84,6 +87,7 @@ export const store = configureStore({
       trnsApi.middleware,
       settingsApi.middleware,
       astsApi.middleware,
+      salesApi.middleware,
     ),
 });
 

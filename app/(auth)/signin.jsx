@@ -41,6 +41,8 @@ const Signin = () => {
 
       if (result) {
         await auth.currentUser.getIdToken(true);
+        console.log(` `);
+        console.log(`Signin ---successful, navigating to /(tabs)/erfs`);
         router.replace("/(tabs)/erfs");
         resetForm();
       }

@@ -4,7 +4,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 
 export const TrnMiniMap = ({ gps }) => {
   // 🛡️ Added logs to catch the data in the console
-  console.log("MiniMap GPS Receiver:", gps);
+  // console.log("MiniMap GPS Receiver:", gps);
 
   if (!gps?.lat || !gps?.lng) {
     console.log("📍 MiniMap: Missing Coordinates");

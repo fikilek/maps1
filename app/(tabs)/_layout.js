@@ -14,6 +14,7 @@ export default function TabsLayout() {
     dashboard: "Dashboard",
     admin: "Admin",
     premises: "Premises",
+    sales: "Sales",
   };
 
   return (
@@ -22,6 +23,9 @@ export default function TabsLayout() {
         header: () => (
           <AppHeader title={titles[route.name]} user={{ profile }} />
         ),
+        tabBarActiveTintColor: "#4CAF50", // iREPS Green
+        tabBarInactiveTintColor: "#888",
+        tabBarStyle: { backgroundColor: "#d4d4d4", borderTopColor: "#d7d7d7" },
       })}
     >
       <Tabs.Screen name="index" options={{ href: null }} />
@@ -85,20 +89,6 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
               name="map-outline"
-              color={color}
-              size={size}
-            />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="dashboard"
-        options={{
-          title: "Dashboard",
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons
-              name="view-dashboard-outline"
               color={color}
               size={size}
             />

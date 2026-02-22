@@ -15,7 +15,7 @@ const SelectedErf = ({ coordinate, erfNo }) => {
       <View
         style={{
           backgroundColor: "white",
-          padding: 2,
+          padding: 8,
           borderWidth: 1,
           borderColor: "blue",
           borderRadius: 4,

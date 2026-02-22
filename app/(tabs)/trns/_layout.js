@@ -1,35 +1,63 @@
 import { Stack } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import { useMemo } from "react";
+import SovereignHeader from "../../../components/SovereignHeader";
 import { useGeo } from "../../../src/context/GeoContext";
+import { useTrnFilter } from "../../../src/hooks/useTrnFilter"; // 🎯 Ensure you have this hook
 import { useGetTrnsByLmPcodeQuery } from "../../../src/redux/trnsApi";
 
 export default function TrnsLayout() {
   const { geoState } = useGeo();
   const lmPcode = geoState?.selectedLm?.id;
 
+  // 🏛️ TACTICAL DATA HOOK
   const { data: trns } = useGetTrnsByLmPcodeQuery(
     { lmPcode },
     { skip: !lmPcode },
   );
-  const totalTrns = trns?.length || 0;
+
+  // 🎯 FILTER HOOK (Standardized)
+  const {
+    showFilters,
+    setShowFilters,
+    showStats,
+    setShowStats,
+    showSearch,
+    setShowSearch,
+    filterState,
+    resetFilters,
+  } = useTrnFilter();
+
+  // 📊 CALCULATION OF RATIOS
+  const filteredTrns = useMemo(() => {
+    let list = trns || [];
+    if (filterState?.status) {
+      list = list.filter((t) => t.status === filterState.status);
+    }
+    return list;
+  }, [trns, filterState]);
+
+  const isFiltering =
+    filterState?.status !== null || filterState?.searchQuery !== "";
 
   return (
     <Stack>
-      {/* 🏛️ THE MAIN LIST SCREEN */}
       <Stack.Screen
         name="index"
         options={{
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: "#F8FAFC" },
-          headerLeft: () => (
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerTitle}>TRNS</Text>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{totalTrns}</Text>
-              </View>
-            </View>
+          header: () => (
+            <SovereignHeader
+              title="TRNS"
+              totalCount={trns?.length || 0}
+              filteredCount={filteredTrns?.length || 0}
+              isFiltering={isFiltering}
+              filterCount={filterState?.status ? 1 : 0}
+              showSearch={showSearch}
+              onSearchPress={() => setShowSearch(true)}
+              onFilterPress={() => setShowFilters(true)}
+              onStatsPress={() => setShowStats(true)}
+              onQuickReset={() => resetFilters()}
+            />
           ),
-          headerTitle: "",
         }}
       />
 
@@ -37,37 +65,11 @@ export default function TrnsLayout() {
       <Stack.Screen
         name="[id]"
         options={{
-          presentation: "transparentModal", // 🎯 Ensures background is visible (for the overlay feel)
-          headerShown: false, // We will build our own custom header inside the modal
+          presentation: "transparentModal",
+          headerShown: false,
           animation: "fade",
         }}
       />
     </Stack>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 8,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: "#1E293B",
-  },
-  badge: {
-    backgroundColor: "#EAB308", // Yellow/Gold to match the TRNS/Discovery vibe
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginLeft: 8,
-    marginTop: 4,
-  },
-  badgeText: {
-    color: "#FFF",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-});

@@ -373,17 +373,6 @@ export default function MapsScreen() {
           lineDashPattern={[5, 5]}
           zIndex={1200}
         />
-        <Marker
-          coordinate={{
-            latitude: (meterGps.lat + pCentroid[0]) / 2,
-            longitude: (meterGps.lng + pCentroid[1]) / 2,
-          }}
-          anchor={{ x: 0.5, y: 0.5 }}
-        >
-          <View style={styles.distanceBadge}>
-            <Text style={styles.distanceText}>SERVICE LINK</Text>
-          </View>
-        </Marker>
       </>
     );
   };
@@ -508,8 +497,9 @@ const styles = StyleSheet.create({
   },
   neighborhoodLabel: {
     backgroundColor: "white",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    // paddingHorizontal: 8,
+    // paddingVertical: 4,:
+    padding: 8,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: "#94a3b8",

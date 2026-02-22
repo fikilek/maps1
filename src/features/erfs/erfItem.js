@@ -10,7 +10,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 export const ErfItem = React.memo(
   ({ item, isActive, onSelect, onMapPress, onErfDetailPress }) => {
     // 🎯 CORE DATA EXTRACTION
-    const premiseCount = item?.totals?.premises ?? item?.premises?.length ?? 0;
+    const premiseCount = item?.premises?.length ?? 0;
     const summaryIcon = item?.summaryIcon || "home-city-outline";
     const wardNo = item?.admin?.ward?.name || "N/A";
 
@@ -94,11 +94,20 @@ export const ErfItem = React.memo(
   },
   (prevProps, nextProps) => {
     // 🛡️ THE GATEKEEPER: Prevent re-renders unless essential data actually changes
+
     return (
       prevProps.isActive === nextProps.isActive &&
       prevProps.item.id === nextProps.item.id &&
+      // 🎯 THE CRITICAL ADDITION: Check if premises array length has changed
+      prevProps.item.premises?.length === nextProps.item.premises?.length &&
       prevProps.item.metadata?.updatedAt === nextProps.item.metadata?.updatedAt
     );
+
+    // return (
+    //   prevProps.isActive === nextProps.isActive &&
+    //   prevProps.item.id === nextProps.item.id &&
+    //   prevProps.item.metadata?.updatedAt === nextProps.item.metadata?.updatedAt
+    // );
   },
 );
 

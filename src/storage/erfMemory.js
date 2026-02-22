@@ -1,33 +1,84 @@
 import { erfsKV } from "../redux/mmkv";
 
 export const erfMemory = {
-  // 🏛️ META: BULK OPERATIONS (The Gold Standard)
+  // Inside erfMemory.js -> saveBulkErfMeta
   saveBulkErfMeta: (lmPcode, metaEntries) => {
     try {
-      const storageKey = `meta_${lmPcode}`;
-      erfsKV.set(storageKey, JSON.stringify(metaEntries));
+      // 1. Save the actual Metadata
+      erfsKV.set(`meta_${lmPcode}`, JSON.stringify(metaEntries));
 
-      // Update Registry for the Audit Report
-      const registry = erfMemory.getRegistry();
-      registry.lms = registry.lms || {};
+      // 2. Hydrate the Registry
+      const rawRegistry = erfsKV.getString("registry");
+      const registry = rawRegistry ? JSON.parse(rawRegistry) : { lms: {} };
+
+      // 3. The Sovereign Entry (Now with Geo Verification)
       registry.lms[lmPcode] = {
+        pcode: lmPcode,
         count: metaEntries.length,
-        lastSync: new Date().toISOString(),
+        // 🎯 THE VERIFIER: Checks if the 'geo_' key exists for this LM
+        hasGeo: erfsKV.contains(`geo_${lmPcode}`),
+        updatedAt: new Date().toISOString(),
       };
+
+      // 4. Seal the Registry
       erfsKV.set("registry", JSON.stringify(registry));
 
       console.log(
-        `⚡️ [VAULT]: ${lmPcode} Meta Secured (${metaEntries.length} items).`,
+        `✅ [VAULT]: Registry Verified for ${lmPcode}. Geo: ${registry.lms[lmPcode].hasGeo}`,
       );
     } catch (e) {
-      console.error("❌ [VAULT]: Bulk Meta Save Failed", e);
+      console.error("❌ [VAULT]: Registry Sync Failed", e);
     }
   },
+
+  // saveBulkErfMeta: (lmPcode, metaEntries) => {
+  //   try {
+  //     const storageKey = `meta_${lmPcode}`;
+  //     erfsKV.set(storageKey, JSON.stringify(metaEntries));
+
+  //     // 🎯 THE FIX: Get the existing registry first
+  //     const registry = erfMemory.getRegistry();
+  //     if (!registry.lms) registry.lms = {};
+
+  //     registry.lms[lmPcode] = {
+  //       count: metaEntries.length,
+  //       lastSync: new Date().toISOString(),
+  //     };
+
+  //     // Save the combined registry
+  //     erfsKV.set("registry", JSON.stringify(registry));
+  //   } catch (e) {
+  //     console.error("❌ [VAULT]: Bulk Save Failed", e);
+  //   }
+  // },
+
+  // 🏛️ META: BULK OPERATIONS (The Gold Standard)
+  // saveBulkErfMeta: (lmPcode, metaEntries) => {
+  //   try {
+  //     const storageKey = `meta_${lmPcode}`;
+  //     erfsKV.set(storageKey, JSON.stringify(metaEntries));
+
+  //     // Update Registry for the Audit Report
+  //     const registry = erfMemory.getRegistry();
+  //     registry.lms = registry.lms || {};
+  //     registry.lms[lmPcode] = {
+  //       count: metaEntries.length,
+  //       lastSync: new Date().toISOString(),
+  //     };
+  //     erfsKV.set("registry", JSON.stringify(registry));
+
+  //     console.log(
+  //       `⚡️ [VAULT]: ${lmPcode} Meta Secured (${metaEntries.length} items).`,
+  //     );
+  //   } catch (e) {
+  //     console.error("❌ [VAULT]: Bulk Meta Save Failed", e);
+  //   }
+  // },
 
   getErfsMetaList: (lmPcode) => {
     try {
       const storageKey = `meta_${lmPcode}`;
-      const data = erfsKV.getString(storageKey);
+      const data = erfsKV?.getString(storageKey);
       return data ? JSON.parse(data) : [];
     } catch (e) {
       return [];
@@ -60,9 +111,30 @@ export const erfMemory = {
   },
 
   // 🛠️ UTILITIES
+  // getRegistry: () => {
+  //   const data = erfsKV?.getString("registry");
+  //   return data ? JSON.parse(data) : { lms: {} };
+  // },
+
+  // 🛠️ UTILITIES
   getRegistry: () => {
-    const data = erfsKV.getString("registry");
-    return data ? JSON.parse(data) : { lms: {} };
+    // 🛡️ The "Battery Check": If erfsKV is missing, return empty instead of crashing
+    console.log(`getRegistry ---erfsKV `, erfsKV);
+
+    if (!erfsKV) {
+      console.warn(
+        "⚠️ [VAULT]: MMKV instance (erfsKV) is not yet initialized.",
+      );
+      return { lms: {} };
+    }
+
+    try {
+      const data = erfsKV.getString("registry");
+      return data ? JSON.parse(data) : { lms: {} };
+    } catch (e) {
+      console.error("❌ [VAULT]: Registry parse failed", e);
+      return { lms: {} };
+    }
   },
 
   saveSyncTimestamp: (lmPcode) => {

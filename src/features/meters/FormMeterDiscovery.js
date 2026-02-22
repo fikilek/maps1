@@ -136,6 +136,10 @@ export default function FormMeterDiscovery() {
   // console.log(`handleSubmitDiscovery --accessInitValues`, accessInitValues);
 
   const handleSubmitDiscovery = async (values) => {
+    console.log(
+      `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
+      values?.ast?.normalisation?.actionTaken,
+    );
     if (!premise?.id) {
       Alert.alert("Error", "Premise data not found.");
       return;
@@ -185,6 +189,12 @@ export default function FormMeterDiscovery() {
       );
 
       // --- PHASE 3: DISPATCH ---
+
+      console.log(`handleSubmitDiscovery --cleanPayload`, cleanPayload);
+      console.log(
+        `handleSubmitDiscovery --cleanPayload?.ast?.normalisation?.actionTaken`,
+        cleanPayload?.ast?.normalisation?.actionTaken,
+      );
       await addTrn(cleanPayload).unwrap();
       setShowSuccess(true);
       setTimeout(() => {
@@ -451,9 +461,8 @@ export default function FormMeterDiscovery() {
           )
             return this.createError({ message: "Anomaly photo required" });
 
-          // Ensure it's an array AND has items before running .some()
           const hasIntervention = Array.isArray(normalisationActions)
-            ? normalisationActions.some((a) => a !== "None")
+            ? normalisationActions.some((a) => a !== "none") // 🎯 Fixed: lowercase 'none'
             : false;
 
           if (
@@ -527,72 +536,34 @@ export default function FormMeterDiscovery() {
         },
         ast: {
           astData: {
-            astNo: "",
-            astManufacturer: "",
-            astName: "",
+            astNo: "123456789",
+            astManufacturer: "Conlog",
+            astName: "Bec55",
             meter: {
-              phase: "",
-              type: "",
+              phase: "single",
+              type: "prepaid",
               category: "Normal",
-              keypad: { serialNo: "", comment: "" }, // 🎯 Initialized
-              cb: { size: "", comment: "" }, // 🎯 Initialized
+              keypad: { serialNo: "tyu67890", comment: "" }, // 🎯 Initialized
+              cb: { size: "90", comment: "" }, // 🎯 Initialized
             },
           },
           anomalies: {
-            anomaly: "",
-            anomalyDetail: "",
+            anomaly: "Meter Ok",
+            anomalyDetail: "Operationally Ok",
           },
-          sc: { status: "" },
+          sc: { status: "connected" },
           location: {
             gps: null, // 🛰️ Will be an Object {lat, lng} via the Picker
-            placement: "",
+            placement: "kiosk",
           },
-          ogs: { hasOffGridSupply: "" },
-          normalisation: { actionTaken: ["None"] },
+          ogs: { hasOffGridSupply: "no" },
+          normalisation: { actionTaken: ["none"] },
         },
         meterType: "electricity",
         media: [],
       },
       schema: ElecDiscoverySchema,
     };
-
-    // return {
-    //   initValues: {
-    //     accessData: {
-    //       ...accessInitValues,
-    //       access: { hasAccess: "yes", reason: "N/A" },
-    //     },
-    //     ast: {
-    //       astData: {
-    //         astNo: "",
-    //         astManufacturer: "",
-    //         astName: "",
-    //         meter: {
-    //           phase: "", // Default
-    //           type: "", // Default
-    //           category: "Normal", // Default
-    //           keypad: { serialNo: "", comment: "" },
-    //           cb: { size: "", comment: "" },
-    //         },
-    //       },
-    //       anomalies: {
-    //         anomaly: "",
-    //         anomalyDetail: "",
-    //       },
-    //       sc: { status: "" },
-    //       location: {
-    //         gps: null, // Placeholder for the final liveLocation capture
-    //         placement: "",
-    //       },
-    //       // location: { placement: "kiosk" },
-    //       ogs: { hasOffGridSupply: "" },
-    //       normalisation: { actionTaken: "None" },
-    //     },
-    //     meterType: "electricity",
-    //     media: [],
-    //   },
-    //   schema: ElecDiscoverySchema, // ⚡ Pointing to the new deep schema
-    // };
   };
 
   const actionInit = useMemo(() => getInitialValues(), [premiseId, actionRaw]);
@@ -666,8 +637,12 @@ export default function FormMeterDiscovery() {
           //   `handleSubmitDiscovery values`,
           //   JSON.stringify(values, null, 2),
           // );
-          // console.log(` `);
-          // console.log(`handleSubmitDiscovery --values`, values);
+          console.log(` `);
+          console.log(`handleSubmitDiscovery --values`, values);
+          console.log(
+            `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
+            values?.ast?.normalisation?.actionTaken,
+          );
           // console.log(`values`, JSON.stringify(values, null, 2));
 
           // console.log(

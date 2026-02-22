@@ -4,7 +4,8 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Surface } from "react-native-paper";
 
 export default function UserTrnsReportHeader({
-  totalUsers,
+  totalValue, // 🎯 Generic value
+  type = "USERS", // 🎯 Default to USERS, can be "TRNS"
   activeView,
   onToggleView,
   onShowGraphs,
@@ -16,8 +17,8 @@ export default function UserTrnsReportHeader({
     <Surface style={styles.headerContainer} elevation={2}>
       {/* COL 1: TOTAL USERS */}
       <View style={styles.statBlock}>
-        <Text style={styles.statLabel}>TOTAL USERS</Text>
-        <Text style={styles.statValue}>{totalUsers}</Text>
+        <Text style={styles.statLabel}>TOTAL {type}</Text>
+        <Text style={styles.statValue}>{totalValue}</Text>
       </View>
 
       <View style={styles.actionRow}>

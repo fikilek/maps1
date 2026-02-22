@@ -168,7 +168,8 @@ export default function UsersTrnsReport() {
   return (
     <View style={styles.container}>
       <UserTrnsReportHeader
-        totalUsers={users.length}
+        totalValue={users.length}
+        type="USERS" // 🎯 This triggers "TOTAL USERS"
         activeView={activeView} // 🛰️ Pass current state
         selectedDateLabel={activeDateRange.label}
         onOpenDateFilter={() => setShowDateModal(true)}

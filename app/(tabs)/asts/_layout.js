@@ -1,98 +1,107 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack } from "expo-router";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useMemo } from "react";
+import SovereignHeader from "../../../components/SovereignHeader";
 import { useGeo } from "../../../src/context/GeoContext";
+import { useAstFilter } from "../../../src/hooks/useAstFilter";
 import { useGetAstsByLmPcodeQuery } from "../../../src/redux/astsApi";
 
 export default function AstsLayout() {
   const { geoState } = useGeo();
   const lmPcode = geoState?.selectedLm?.id;
 
-  // 🎯 Fetching here ensures the Header has access to the length
-  const { data: asts } = useGetAstsByLmPcodeQuery(
+  // 🏛️ TACTICAL DATA HOOK
+  // Fetching here ensures the Header has access to the length immediately
+  const { data: asts, isLoading } = useGetAstsByLmPcodeQuery(
     { lmPcode },
     { skip: !lmPcode },
   );
-  const totalMeters = asts?.length || 0;
+
+  // 🎯 FILTER HOOK
+  const {
+    showFilters,
+    setShowFilters,
+    showStats,
+    setShowStats,
+    showSearch,
+    setShowSearch,
+    filterState,
+    setFilterState,
+    resetFilters,
+  } = useAstFilter();
+
+  // 📊 CALCULATION OF RATIOS
+  // We calculate the filtered count here to pass it to the "Filtered Pod"
+  const filteredMeters = useMemo(() => {
+    let list = asts || [];
+    if (filterState.mosiGroup) {
+      // Add your specific G1-R5 filtering logic here
+      list = list.filter((a) => a.mosiGroup === filterState.mosiGroup);
+    }
+    if (filterState.status) {
+      list = list.filter((a) => a.status === filterState.status);
+    }
+    return list;
+  }, [asts, filterState]);
+
+  const isFiltering =
+    filterState.mosiGroup !== null || filterState.status !== null;
 
   return (
     <Stack>
       <Stack.Screen
         name="index"
         options={{
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: "#F8FAFC" },
-          headerLeft: () => (
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerTitle}>ASTS</Text>
-              {/* 🎯 The Counter Badge */}
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{totalMeters}</Text>
-              </View>
-            </View>
+          header: () => (
+            <SovereignHeader
+              title="METERS"
+              totalCount={asts?.length || 0}
+              filteredCount={filteredMeters?.length || 0}
+              isFiltering={isFiltering}
+              filterCount={
+                (filterState.mosiGroup ? 1 : 0) + (filterState.status ? 1 : 0)
+              }
+              showSearch={showSearch}
+              onSearchPress={() => setShowSearch(true)}
+              onFilterPress={() => setShowFilters(true)}
+              onStatsPress={() => setShowStats(true)}
+              onQuickReset={() => resetFilters()}
+            />
           ),
-          headerTitle: "",
-          headerRight: () => (
-            <View style={styles.headerRightContainer}>
-              <TouchableOpacity style={styles.iconButton}>
-                <MaterialCommunityIcons
-                  name="chart-bar"
-                  size={22}
-                  color="#1E293B"
-                />
-              </TouchableOpacity>
+        }}
+      />
 
-              <TouchableOpacity style={styles.iconButton}>
-                <MaterialCommunityIcons
-                  name="filter-variant"
-                  size={22}
-                  color="#1E293B"
-                />
-              </TouchableOpacity>
-            </View>
-          ),
+      {/* 🚀 Asset Lifecycle Report */}
+      <Stack.Screen
+        name="[id]"
+        options={{
+          title: "Meter Report",
+          headerShown: true, // We use our own custom header in [id].js
+        }}
+      />
+
+      {/* 📸 Asset Media Gallery/Camera Strike */}
+      <Stack.Screen
+        name="media"
+        options={{
+          title: "ASSET EVIDENCE",
+          headerStyle: { backgroundColor: "#F8FAFC" },
+          headerTitleStyle: {
+            fontWeight: "900",
+            color: "#0F172A",
+            letterSpacing: 1,
+          },
+          headerShadowVisible: true,
+          presentation: "modal", // Gives it a focused "overlay" feel
+        }}
+      />
+
+      <Stack.Screen
+        name="details"
+        options={{
+          title: "Meter details",
+          headerShown: true,
         }}
       />
     </Stack>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 8,
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: "#1E293B",
-  },
-  badge: {
-    backgroundColor: "#3B82F6", // Power Blue
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginLeft: 8,
-    marginTop: 4, // Aligns it slightly better with the baseline
-  },
-  badgeText: {
-    color: "#FFF",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  headerRightContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  iconButton: {
-    padding: 8,
-    backgroundColor: "#FFF",
-    borderRadius: 10,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-});

@@ -52,6 +52,9 @@ export const authApi = createApi({
       async onCacheEntryAdded(_, { updateCachedData, cacheEntryRemoved }) {
         let profileUnsubscribe = null;
 
+        console.log(` `);
+        console.log(`getAuthState ---onCacheEntryAdded started`);
+
         const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
           // 🛡️ Clean up old profile listener if user changes
           if (profileUnsubscribe) profileUnsubscribe();
@@ -91,6 +94,8 @@ export const authApi = createApi({
         await cacheEntryRemoved;
         authUnsubscribe();
         if (profileUnsubscribe) profileUnsubscribe();
+
+        console.log(`getAuthState ---onCacheEntryAdded ended`);
       },
     }),
 

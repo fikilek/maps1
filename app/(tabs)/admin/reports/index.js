@@ -27,6 +27,18 @@ export default function ReportsIndex() {
           icon="account-group-outline" // 🏛️ More appropriate for a User report
           onPress={() => router.push("/admin/reports/users-trns-report")}
         />
+        <ReportCard
+          title="Normalisation Report"
+          subtitle="Tracking normalisation transactions "
+          icon="hammer-wrench"
+          onPress={() => router.push("/admin/reports/normalisation-report")}
+        />
+        <ReportCard
+          title="Anomaly Report"
+          subtitle="Details of Anomaly and Anomaly Details transactions "
+          icon="alert-decagram"
+          onPress={() => router.push("/admin/reports/anomaly-report")}
+        />
       </Section>
 
       {/* 🏛️ MANAGEMENT INTEL */}

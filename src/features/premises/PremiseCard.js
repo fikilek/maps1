@@ -2,6 +2,8 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { memo } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useGeo } from "../../context/GeoContext";
+import { useWarehouse } from "../../context/WarehouseContext";
 
 // 🛰️ BEACON SELECTOR: Visualizes property types instantly
 const getPropertyBeacon = (type = "") => {
@@ -15,6 +17,8 @@ const getPropertyBeacon = (type = "") => {
   if (t.includes("flat") || t.includes("sectional"))
     return { name: "office-building", color: "#8b5cf6" };
   if (t.includes("commercial") || t.includes("shop"))
+    return { name: "storefront", color: "#ec4899" };
+  if (t.includes("business") || t.includes("shop"))
     return { name: "storefront", color: "#ec4899" };
   if (t.includes("industrial") || t.includes("factory"))
     return { name: "factory", color: "#64748b" };
@@ -45,6 +49,10 @@ const PremiseCard = memo(
     onNaPress,
   }) => {
     const isFlat = item?.propertyType?.type === "Flats";
+    const erfId = item?.erfId; // 🎯 The link to the sovereign
+
+    const { updateGeo } = useGeo(); // 🛰️ THE COMMANDER
+    const { all } = useWarehouse(); // 🕵️ THE INTEL
 
     const router = useRouter();
 
@@ -96,6 +104,31 @@ const PremiseCard = memo(
       );
     };
 
+    const handleBeaconPress = () => {
+      // 🕵️ 1. Find the parent Erf in the Warehouse
+      const parentErf = all?.erfs?.find((e) => e.id === erfId);
+
+      console.log(
+        `📡 [Beacon Strike]: Locking GeoContext and Jumping to Erf: ${erfId}`,
+      );
+
+      // 🎯 TAP 1: Select the Erf (The Sovereign)
+      updateGeo({
+        selectedErf: parentErf || { id: erfId },
+        lastSelectionType: "ERF",
+      });
+
+      // 🎯 TAP 2: Select the Premise (The Target)
+      updateGeo({
+        selectedPremise: item,
+        lastSelectionType: "PREMISE",
+      });
+
+      // 🚀 THE JUMP: Navigate to the Erfs Screen
+      // This assumes your Erfs list is at /(tabs)/erfs/index.js
+      router.push("/(tabs)/erfs");
+    };
+
     return (
       <TouchableOpacity
         style={styles.card}
@@ -109,19 +142,28 @@ const PremiseCard = memo(
         </View>
 
         <View style={styles.cardHeader}>
-          {/* 🛰️ THE GIANT BEACON */}
-          <View
+          <TouchableOpacity
+            onPress={handleBeaconPress}
+            activeOpacity={0.7}
             style={[
               styles.beaconContainer,
               { backgroundColor: `${beacon.color}15` },
             ]}
           >
-            <MaterialCommunityIcons
-              name={beacon.name}
-              size={32}
-              color={beacon.color}
-            />
-          </View>
+            {/* 🛰️ THE GIANT BEACON */}
+            <View
+              style={[
+                styles.beaconContainer,
+                { backgroundColor: `${beacon.color}15` },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={beacon.name}
+                size={32}
+                color={beacon.color}
+              />
+            </View>
+          </TouchableOpacity>
 
           <View style={styles.identityColumn}>
             <View style={styles.identityRow}>

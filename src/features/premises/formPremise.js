@@ -316,7 +316,7 @@ export default function FormPremise() {
           <View style={styles.container}>
             <Stack.Screen
               options={{
-                title: "New Premise",
+                title: isEdit ? "Edit Premise" : "New Premise", // Improved UI clarity
                 headerRight: () => (
                   <View style={styles.headerErfBadge}>
                     <Text style={styles.headerErfText}>ERF: {erfNo}</Text>
@@ -324,7 +324,8 @@ export default function FormPremise() {
                 ),
                 headerLeft: () => (
                   <TouchableOpacity
-                    onPress={() => router.back()}
+                    // 🎯 THE FIX: Instead of router.back(), use replace to go back to the Anchor
+                    onPress={() => router.replace(`/(tabs)/erfs/${id}`)}
                     style={styles.closeBtnBorder}
                   >
                     <MaterialCommunityIcons

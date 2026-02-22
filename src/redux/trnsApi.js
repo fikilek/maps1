@@ -83,55 +83,6 @@ export const trnsApi = createApi({
       },
     }),
 
-    // addTrn: builder.mutation({
-    //   async queryFn(payload) {
-    //     try {
-    //       // 🚀 1. Hits Firestore "trns" collection
-    //       const docRef = await addDoc(collection(db, "trns"), payload);
-    //       return { data: { id: docRef.id, ...payload } };
-    //     } catch (error) {
-    //       return { error };
-    //     }
-    //   },
-    //   invalidatesTags: ["Trns"],
-
-    //   async onQueryStarted(payload, { dispatch, queryFulfilled }) {
-    //     try {
-    //       await queryFulfilled;
-
-    //       // 🏗️ 2. DESTRICTURING THE 3-SECTION PAYLOAD
-    //       // We reach into Section 1 (accessData) for the goodies
-    //       const { accessData } = payload;
-    //       const { premise, metadata, trnType } = accessData;
-
-    //       const { premisesApi } = await import("./premisesApi");
-
-    //       if (trnType === "METER_DISCOVERY") {
-    //         dispatch(
-    //           premisesApi.util.updateQueryData(
-    //             "getPremisesByLmPcode",
-    //             { lmPcode: metadata.lmPcode },
-    //             (draft) => {
-    //               const p = draft.find((item) => item.id === premise.id);
-    //               if (p) {
-    //                 // Update the local RAM so the UI looks fresh immediately
-    //                 p.metadata = metadata;
-
-    //                 // Optional: Update occupancy status in cache for the demo?
-    //                 if (accessData.access.hasAccess === "no") {
-    //                   p.occupancy = { status: "NO_ACCESS" };
-    //                 }
-    //               }
-    //             },
-    //           ),
-    //         );
-    //       }
-    //     } catch (err) {
-    //       console.error("onQueryStarted Error:", err);
-    //     }
-    //   },
-    // }),
-
     getTrnsByLmPcode: builder.query({
       async queryFn() {
         return { data: [] };
@@ -240,7 +191,6 @@ export const trnsApi = createApi({
       },
     }),
 
-    // 🎯 INDIVIDUAL TRN REPORT FETCH
     getTrnById: builder.query({
       async queryFn(id) {
         // We return empty initially as onCacheEntryAdded will populate it
@@ -274,6 +224,43 @@ export const trnsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getTrnsByAstNo: builder.query({
+      async queryFn() {
+        return { data: [] };
+      },
+      async onCacheEntryAdded(
+        astNo, // 🎯 The Meter Number
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        console.log(`getTrnsByAstNo --astNo`, astNo);
+        try {
+          await cacheDataLoaded;
+          if (!astNo) return;
+
+          // 🛰️ Real-time query filtered by the specific Meter Number
+          const q = query(
+            collection(db, "trns"),
+            where("ast.astData.astNo", "==", astNo),
+            // orderBy("accessData.metadata.created.at", "desc"),
+          );
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData((draft) => {
+              return snapshot.docs.map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+              }));
+            });
+          });
+        } catch (error) {
+          console.error("❌ [TRN AST LINK ERROR]:", error);
+        }
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
@@ -283,4 +270,5 @@ export const {
   useGetTrnsByCountryCodeQuery,
   useGetTrnsByPremiseIdQuery,
   useGetTrnByIdQuery,
+  useGetTrnsByAstNoQuery,
 } = trnsApi;

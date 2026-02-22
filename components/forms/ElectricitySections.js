@@ -1,19 +1,10 @@
-// import { StyleSheet, View } from "react-native";
-// import FormInputMeterNo from "../../src/features/meters/FormInputMeterNo";
-// import { IrepsMedia } from "../media/IrepsMedia";
-// import { AnomalySection } from "./AnomalySection";
-// import FormInput from "./FormInput";
-// import { FormSection } from "./FormSection";
-// import FormSelect from "./FormSelect";
-// import { LocationPickerSection } from "./LocationPickerSection";
-
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Checkbox } from "react-native-paper";
 import FormInputMeterNo from "../../src/features/meters/FormInputMeterNo";
 import SovereignLocationPicker from "../maps/SovereignLocationPicker";
 import { IrepsMedia } from "../media/IrepsMedia";
 import { AnomalySection } from "./AnomalySection";
 import FormInput from "./FormInput";
-import { FormMultiSelect } from "./FormMultiSelect";
 import { FormSection } from "./FormSection";
 import FormSelect from "./FormSelect";
 
@@ -31,178 +22,268 @@ export const ElectricitySections = ({
   erfCentroid,
   landingPoint,
   icon,
-}) => (
-  <View style={disabled && { opacity: 0.7 }}>
-    {/* ⚡ SECTION 1: CORE METER DATA */}
-    <FormSection title="Meter Details">
-      <FormInputMeterNo
-        label="Meter Number"
-        name="ast.astData.astNo"
-        disabled={disabled}
-      />
-      <IrepsMedia
-        tag={"astNoPhoto"}
-        agentName={agentName}
-        agentUid={agentUid}
-      />
+}) => {
+  // 🛰️ TRANSFORMING SETTINGS FOR MULTI-SELECT
+  // We take the raw strings from Firestore and turn them into {label, value} objects
+  const normalizationOptions = (getOptions("norm_actions") || []).map(
+    (opt) => ({
+      label: opt === "none" ? "NONE (SAFE)" : opt.toUpperCase(),
+      value: opt,
+    }),
+  );
 
-      <FormSelect
-        label="MANUFACTURER"
-        name="ast.astData.astManufacturer"
-        options={getOptions("elec_manufacturers")}
-        disabled={disabled}
-      />
-      <FormInput
-        label="MODEL (NAME)"
-        name="ast.astData.astName"
-        disabled={disabled}
-      />
+  const handleToggle = (optionValue) => {
+    // 🏛️ 1. Get current actions, ensuring we handle undefined safely
+    const currentActions = values?.ast?.normalisation?.actionTaken || ["none"];
 
-      <View style={styles.row}>
-        <View style={styles.flexHalf}>
-          <FormSelect
-            label="PHASE"
-            name="ast.astData.meter.phase"
-            options={["single", "three"]}
-            disabled={disabled}
-          />
-        </View>
+    let newActions = [];
 
-        <View style={styles.flexHalf}>
-          <FormSelect
-            label="TYPE"
-            name="ast.astData.meter.type"
-            options={["prepaid", "conventional"]}
-            disabled={disabled}
-          />
-        </View>
-      </View>
+    // Standardize the incoming value for comparison
+    const incomingValue = optionValue.toLowerCase();
+    console.log(`incomingValue`, incomingValue);
 
-      <FormSelect
-        label="CATEGORY"
-        name="ast.astData.meter.category"
-        options={["Normal", "Bulk"]}
-        disabled={disabled}
-      />
-    </FormSection>
+    if (incomingValue === "none") {
+      // ⚔️ If 'NONE' is tapped, it nukes every other selection immediately
+      newActions = ["none"];
+    } else {
+      // ⚔️ If a REAL action is tapped
+      if (currentActions.includes(optionValue)) {
+        // Toggle OFF: Remove the action
+        newActions = currentActions.filter((a) => a !== optionValue);
+      } else {
+        // Toggle ON: Add the action AND filter out any variation of "none"
+        // We use a case-insensitive filter to catch "none", "NONE", or "None"
+        newActions = [
+          ...currentActions.filter((a) => a.toLowerCase() !== "none"),
+          optionValue,
+        ];
+      }
+    }
 
-    {/* ⌨️ SECTION 2: INFRASTRUCTURE */}
-    <FormSection title="Infrastructure">
-      <FormInput
-        label="KEYPAD SERIAL NO"
-        name="ast.astData.meter.keypad.serialNo"
-        disabled={disabled}
-      />
-      {/* 🛡️ Reactive Logic: Required if Serial is missing */}
-      {!values?.ast?.astData?.meter?.keypad?.serialNo && (
-        <FormInput
-          label="KEYPAD COMMENT (REQUIRED)"
-          name="ast.astData.meter.keypad.comment"
-          placeholder="Why is there no serial?"
+    // ⚔️ FINAL GUARD: If the user unchecks everything, force "none" back in
+    if (newActions.length === 0) {
+      newActions = ["none"];
+    }
+
+    console.log(`newActions`, newActions);
+
+    setFieldValue("ast.normalisation.actionTaken", newActions);
+  };
+
+  // const handleToggle = (optionValue) => {
+  //   const currentActions = values?.ast?.normalisation?.actionTaken || ["none"];
+
+  //   let newActions = [];
+
+  //   if (optionValue === "none") {
+  //     // ⚔️ If 'NONE' is tapped, it clears everything else
+  //     newActions = ["none"];
+  //   } else {
+  //     // ⚔️ If a REAL action is tapped
+  //     if (currentActions.includes(optionValue)) {
+  //       // Uncheck if already there
+  //       newActions = currentActions.filter((a) => a !== optionValue);
+  //     } else {
+  //       // Check it and BANISH 'none'
+  //       newActions = [
+  //         ...currentActions.filter((a) => a !== "none"),
+  //         optionValue,
+  //       ];
+  //     }
+  //   }
+
+  //   // ⚔️ FINAL GUARD: If nothing is selected, force 'none' back in
+  //   if (newActions.length === 0) newActions = ["none"];
+
+  //   setFieldValue("ast.normalisation.actionTaken", newActions);
+  // };
+
+  return (
+    <View style={disabled && { opacity: 0.7 }}>
+      {/* ⚡ SECTION 1: CORE METER DATA */}
+      <FormSection title="Meter Details">
+        <FormInputMeterNo
+          label="Meter Number"
+          name="ast.astData.astNo"
           disabled={disabled}
         />
-      )}
-      <IrepsMedia
-        tag={"keypadPhoto"}
-        agentName={agentName}
-        agentUid={agentUid}
-      />
-      <FormInput
-        label="CB SIZE (AMPS)"
-        name="ast.astData.meter.cb.size"
-        keyboardType="numeric"
-        disabled={disabled}
-      />
-      {!values?.ast?.astData?.meter?.cb?.size && (
-        <FormInput
-          label="CB COMMENT (REQUIRED)"
-          name="ast.astData.meter.cb.comment"
-          placeholder="Why is the CB size missing?"
-          disabled={disabled}
-        />
-      )}
-      <IrepsMedia
-        tag={"astCbPhoto"}
-        agentName={agentName}
-        agentUid={agentUid}
-      />
-    </FormSection>
-
-    {/* 📍 SECTION 3: LOCATION (The Sovereign Anchor) */}
-    <FormSection title="Meter Location">
-      <FormSelect
-        label="Meter Placement"
-        name="ast.location.placement"
-        options={getOptions("placements")}
-        disabled={disabled}
-      />
-      <SovereignLocationPicker
-        label="Meter GPS Position"
-        name="ast.location.gps"
-        initialGps={landingPoint}
-        icon={icon}
-        referenceBoundary={erfBoundary}
-        erfNo={erfNo}
-        erfCentroid={erfCentroid}
-      />
-    </FormSection>
-
-    {/* 🔒 SECTION 4: CONNECTION & STATUS */}
-    <FormSection title="Status & Supply">
-      <FormSelect
-        label="SERVICE CONNECTION (SC)"
-        name="ast.sc.status"
-        options={["Connected", "Disconnected", "Not In Use"]}
-        disabled={disabled}
-      />
-      <FormSelect
-        label="OFF-GRID SUPPLY?"
-        name="ast.ogs.hasOffGridSupply"
-        options={["yes", "no"]}
-        disabled={disabled}
-      />
-      {values?.ast?.ogs?.hasOffGridSupply === "yes" && (
         <IrepsMedia
-          tag={"ogsPhoto"}
+          tag={"astNoPhoto"}
           agentName={agentName}
           agentUid={agentUid}
         />
-      )}
-    </FormSection>
 
-    {/* 🔒 SECTION : ANOMALY  */}
-    <AnomalySection
-      values={values}
-      getOptions={getOptions}
-      agentName={agentName}
-      agentUid={agentUid}
-      setFieldValue={setFieldValue}
-      disabled={disabled}
-    />
+        <FormSelect
+          label="MANUFACTURER"
+          name="ast.astData.astManufacturer"
+          options={getOptions("elec_manufacturers")}
+          disabled={disabled}
+        />
+        <FormInput
+          label="MODEL (NAME)"
+          name="ast.astData.astName"
+          disabled={disabled}
+        />
 
-    {/* 🔒 SECTION 4: NORMALISATION */}
-    <FormSection title="Normalisation">
-      <FormMultiSelect
-        label="Actions Taken"
-        name="ast.normalisation.actionTaken"
-        options={[
-          { label: "None", value: "None" }, // 🎯 The "Safe" option
-          { label: "Meter Removed", value: "METER_REMOVED" },
-          { label: "Meter Installed", value: "METER_INSTALLED" },
-          { label: "Meter Disconnected", value: "METER_DISCONNECTED" },
-          { label: "Meter Reconnected", value: "METER_RECONNECTED" },
-          { label: "Tamper Removal", value: "TAMPER_REMOVAL" },
-        ]}
+        <View style={styles.row}>
+          <View style={styles.flexHalf}>
+            <FormSelect
+              label="PHASE"
+              name="ast.astData.meter.phase"
+              options={["single", "three"]}
+              disabled={disabled}
+            />
+          </View>
+
+          <View style={styles.flexHalf}>
+            <FormSelect
+              label="TYPE"
+              name="ast.astData.meter.type"
+              options={["prepaid", "conventional"]}
+              disabled={disabled}
+            />
+          </View>
+        </View>
+
+        <FormSelect
+          label="CATEGORY"
+          name="ast.astData.meter.category"
+          options={["Normal", "Bulk"]}
+          disabled={disabled}
+        />
+      </FormSection>
+
+      {/* ⌨️ SECTION 2: INFRASTRUCTURE */}
+      <FormSection title="Infrastructure">
+        <FormInput
+          label="KEYPAD SERIAL NO"
+          name="ast.astData.meter.keypad.serialNo"
+          disabled={disabled}
+        />
+        {/* 🛡️ Reactive Logic: Required if Serial is missing */}
+        {!values?.ast?.astData?.meter?.keypad?.serialNo && (
+          <FormInput
+            label="KEYPAD COMMENT (REQUIRED)"
+            name="ast.astData.meter.keypad.comment"
+            placeholder="Why is there no serial?"
+            disabled={disabled}
+          />
+        )}
+        <IrepsMedia
+          tag={"keypadPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+        <FormInput
+          label="CB SIZE (AMPS)"
+          name="ast.astData.meter.cb.size"
+          keyboardType="numeric"
+          disabled={disabled}
+        />
+        {!values?.ast?.astData?.meter?.cb?.size && (
+          <FormInput
+            label="CB COMMENT (REQUIRED)"
+            name="ast.astData.meter.cb.comment"
+            placeholder="Why is the CB size missing?"
+            disabled={disabled}
+          />
+        )}
+        <IrepsMedia
+          tag={"astCbPhoto"}
+          agentName={agentName}
+          agentUid={agentUid}
+        />
+      </FormSection>
+
+      {/* 📍 SECTION 3: LOCATION (The Sovereign Anchor) */}
+      <FormSection title="Meter Location">
+        <FormSelect
+          label="Meter Placement"
+          name="ast.location.placement"
+          options={getOptions("placements")}
+          disabled={disabled}
+        />
+        <SovereignLocationPicker
+          label="Meter GPS Position"
+          name="ast.location.gps"
+          initialGps={landingPoint}
+          icon={icon}
+          referenceBoundary={erfBoundary}
+          erfNo={erfNo}
+          erfCentroid={erfCentroid}
+        />
+      </FormSection>
+
+      {/* 🔒 SECTION 4: CONNECTION & STATUS */}
+      <FormSection title="Status & Supply">
+        <FormSelect
+          label="SERVICE CONNECTION (SC)"
+          name="ast.sc.status"
+          options={["Connected", "Disconnected", "Not In Use"]}
+          disabled={disabled}
+        />
+        <FormSelect
+          label="OFF-GRID SUPPLY?"
+          name="ast.ogs.hasOffGridSupply"
+          options={["yes", "no"]}
+          disabled={disabled}
+        />
+        {values?.ast?.ogs?.hasOffGridSupply === "yes" && (
+          <IrepsMedia
+            tag={"ogsPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+          />
+        )}
+      </FormSection>
+
+      {/* 🔒 SECTION : ANOMALY  */}
+      <AnomalySection
+        values={values}
+        getOptions={getOptions}
+        agentName={agentName}
+        agentUid={agentUid}
+        setFieldValue={setFieldValue}
         disabled={disabled}
       />
 
-      {/* 📸 Visibility Logic: Only show if there is a REAL intervention */}
-      {Array.isArray(values?.ast?.normalisation?.actionTaken) &&
-        values?.ast?.normalisation?.actionTaken.some(
-          (action) => action !== "None" && action !== "",
-        ) && (
+      {/* 🏛️ REPAIRED SECTION 4: NORMALISATION */}
+      <FormSection title="Normalisation">
+        <View style={styles.checkboxGroup}>
+          {normalizationOptions.map((opt) => {
+            const isChecked = values?.ast?.normalisation?.actionTaken?.includes(
+              opt.value,
+            );
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.checkRow, isChecked && styles.checkRowActive]}
+                onPress={() => handleToggle(opt.value)}
+                disabled={disabled}
+              >
+                <Checkbox.Android
+                  status={isChecked ? "checked" : "unchecked"}
+                  color="#2563eb"
+                />
+                <Text
+                  style={[
+                    styles.checkLabel,
+                    isChecked && styles.checkLabelActive,
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* 📸 Evidence Logic: Show only if actions > "none" */}
+        {values?.ast?.normalisation?.actionTaken?.some((a) => a !== "none") && (
           <View style={styles.mediaContainer}>
-            <Text style={styles.mediaLabel}>Normalisation Required</Text>
+            <Text style={styles.mediaLabel}>
+              Normalisation Evidence Required
+            </Text>
             <IrepsMedia
               tag="normalisationPhoto"
               agentName={agentName}
@@ -210,9 +291,10 @@ export const ElectricitySections = ({
             />
           </View>
         )}
-    </FormSection>
-  </View>
-);
+      </FormSection>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F1F5F9" },
@@ -574,29 +656,47 @@ const styles = StyleSheet.create({
     flex: 1,
     // marginHorizontal: 4, // 🎯 This creates the gap in the middle
   },
-  // selector: {
-  //   flexDirection: "row",
-  //   justifyContent: "space-between",
-  //   alignItems: "center",
-  //   padding: 12,
-  //   borderRadius: 12,
-  //   backgroundColor: "#f8fafc", // Sexy Light Grey
-  //   borderWidth: 1,
-  //   borderColor: "#e2e8f0",
-  //   elevation: 2,
-  // },
-  // label: {
-  //   fontSize: 11,
-  //   fontWeight: "900",
-  //   color: "#475569",
-  //   marginBottom: 8,
-  //   textTransform: "uppercase",
-  //   letterSpacing: 1,
-  // },
-  // actionText: {
-  //   fontSize: 10,
-  //   color: "#94a3b8",
-  //   fontWeight: "600",
-  //   marginTop: 2,
-  // },
+
+  checkboxGroup: {
+    paddingVertical: 5,
+  },
+  checkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  checkRowActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#2563eb",
+  },
+  checkLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#64748B",
+    marginLeft: 10,
+  },
+  checkLabelActive: {
+    color: "#1E293B",
+  },
+  mediaContainer: {
+    marginTop: 10,
+    padding: 15,
+    backgroundColor: "#FEF2F2",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    alignItems: "center",
+  },
+  mediaLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#DC2626",
+    marginBottom: 10,
+    textTransform: "uppercase",
+  },
 });

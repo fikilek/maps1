@@ -26,7 +26,7 @@ const SelectedPremise = ({ coordinate, erfNo, adrLn1, adrLn2, premiseId }) => {
         {/* 🏷️ THE FLOATING LABEL (Below the circle) */}
         <View style={styles.premiseLabel}>
           <Text style={styles.premiseLabelText}>Erf:{erfNo}</Text>
-          <Text style={styles.premiseLabelText}>{`${adrLn1} ${adrLn2}`}</Text>
+          <Text style={styles.premiseLabelText}>{`${adrLn1}`}</Text>
         </View>
       </View>
     </Marker>
@@ -109,8 +109,9 @@ const styles = StyleSheet.create({
   },
   premiseLabel: {
     backgroundColor: "#507adc",
-    paddingHorizontal: 2,
-    paddingVertical: 2,
+    // paddingHorizontal: 2,
+    // paddingVertical: 2,
+    padding: 8,
     borderRadius: 4,
     marginTop: 2,
   },

@@ -19,8 +19,8 @@ export default function TrnReportModal() {
 
   const renderContent = () => {
     if (!trn) return <Text>Transaction not found.</Text>;
-    console.log(`TrnReportModal --trn`, trn);
-    console.log(`TrnReportModal --trn`, JSON.stringify(trn, null, 2));
+    // console.log(`TrnReportModal --trn`, trn);
+    // console.log(`TrnReportModal --trn`, JSON.stringify(trn, null, 2));
 
     // 🛡️ Sector 1: No Access Logic
     if (
