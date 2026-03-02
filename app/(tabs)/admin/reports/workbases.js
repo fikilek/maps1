@@ -10,9 +10,9 @@ import {
   Text,
   View,
 } from "react-native";
+import LmPremiseReportHeader from "../../../../components/LmPremiseReportHeader";
 import { useGetErfsByCountryCodeQuery } from "../../../../src/redux/erfsApi";
 import { useGetPremisesByCountryCodeQuery } from "../../../../src/redux/premisesApi";
-import LmPremiseReportHeader from "./components/LmPremiseReportHeader";
 
 export default function WorkbasesReport() {
   const country = { id: "ZA", name: "South Africa" };

@@ -11,10 +11,23 @@ import ErfFilterHeader from "./erfFilterHeader";
 import { ErfReport } from "./ErfReport";
 import ErfsBottomSearch from "./ErfsBottomSearch";
 
+import { useSelector } from "react-redux";
 import { HandleNuclearReset } from "../../test/mmkvNuclearReset";
-import StealthAuditor from "../../test/premisesDiagnosis";
 import { ErfItem } from "./erfItem";
 
+const MyComponent = () => {
+  // 🏛️ SOVEREIGN SELECTION: Only listen to the specific Erf Cache
+  // This prevents the "Root State" warning and stops 90% of unnecessary rerenders.
+  const erfCache = useSelector((state) => state.erfsApi?.queries);
+  const authCache = useSelector((state) => state.authApi?.queries);
+
+  if (__DEV__) {
+    console.log("Targeted Erf Cache:", erfCache);
+    // console.log(`erfCache:`, JSON.stringify(erfCache, null, 2));
+
+    console.log("Targeted Auth Cache:", authCache);
+  }
+};
 export default function ErfsScreen() {
   const isFocused = useIsFocused();
   const lastScrolledIdRef = useRef(null);
@@ -22,9 +35,20 @@ export default function ErfsScreen() {
   const router = useRouter();
 
   const { geoState, updateGeo } = useGeo();
-  const { all, filtered, loading } = useWarehouse();
+  const { all, filtered, sync, loading } = useWarehouse();
   const [searchQuery, setSearchQuery] = useState("");
   const [reportVisible, setReportVisible] = useState(false);
+
+  // 0. SYNC
+  const erfsSync = sync?.erfs ?? { status: "idle" };
+
+  const hasLm = !!geoState?.selectedLm?.id;
+
+  const showHydrationSpinner =
+    hasLm && !all?.erfs?.length && erfsSync.status !== "ready";
+
+  const showSyncingBanner =
+    hasLm && (all?.erfs?.length ?? 0) > 0 && erfsSync.status === "syncing";
 
   // 1. 🎯 THE DATA POOL: Memoized for stability
   const filteredErfs = useMemo(() => {
@@ -79,7 +103,8 @@ export default function ErfsScreen() {
   }, [isFocused, geoState?.selectedErf?.id, scrollToTarget]);
 
   // Show the spinner if the system is loading AND we have no Erfs yet.
-  if (loading && (!all?.erfs || all.erfs.length === 0)) {
+
+  if (showHydrationSpinner) {
     return (
       <View
         style={[
@@ -99,7 +124,7 @@ export default function ErfsScreen() {
           HYDRATING SOVEREIGN VAULT...
         </Text>
         <Text style={{ fontSize: 10, color: "#94a3b8", marginTop: 5 }}>
-          LOADING EPHRAIM MOGALE DATA
+          LOADING {geoState?.selectedLm?.name ?? "LOCAL MUNICIPALITY"} DATA
         </Text>
       </View>
     );
@@ -110,8 +135,16 @@ export default function ErfsScreen() {
       {/* Testing & Diagnostics */}
       <View>
         <HandleNuclearReset />
-        <StealthAuditor />
+        {/* <StealthAuditor /> */}
       </View>
+      <View>{/* <MyComponent /> */}</View>
+
+      {showSyncingBanner && (
+        <View style={styles.syncingBanner}>
+          <ActivityIndicator size="small" />
+          <Text style={styles.syncingText}>SYNCING LATEST UPDATES...</Text>
+        </View>
+      )}
 
       <ErfFilterHeader
         selectedWard={geoState.selectedWard}

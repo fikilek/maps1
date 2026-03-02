@@ -8,126 +8,236 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
 
 export const trnsApi = createApi({
   reducerPath: "trnsApi",
   baseQuery: fakeBaseQuery(),
+  extractRehydrationInfo(action, { reducerPath }) {
+    if (action.type === REHYDRATE) {
+      return action.payload?.[reducerPath];
+    }
+  },
   tagTypes: ["Trns"],
   endpoints: (builder) => ({
-    // 🎯 THE MUTATION: All uploads go through here
     addTrn: builder.mutation({
       async queryFn(payload) {
         try {
-          // 🚀 1. Hits Firestore "trns" collection
-          // The payload now includes lmId, districtId, provinceId, and countryId
           const docRef = await addDoc(collection(db, "trns"), payload);
           return { data: { id: docRef.id, ...payload } };
         } catch (error) {
           return { error };
         }
       },
-      invalidatesTags: ["Trns"],
-
       async onQueryStarted(payload, { dispatch, queryFulfilled }) {
+        const { accessData, ast, meterType } = payload;
+        const { premise, metadata, erfId } = accessData;
+        const lmPcode = metadata?.lmPcode;
+
+        // 🆔 Temporary IDs for immediate UI feedback
+        const tempTrnId = `TEMP_TRN_${Date.now()}`;
+        const tempAstId = `TEMP_AST_${Date.now()}`;
+
         try {
-          await queryFulfilled;
-
-          // 🏗️ 2. DESTRUCTURING THE 3-SECTION PAYLOAD
-          const { accessData } = payload;
-          const { premise, metadata, trnType, access } = accessData;
-
-          // 🛰️ We need the API reference for surgical RAM updates
+          // 🛰️ Bridge imports
           const { premisesApi } = await import("./premisesApi");
+          const { erfsApi } = await import("./erfsApi");
+          const { astsApi } = await import("./astsApi");
 
-          if (trnType === "METER_DISCOVERY") {
+          // 🎯 1. OPTIMISTIC TRANSACTION (The Audit Log)
+          // We unshift to the top so Zamo sees his latest work instantly
+          dispatch(
+            trnsApi.util.updateQueryData(
+              "getTrnsByLmPcode",
+              lmPcode,
+              (draft) => {
+                draft.unshift({
+                  id: tempTrnId,
+                  ...payload,
+                  isOptimistic: true,
+                });
+              },
+            ),
+          );
+
+          // 🎯 2. OPTIMISTIC ASSET (The Map Circle)
+          if (
+            accessData.trnType === "METER_DISCOVERY" &&
+            accessData.access.hasAccess === "yes"
+          ) {
+            dispatch(
+              astsApi.util.updateQueryData(
+                "getAstsByLmPcode",
+                lmPcode,
+                (draft) => {
+                  draft.push({
+                    id: tempAstId,
+                    accessData,
+                    ast,
+                    meterType,
+                    metadata: { ...metadata, isOptimistic: true },
+                  });
+                },
+              ),
+            );
+          }
+
+          // 🎯 3. OPTIMISTIC PREMISE (Occupancy + Service Link)
+          if (premise?.id) {
             dispatch(
               premisesApi.util.updateQueryData(
                 "getPremisesByLmPcode",
-                { lmPcode: metadata.lmPcode }, // Still scoped by LM
+                lmPcode,
                 (draft) => {
                   const p = draft.find((item) => item.id === premise.id);
                   if (p) {
-                    // 🏛️ SOVEREIGN CACHE UPDATE
-                    // Update metadata with the new full lineage (lmId, districtId, etc.)
-                    p.metadata = {
-                      ...p.metadata,
-                      ...metadata,
-                    };
-
-                    // 🛡️ ACCURACY OVERRIDE: Update occupancy based on access results
-                    if (access.hasAccess === "no") {
-                      p.occupancy = {
-                        ...p.occupancy,
-                        status: "NO_ACCESS",
-                        lastAttempt: metadata.updated.at,
-                      };
-                    } else {
-                      p.occupancy = {
-                        ...p.occupancy,
-                        status: "OCCUPIED",
-                      };
-                    }
-
-                    console.log(
-                      `✅ [RAM PATCH]: Premise ${p.id} updated with new lineage.`,
-                    );
+                    p.occupancy = { ...p.occupancy, status: "ACCESSED" };
+                    if (!p.services)
+                      p.services = { waterMeters: [], electricityMeters: [] };
+                    const field =
+                      meterType === "water"
+                        ? "waterMeters"
+                        : "electricityMeters";
+                    if (!p.services[field]) p.services[field] = [];
+                    p.services[field].push(tempAstId);
                   }
                 },
               ),
             );
           }
+
+          // 🎯 4. OPTIMISTIC ERF (Timestamp Pulse)
+          if (erfId) {
+            dispatch(
+              erfsApi.util.updateQueryData(
+                "getErfsByLmPcode",
+                lmPcode,
+                (draft) => {
+                  const targetErf = draft?.metaEntries?.find(
+                    (e) => e.id === erfId,
+                  );
+                  if (targetErf) {
+                    targetErf.metadata = {
+                      ...targetErf.metadata,
+                      updatedAt: new Date().toISOString(),
+                    };
+                  }
+                },
+              ),
+            );
+          }
+
+          // 🏁 THE HANDSHAKE
+          const { data: finalTrn } = await queryFulfilled;
+
+          // Replace the TEMP Transaction with the REAL one to avoid duplicates
+          dispatch(
+            trnsApi.util.updateQueryData(
+              "getTrnsByLmPcode",
+              lmPcode,
+              (draft) => {
+                const index = draft.findIndex((t) => t.id === tempTrnId);
+                if (index > -1) draft[index] = finalTrn;
+              },
+            ),
+          );
         } catch (err) {
-          console.error("❌ [MUTATION SYNC ERROR]:", err);
+          console.error("❌ [TRN_PULSE_ERROR]:", err);
+          // Optional: You could trigger a manual refetch here to clean up the TEMP data if it fails
         }
       },
     }),
-
     getTrnsByLmPcode: builder.query({
-      async queryFn() {
-        return { data: [] };
-      },
+      queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
-        arg,
+        lmPcode,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
-        // console.log(`getTrnsByLmPcode ----arg`, arg);
         try {
           await cacheDataLoaded;
 
+          // 🎯 1. CLOUD SORT: Newest first (Ensure you have a composite index for this!)
           const q = query(
             collection(db, "trns"),
-            where("accessData.metadata.lmPcode", "==", arg.lmPcode),
+            where("accessData.metadata.lmPcode", "==", lmPcode),
             orderBy("accessData.metadata.updated.at", "desc"),
           );
+
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData((draft) => {
-              return snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-              }));
+              // 🎯 2. INITIAL SYNC: Direct mapping of the sorted snapshot
+              if (snapshot.docChanges().length === snapshot.docs.length) {
+                return snapshot.docs.map((doc) => ({
+                  id: doc.id,
+                  ...doc.data(),
+                }));
+              }
+
+              // 🎯 3. SURGICAL UPDATES: New transactions unshifted to index 0
+              snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                  const trn = { id: change.doc.id, ...change.doc.data() };
+                  const exists = draft.find((t) => t.id === trn.id);
+
+                  // 🛡️ Always unshift to the top for "Audit Log" feel
+                  if (!exists) draft.unshift(trn);
+                }
+              });
             });
           });
-        } catch {}
+        } catch (err) {
+          console.error("❌ [TRN_STREAM_ERROR]:", err);
+        }
         await cacheEntryRemoved;
         unsubscribe();
       },
     }),
+
+    // getTrnsByLmPcode: builder.query({
+    //   queryFn: () => ({ data: [] }),
+    //   async onCacheEntryAdded(
+    //     lmPcode,
+    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+    //   ) {
+    //     let unsubscribe = () => {};
+    //     try {
+    //       await cacheDataLoaded;
+    //       const q = query(
+    //         collection(db, "trns"),
+    //         where("accessData.metadata.lmPcode", "==", lmPcode),
+    //         // orderBy("accessData.metadata.updated.at", "desc"),
+    //       );
+    //       unsubscribe = onSnapshot(q, (snapshot) => {
+    //         updateCachedData((draft) => {
+    //           snapshot.docChanges().forEach((change) => {
+    //             const trn = { id: change.doc.id, ...change.doc.data() };
+    //             if (change.type === "added") {
+    //               // Transactions are immutable, so we only care about 'added'
+    //               const exists = draft.find((t) => t.id === trn.id);
+    //               if (!exists) draft.unshift(trn);
+    //             }
+    //           });
+    //         });
+    //       });
+    //     } catch {}
+    //     await cacheEntryRemoved;
+    //     unsubscribe();
+    //   },
+    // }),
 
     getTrnsByPremiseId: builder.query({
       async queryFn() {
         return { data: [] };
       },
       async onCacheEntryAdded(
-        { premiseId }, // 🎯 DESTRUCTURED OBJECT ARGUMENT
+        { premiseId },
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
         try {
           await cacheDataLoaded;
-
-          // 🛡️ NATIVE GUARD: Ensure we don't start a ghost stream
           if (!premiseId) return;
 
           const q = query(
@@ -138,16 +248,19 @@ export const trnsApi = createApi({
 
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData((draft) => {
-              return snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-              }));
+              snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                  const trn = { id: change.doc.id, ...change.doc.data() };
+                  if (!draft.find((t) => t.id === trn.id)) {
+                    draft.unshift(trn); // 🎯 Surgical Top-Insert
+                  }
+                }
+              });
             });
           });
         } catch (error) {
-          console.error("🛰️ Stream Error:", error);
+          console.error("❌ [PREMISE_TRN_ERROR]:", error);
         }
-
         await cacheEntryRemoved;
         unsubscribe();
       },
@@ -230,32 +343,34 @@ export const trnsApi = createApi({
         return { data: [] };
       },
       async onCacheEntryAdded(
-        astNo, // 🎯 The Meter Number
+        astNo,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
-        console.log(`getTrnsByAstNo --astNo`, astNo);
         try {
           await cacheDataLoaded;
           if (!astNo) return;
 
-          // 🛰️ Real-time query filtered by the specific Meter Number
           const q = query(
             collection(db, "trns"),
             where("ast.astData.astNo", "==", astNo),
-            // orderBy("accessData.metadata.created.at", "desc"),
+            // Note: If you add orderBy, ensure you have the Firestore Index
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData((draft) => {
-              return snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-              }));
+              snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                  const trn = { id: change.doc.id, ...change.doc.data() };
+                  if (!draft.find((t) => t.id === trn.id)) {
+                    draft.unshift(trn); // 🎯 Surgical Top-Insert
+                  }
+                }
+              });
             });
           });
         } catch (error) {
-          console.error("❌ [TRN AST LINK ERROR]:", error);
+          console.error("❌ [AST_TRN_ERROR]:", error);
         }
         await cacheEntryRemoved;
         unsubscribe();

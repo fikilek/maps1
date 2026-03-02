@@ -7,8 +7,8 @@ import {
   Text,
   View,
 } from "react-native";
-import LmPremiseReportHeader from "./components/LmPremiseReportHeader";
-import UserRow from "./components/UserRow";
+import LmPremiseReportHeader from "../../../../components/LmPremiseReportHeader";
+import UserRow from "../../../../components/UserRow";
 
 export default function UsersReport() {
   const { data: users = [], isLoading } = useGetUsersQuery();

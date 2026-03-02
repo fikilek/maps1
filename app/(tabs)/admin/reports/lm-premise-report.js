@@ -2,9 +2,8 @@
 import { useWarehouse } from "@/src/context/WarehouseContext";
 import { useMemo, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
-import LmPremiseReportHeader from "./components/LmPremiseReportHeader";
-import { ReportRow } from "./components/ReportRow";
-// import { ReportRow } from "./components/ReportRow"; // Flattened row component
+import LmPremiseReportHeader from "../../../../components/LmPremiseReportHeader";
+import ReportRow from "../../../../components/ReportRow";
 
 export default function LmPremiseReport() {
   const { filtered, all } = useWarehouse();

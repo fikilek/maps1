@@ -13,8 +13,8 @@ import {
 } from "react-native";
 import { Text } from "react-native-paper";
 import DateRangeModal from "../../../../components/DateRangeModal";
-import { ExportIntelligenceModal } from "./components/ExportModal";
-import UserTrnsReportHeader from "./components/UserTrnsReportHeader";
+import { ExportIntelligenceModal } from "../../../../components/ExportModal";
+import UserTrnsReportHeader from "../../../../components/UserTrnsReportHeader";
 
 export default function NormalisationReport() {
   const { geoState } = useGeo();
@@ -75,10 +75,9 @@ export default function NormalisationReport() {
   };
 
   // 📡 THE SOVEREIGN STREAMS
-  const { data: rawTrns = [], isLoading } = useGetTrnsByLmPcodeQuery(
-    { lmPcode },
-    { skip: !lmPcode },
-  );
+  const { data: rawTrns = [], isLoading } = useGetTrnsByLmPcodeQuery(lmPcode, {
+    skip: !lmPcode,
+  });
 
   const processedData = useMemo(() => {
     // 🛰️ STEP 1: Filter Electricity Transactions for the current LM

@@ -8,8 +8,8 @@ import {
   where,
 } from "firebase/firestore";
 
+import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
-import { erfMemory } from "../storage/erfMemory";
 import { transformGeoData } from "../utils/geo/parseGeometry";
 
 const workoutSovereignErf = (id) => {
@@ -48,9 +48,14 @@ const transformToMeta = (id, erf) => {
 
 export const erfsApi = createApi({
   reducerPath: "erfsApi",
-  baseQuery: fakeBaseQuery(),
   tagTypes: ["ERF"],
-
+  keepUnusedDataFor: 31536000,
+  baseQuery: fakeBaseQuery(),
+  extractRehydrationInfo(action, { reducerPath }) {
+    if (action.type === REHYDRATE) {
+      return action.payload?.[reducerPath];
+    }
+  },
   endpoints: (builder) => ({
     getErfsByLmAndWard: builder.query({
       async queryFn({ lmPcode, wardPcode }) {
@@ -86,259 +91,116 @@ export const erfsApi = createApi({
       keepUnusedDataFor: 3600,
     }),
 
-    // getErfsByLmPcode: builder.query({
-    //   async queryFn({ lmPcode }) {
-    //     if (!lmPcode)
-    //       return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
-
-    //     try {
-    //       console.log(
-    //         `[${new Date().toLocaleTimeString()}] 🏛️ getErfsByLmPcode ---queryFn SRARTED for ${lmPcode}`,
-    //       );
-    //       const startTime = Date.now(); // ⏱️ Start timer
-    //       // ⚡ THE INSTANT STRIKE: Moving hydration here stops the "Switching Evaporation"
-    //       const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-    //       const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
-
-    //       const wardSet = new Set();
-    //       localMeta.forEach((m) => {
-    //         if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //       });
-
-    //       console.log(
-    //         `🏛️ [SOVEREIGN HYDRATION]: ${lmPcode} | Meta: ${localMeta.length} | Geo: ${Object.keys(localGeo).length}`,
-    //       );
-
-    //       const duration = Date.now() - startTime; // 🏁 Calculate diff
-    //       console.log(
-    //         `[${new Date().toLocaleTimeString()}] 🏛️ [SOVEREIGN HYDRATION]: ${lmPcode} loaded in ${duration}ms`,
-    //       );
-    //       console.log(
-    //         `[${new Date().toLocaleTimeString()}] 🏛️ getErfsByLmPcode ---queryFn FINISHED for ${lmPcode}`,
-    //       );
-    //       return {
-    //         data: {
-    //           metaEntries: localMeta,
-    //           geoEntries: localGeo,
-    //           wards: ["ALL", ...Array.from(wardSet)].sort(),
-    //         },
-    //       };
-    //     } catch (error) {
-    //       return { error: { status: "CUSTOM_ERROR", error: error.message } };
-    //     }
-    //   },
-
-    //   // async onCacheEntryAdded(
-    //   //   { lmPcode },
-    //   //   { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   // ) {
-    //   //   let unsubscribe = () => {};
-    //   //   if (!lmPcode) return;
-
-    //   //   console.log(` `);
-    //   //   console.log(
-    //   //     `🏛️ getErfsByLmPcode ---onCacheEntryAdded started for ${lmPcode}`,
-    //   //   );
-    //   //   try {
-    //   //     await cacheDataLoaded;
-
-    //   //     const q = query(
-    //   //       collection(db, "ireps_erfs"),
-    //   //       where("admin.localMunicipality.pcode", "==", lmPcode),
-    //   //     );
-
-    //   //     unsubscribe = onSnapshot(q, (snapshot) => {
-    //   //       if (snapshot.empty && snapshot.docChanges().length === 0) return;
-
-    //   //       updateCachedData((draft) => {
-    //   //         // 🛡️ THE EVAPORATION SHIELD
-    //   //         if (Object.keys(draft.geoEntries || {}).length === 0) {
-    //   //           draft.geoEntries = erfMemory.getErfsGeoList(lmPcode) || {};
-    //   //         }
-
-    //   //         const indexMap = new Map(
-    //   //           draft.metaEntries.map((m, i) => [m.id, i]),
-    //   //         );
-
-    //   //         // 🎯 THE VERIFIED TRINITY: Explicit Added, Modified, Removed
-    //   //         snapshot.docChanges().forEach((change) => {
-    //   //           const erf = change.doc.data();
-    //   //           const id = erf.erfId || change.doc.id;
-
-    //   //           if (change.type === "added") {
-    //   //             if (!indexMap.has(id)) {
-    //   //               draft.metaEntries.push(transformToMeta(id, erf));
-    //   //             }
-    //   //           }
-
-    //   //           if (change.type === "modified") {
-    //   //             const modIdx = indexMap.get(id);
-    //   //             if (modIdx !== undefined) {
-    //   //               draft.metaEntries[modIdx] = transformToMeta(id, erf);
-    //   //             }
-    //   //           }
-
-    //   //           if (change.type === "removed") {
-    //   //             const remIdx = indexMap.get(id);
-    //   //             if (remIdx !== undefined) {
-    //   //               draft.metaEntries.splice(remIdx, 1);
-    //   //               delete draft.geoEntries[id];
-    //   //             }
-    //   //           }
-
-    //   //           // 🛰️ GEOMETRY HANDLER: Keeping it isolated from the meta loop
-    //   //           if (change.type !== "removed") {
-    //   //             if (erf.geometry || erf.centroid) {
-    //   //               draft.geoEntries[id] = {
-    //   //                 centroid: erf.centroid,
-    //   //                 bbox: erf.bbox,
-    //   //                 geometry:
-    //   //                   typeof erf.geometry === "string"
-    //   //                     ? JSON.parse(erf.geometry)
-    //   //                     : erf.geometry,
-    //   //               };
-    //   //             }
-    //   //           }
-    //   //         });
-
-    //   //         // 💾 DISK PERSISTENCE: Save only if we have a valid state
-    //   //         if (draft.metaEntries.length > 0) {
-    //   //           erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-    //   //           erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-    //   //           erfMemory.saveSyncTimestamp(lmPcode);
-    //   //         }
-
-    //   //         // 📊 RE-CALCULATE WARDS
-    //   //         const wardSet = new Set();
-    //   //         draft.metaEntries.forEach((m) => {
-    //   //           if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //   //         });
-    //   //         draft.wards = ["ALL", ...Array.from(wardSet)].sort();
-    //   //       });
-    //   //     });
-    //   //     console.log(` `);
-    //   //     console.log(
-    //   //       `🏛️ getErfsByLmPcode ---onCacheEntryAdded finished for ${lmPcode}`,
-    //   //     );
-    //   //   } catch (error) {
-    //   //     console.error("❌ [ERF STREAM ERROR]:", error);
-    //   //   }
-
-    //   //   await cacheEntryRemoved;
-    //   //   unsubscribe();
-    //   // },
-    // }),
-
     getErfsByLmPcode: builder.query({
-      async queryFn({ lmPcode }) {
-        if (!lmPcode)
-          return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
-
-        try {
-          // ⚡ STEP 1: THE INSTANT STRIKE
-          // Pull directly from the Vault. 0ms latency.
-
-          const startTime = Date.now(); // ⏱️ Start timer
-
-          const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-          const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
-
-          // 🕵️ THE TRACE LOGS
-          console.log(`🔍 [VAULT_TRACE]: Meta Count: ${localMeta.length}`);
-          console.log(
-            `🔍 [VAULT_TRACE]: Geo Keys: ${Object.keys(localGeo).length}`,
-          );
-
-          // Reconstruct the Ward list from local data
-          const wardSet = new Set();
-          localMeta.forEach((m) => {
-            if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-          });
-
-          console.log(
-            `🏛️ [SOVEREIGN HYDRATION]: ${lmPcode} - ${localMeta.length} items pulled from Disk.`,
-          );
-
-          // Check if the first item actually has a shape
-          const firstKey = Object.keys(localGeo)[0];
-          if (firstKey) {
-            console.log(
-              `🔍 [VAULT_TRACE]: Sample Geo Key [${firstKey}] exists:`,
-              !!localGeo[firstKey],
-            );
-          }
-
-          const duration = Date.now() - startTime; // 🏁 Calculate diff
-          console.log(
-            `[${new Date().toLocaleTimeString()}] 🏛️ [SOVEREIGN HYDRATION]: ${lmPcode} loaded in ${duration}ms`,
-          );
-
-          return {
-            data: {
-              metaEntries: localMeta,
-              geoEntries: localGeo, // 🎯 This is the payload
-              wards: ["ALL", ...Array.from(wardSet)].sort(),
-            },
-          };
-        } catch (error) {
-          return { error: { status: "CUSTOM_ERROR", error: error.message } };
-        }
-      },
+      queryFn: (lmPcode) => ({
+        data: {
+          metaEntries: [],
+          geoEntries: {},
+          sync: {
+            status: "idle", // idle | syncing | ready | error
+            lmPcode,
+            lastSyncAt: 0,
+            firstSnapshotAt: 0,
+          },
+        },
+      }),
 
       async onCacheEntryAdded(
-        { lmPcode },
+        lmPcode,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
-        let unsubscribe = () => {};
-        try {
-          await cacheDataLoaded;
+        if (!lmPcode) return;
+        await cacheDataLoaded;
 
-          const q = query(
-            collection(db, "ireps_erfs"),
-            where("admin.localMunicipality.pcode", "==", lmPcode),
-          );
+        let first = true;
 
-          unsubscribe = onSnapshot(q, (snapshot) => {
-            const firestoreCount = snapshot.docs.length;
-            const registry = erfMemory?.getRegistry();
-            const mmkvCount = registry?.lms[lmPcode]?.count || 0;
+        // 🏁 Mark syncing immediately
+        updateCachedData((draft) => {
+          draft.metaEntries = draft.metaEntries || [];
+          draft.geoEntries = draft.geoEntries || {};
+          draft.sync = draft.sync || {};
+          draft.sync.status = "syncing";
+          draft.sync.lmPcode = lmPcode;
+        });
 
-            // 🛡️ GATEKEEPER: Still protects the first boot
-            if (snapshot.docChanges().length === firestoreCount) {
-              if (firestoreCount === mmkvCount) {
-                console.log(
-                  `🏛️ [GATEKEEPER]: Vault is Sovereign (${firestoreCount}). Aborting Initial Blast.`,
-                );
-                return;
-              }
-            }
+        // ✅ Authoritative ordering in Firestore
+        const q = query(
+          collection(db, "ireps_erfs"),
+          where("admin.localMunicipality.pcode", "==", lmPcode),
+          orderBy("metadata.updatedAt", "desc"),
+        );
 
+        const unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
             updateCachedData((draft) => {
-              // 🛡️ THE EVAPORATION SHIELD: Ensure Geo is present in cache
-              if (Object.keys(draft.geoEntries || {}).length === 0) {
-                draft.geoEntries = erfMemory.getErfsGeoList(lmPcode) || {};
+              // 🛡️ Rehydration shields
+              draft.metaEntries = draft.metaEntries || [];
+              draft.geoEntries = draft.geoEntries || {};
+              draft.sync = draft.sync || {};
+
+              // ✅ FIRST snapshot = full authoritative rebuild (keeps descending order correct)
+              if (first) {
+                first = false;
+                draft.sync.status = "ready";
+                draft.sync.firstSnapshotAt = Date.now();
+
+                // 🔥 Bulk heal: replace any rehydrated mess with cloud order
+                draft.metaEntries = snapshot.docs.map((doc) => {
+                  const data = doc.data();
+                  const id = data.erfId || doc.id;
+                  return transformToMeta(id, data);
+                });
+
+                // optional: also hydrate geoEntries on first pass
+                snapshot.docs.forEach((doc) => {
+                  const data = doc.data();
+                  const id = data.erfId || doc.id;
+                  if (data.geometry || data.centroid) {
+                    draft.geoEntries[id] = {
+                      centroid: data.centroid,
+                      bbox: data.bbox,
+                      geometry:
+                        typeof data.geometry === "string"
+                          ? JSON.parse(data.geometry)
+                          : data.geometry,
+                    };
+                  }
+                });
+
+                draft.sync.lastSyncAt = Date.now();
+                return; // first snapshot done
               }
 
-              const metaIndexMap = new Map(
-                draft.metaEntries.map((m, i) => [m.id, i]),
-              );
-              let needsDiskUpdate = false;
+              // ✅ Any snapshot = last sync time update
+              draft.sync.lastSyncAt = Date.now();
 
-              snapshot.docChanges().forEach((change) => {
+              const changes = snapshot.docChanges();
+              if (changes.length === 0) return;
+
+              // ✅ Surgical updates (fast) + final re-sort to guarantee descending order
+              changes.forEach((change) => {
                 const erf = change.doc.data();
                 const id = erf.erfId || change.doc.id;
-                needsDiskUpdate = true;
 
                 if (change.type === "removed") {
-                  const idx = metaIndexMap.get(id);
-                  if (idx !== undefined) draft.metaEntries.splice(idx, 1);
+                  const idx = draft.metaEntries.findIndex((m) => m.id === id);
+                  if (idx > -1) draft.metaEntries.splice(idx, 1);
                   delete draft.geoEntries[id];
-                } else {
-                  // 🎯 THE FIX: Robust Meta & Geo Reconstruction
-                  const meta = transformToMeta(id, erf);
+                  return;
+                }
 
-                  // Re-parse geometry safely for the Map
-                  const geo = {
+                // META
+                const meta = transformToMeta(id, erf);
+                const existingIdx = draft.metaEntries.findIndex(
+                  (m) => m.id === id,
+                );
+                if (existingIdx > -1) draft.metaEntries[existingIdx] = meta;
+                else draft.metaEntries.push(meta);
+
+                // GEO
+                if (erf.geometry || erf.centroid) {
+                  draft.geoEntries[id] = {
                     centroid: erf.centroid,
                     bbox: erf.bbox,
                     geometry:
@@ -346,770 +208,354 @@ export const erfsApi = createApi({
                         ? JSON.parse(erf.geometry)
                         : erf.geometry,
                   };
-
-                  const existingIdx = metaIndexMap.get(id);
-                  if (existingIdx !== undefined) {
-                    draft.metaEntries[existingIdx] = meta;
-                  } else {
-                    draft.metaEntries.push(meta);
-                  }
-
-                  if (geo.geometry || geo.centroid) {
-                    draft.geoEntries[id] = geo;
-                  }
                 }
               });
 
-              // 📊 RE-CALCULATE WARDS: Ensure filters update for new/changed Erfs
-              if (needsDiskUpdate) {
-                const wardSet = new Set();
-                draft.metaEntries.forEach((m) => {
-                  if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-                });
-                draft.wards = ["ALL", ...Array.from(wardSet)].sort();
-
-                // 💾 PERMANENT STORAGE
-                erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-                erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-                console.log(
-                  `🔄 [VAULT SYNC]: ${snapshot.docChanges().length} live updates secured.`,
-                );
-              }
+              // ✅ Final authoritative sort (metadata.updatedAt is ISO string)
+              draft.metaEntries.sort((a, b) =>
+                String(b?.metadata?.updatedAt || "").localeCompare(
+                  String(a?.metadata?.updatedAt || ""),
+                ),
+              );
             });
-          });
-        } catch (e) {
-          console.error("❌ [SYNC ERROR]:", e);
-        }
+          },
+          (error) => {
+            console.error("❌ ERFs snapshot error:", error);
+            updateCachedData((draft) => {
+              draft.sync = draft.sync || {};
+              draft.sync.status = "error";
+              draft.sync.lastError = String(error?.message || error);
+            });
+          },
+        );
+
         await cacheEntryRemoved;
         unsubscribe();
       },
-
-      // async onCacheEntryAdded(
-      //   { lmPcode },
-      //   { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-      // ) {
-      //   console.log(` `);
-      //   console.log(`onCacheEntryAdded ---started `);
-      //   let unsubscribe = () => {};
-      //   try {
-      //     await cacheDataLoaded;
-
-      //     // 📡 STEP 2: THE SILENT SYNC
-      //     // Now that the UI is already showing the local data, we start the stream.
-      //     const q = query(
-      //       collection(db, "ireps_erfs"),
-      //       where("admin.localMunicipality.pcode", "==", lmPcode),
-      //     );
-
-      //     unsubscribe = onSnapshot(q, (snapshot) => {
-      //       console.log(` `);
-      //       console.log(`onSnapshot ---started `);
-      //       const firestoreCount = snapshot.docs.length;
-
-      //       // 🎯 THE FIX: Reach into the Master Index (Registry) to get the count
-
-      //       const registry = erfMemory?.getRegistry();
-      //       console.log(`onCacheEntryAdded ---registry `, registry);
-
-      //       // const mmkvCount = erfMemory.getErfsMetaList(lmPcode)?.length || 0;
-      //       const mmkvCount = registry?.lms[lmPcode]?.count || 0;
-
-      //       // 🛡️ CASE 1: THE BOOT PHASE (The Initial Blast)
-      //       // If the counts match, the Vault (MMKV) is already perfect.
-      //       // We abort to save the Samsung A06 from the 20-minute freeze.
-      //       console.log(`onCacheEntryAdded ---firestoreCount `, firestoreCount);
-      //       console.log(`onCacheEntryAdded ---mmkvCount `, mmkvCount);
-      //       if (snapshot.docChanges().length === firestoreCount) {
-      //         if (firestoreCount === mmkvCount) {
-      //           console.log(
-      //             `🛡️ [GATEKEEPER]: Counts match (${firestoreCount}). Vault is Sovereign. Aborting Initial Blast.`,
-      //           );
-      //           return;
-      //         }
-      //       }
-
-      //       updateCachedData((draft) => {
-      //         // ⚡ CASE 2: THE UPDATE PHASE (Deltas/Changes)
-      //         // If we are here, it means either MMKV was empty, or there's a real change.
-      //         let needsDiskUpdate = false;
-      //         const metaIndexMap = new Map(
-      //           draft.metaEntries.map((m, i) => [m.id, i]),
-      //         );
-
-      //         snapshot.docChanges().forEach((change) => {
-      //           const erf = change.doc.data();
-      //           const id = erf.erfId || change.doc.id;
-      //           needsDiskUpdate = true;
-
-      //           if (change.type === "removed") {
-      //             const idx = metaIndexMap.get(id);
-      //             if (idx !== undefined) draft.metaEntries.splice(idx, 1);
-      //             delete draft.geoEntries[id];
-      //           } else {
-      //             // This handles both 'added' (new Erfs) and 'modified' (Premise registration)
-      //             const meta = transformToMeta(id, erf);
-      //             const geo = erf.geometry || null;
-      //             const existingIdx = metaIndexMap.get(id);
-
-      //             if (existingIdx !== undefined) {
-      //               draft.metaEntries[existingIdx] = meta;
-      //             } else {
-      //               draft.metaEntries.push(meta);
-      //             }
-      //             if (geo) draft.geoEntries[id] = geo;
-      //           }
-      //         });
-
-      //         // 💾 SAVE THE GAINS
-      //         if (needsDiskUpdate) {
-      //           erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-      //           erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-      //           console.log(
-      //             `🔄 [VAULT SYNC]: ${snapshot.docChanges().length} changes merged.`,
-      //           );
-      //         }
-      //       });
-      //     });
-
-      //     // unsubscribe = onSnapshot(q, (snapshot) => {
-      //     //   if (snapshot.docChanges().length === 0) return;
-
-      //     //   updateCachedData((draft) => {
-      //     //     const metaIndexMap = new Map(
-      //     //       draft.metaEntries.map((m, i) => [m.id, i]),
-      //     //     );
-      //     //     let needsDiskUpdate = false;
-
-      //     //     snapshot.docChanges().forEach((change) => {
-      //     //       const erf = change.doc.data();
-      //     //       const id = erf.erfId || change.doc.id;
-      //     //       needsDiskUpdate = true;
-
-      //     //       if (change.type === "removed") {
-      //     //         // 1. Remove Meta
-      //     //         const idx = metaIndexMap.get(id);
-      //     //         if (idx !== undefined) draft.metaEntries.splice(idx, 1);
-      //     //         // 2. Remove Geo
-      //     //         delete draft.geoEntries[id];
-      //     //       } else {
-      //     //         // 🎯 THE FIX: Sync Meta AND Geo
-      //     //         const meta = transformToMeta(id, erf);
-      //     //         const geo = erf.geometry || null; // Capture the shape!
-
-      //     //         // Update Meta List
-      //     //         const existingIdx = metaIndexMap.get(id);
-      //     //         if (existingIdx !== undefined) {
-      //     //           draft.metaEntries[existingIdx] = meta;
-      //     //         } else {
-      //     //           draft.metaEntries.push(meta);
-      //     //         }
-
-      //     //         // Update Geo Library (The Map Shapes)
-      //     //         if (geo) {
-      //     //           draft.geoEntries[id] = geo;
-      //     //         }
-      //     //       }
-      //     //     });
-
-      //     //     // 💾 STEP 3: CONSOLIDATED BACKGROUND RECOVERY
-      //     //     if (needsDiskUpdate) {
-      //     //       // Save the List (Meta)
-      //     //       erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-
-      //     //       // Save the Shapes (Geo)
-      //     //       // This ensures the local vault stays 100% accurate for Zamo's Audit
-      //     //       erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-
-      //     //       console.log(`📡 [SYNC]: Vault & Map Refreshed for ${lmPcode}`);
-      //     //     }
-      //     //   });
-      //     // });
-      //   } catch (e) {
-      //     console.error("❌ [SYNC ERROR]:", e);
-      //   }
-      //   await cacheEntryRemoved;
-      //   unsubscribe();
-      // },
     }),
 
     // getErfsByLmPcode: builder.query({
-    //   async queryFn({ lmPcode }) {
-    //     if (!lmPcode)
-    //       return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
+    //   queryFn: (lmPcode) => ({
+    //     data: {
+    //       metaEntries: [],
+    //       geoEntries: {},
+    //       sync: {
+    //         status: "idle", // idle | syncing | ready | error
+    //         lmPcode,
+    //         lastSyncAt: 0,
+    //         firstSnapshotAt: 0,
+    //       },
+    //     },
+    //   }),
 
-    //     // ⚡ THE 0ms STRIKE: Pull from MMKV first.
-    //     // This is what Zamo sees the moment he taps the LM.
-    //     const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-    //     const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
+    //   async onCacheEntryAdded(
+    //     lmPcode,
+    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+    //   ) {
+    //     if (!lmPcode) return;
 
-    //     const wardSet = new Set();
-    //     localMeta.forEach((m) => {
-    //       if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
+    //     await cacheDataLoaded;
+
+    //     let first = true;
+
+    //     // 🏁 Mark syncing immediately
+    //     updateCachedData((draft) => {
+    //       draft.metaEntries = draft.metaEntries || [];
+    //       draft.geoEntries = draft.geoEntries || {};
+
+    //       draft.sync = draft.sync || {};
+    //       draft.sync.status = "syncing";
+    //       draft.sync.lmPcode = lmPcode;
     //     });
 
-    //     console.log(
-    //       `🏛️ [VAULT BOOT]: ${lmPcode} - ${localMeta.length} items recovered.`,
+    //     const q = query(
+    //       collection(db, "ireps_erfs"),
+    //       where("admin.localMunicipality.pcode", "==", lmPcode),
+    //       orderBy("metadata.updatedAt", "desc"),
     //     );
 
-    //     return {
-    //       data: {
-    //         metaEntries: localMeta,
-    //         geoEntries: localGeo,
-    //         wards: ["ALL", ...Array.from(wardSet)].sort(),
-    //       },
-    //     };
-    //   },
-
-    //   async onCacheEntryAdded(
-    //     { lmPcode },
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     let unsubscribe = () => {};
-    //     try {
-    //       await cacheDataLoaded; // Wait for the disk load above to finish
-
-    //       // 📡 BACKGROUND SYNC: Only handles Deltas
-    //       const q = query(
-    //         collection(db, "ireps_erfs"),
-    //         where("admin.localMunicipality.pcode", "==", lmPcode),
-    //       );
-
-    //       unsubscribe = onSnapshot(q, (snapshot) => {
-    //         // 🛡️ GUARD 1: If cloud sends nothing, don't open the draft.
-    //         if (snapshot.empty && snapshot.docChanges().length === 0) return;
+    //     const unsubscribe = onSnapshot(
+    //       q,
+    //       (snapshot) => {
+    //         const changes = snapshot.docChanges();
 
     //         updateCachedData((draft) => {
-    //           const indexMap = new Map(
-    //             draft.metaEntries.map((m, i) => [m.id, i]),
-    //           );
-    //           let hasNewData = false;
+    //           // 🛡️ Rehydration shields
+    //           draft.metaEntries = draft.metaEntries || [];
+    //           draft.geoEntries = draft.geoEntries || {};
+    //           draft.sync = draft.sync || {};
 
-    //           snapshot.docChanges().forEach((change) => {
-    //             hasNewData = true;
-    //             const erf = change.doc.data();
-    //             const id = erf.erfId || change.doc.id;
+    //           // ✅ FIRST SNAPSHOT = DATA HYDRATED
+    //           if (first) {
+    //             first = false;
+    //             draft.sync.status = "ready";
+    //             draft.sync.firstSnapshotAt = Date.now();
 
-    //             if (change.type === "removed") {
-    //               const remIdx = indexMap.get(id);
-    //               if (remIdx !== undefined) {
-    //                 draft.metaEntries.splice(remIdx, 1);
-    //                 delete draft.geoEntries[id];
-    //               }
-    //             } else {
-    //               const meta = transformToMeta(id, erf);
-    //               const existingIdx = indexMap.get(id);
-    //               if (existingIdx !== undefined) {
-    //                 draft.metaEntries[existingIdx] = meta;
-    //               } else {
-    //                 draft.metaEntries.push(meta);
-    //               }
-
-    //               // Geometry updates in background
-    //               if (erf.geometry || erf.centroid) {
-    //                 draft.geoEntries[id] = {
-    //                   centroid: erf.centroid,
-    //                   bbox: erf.bbox,
-    //                   geometry:
-    //                     typeof erf.geometry === "string"
-    //                       ? JSON.parse(erf.geometry)
-    //                       : erf.geometry,
-    //                 };
-    //               }
-    //             }
-    //           });
-
-    //           // 🛡️ GUARD 2: Only save if we actually processed something new.
-    //           // This prevents the "0 items" overwrite during stream initialization.
-    //           if (hasNewData && draft.metaEntries.length > 0) {
-    //             erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-    //             erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-    //           }
-    //         });
-    //       });
-    //     } catch (e) {
-    //       console.error("❌ [SYNC ERROR]:", e);
-    //     }
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
-
-    // getErfsByLmPcode: builder.query({
-    //   async queryFn({ lmPcode }) {
-    //     // 🎯 THE INSTANT STRIKE:
-    //     // We pull from MMKV inside the queryFn.
-    //     // This ensures the VERY FIRST thing the UI sees is the disk data.
-    //     const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-    //     const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
-    //     const wardSet = new Set();
-    //     localMeta.forEach((m) => {
-    //       if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //     });
-
-    //     return {
-    //       data: {
-    //         metaEntries: localMeta,
-    //         geoEntries: localGeo,
-    //         wards: ["ALL", ...Array.from(wardSet)].sort(),
-    //       },
-    //     };
-    //   },
-
-    //   async onCacheEntryAdded(
-    //     { lmPcode },
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     let unsubscribe = () => {};
-    //     try {
-    //       await cacheDataLoaded;
-
-    //       // 🛑 STEP 2: THE STREAM (Background Delta Sync only)
-    //       const q = query(
-    //         collection(db, "ireps_erfs"),
-    //         where("admin.localMunicipality.pcode", "==", lmPcode),
-    //       );
-
-    //       unsubscribe = onSnapshot(q, (snapshot) => {
-    //         if (snapshot.empty) return;
-
-    //         updateCachedData((draft) => {
-    //           const indexMap = new Map(
-    //             draft.metaEntries.map((m, i) => [m.id, i]),
-    //           );
-    //           let hasChanges = false;
-
-    //           snapshot.docChanges().forEach((change) => {
-    //             hasChanges = true;
-    //             const erf = change.doc.data();
-    //             const id = erf.erfId || change.doc.id;
-
-    //             if (change.type === "removed") {
-    //               const remIdx = indexMap.get(id);
-    //               if (remIdx !== undefined) {
-    //                 draft.metaEntries.splice(remIdx, 1);
-    //                 delete draft.geoEntries[id];
-    //               }
-    //             } else {
-    //               const meta = transformToMeta(id, erf);
-    //               const existingIdx = indexMap.get(id);
-    //               if (existingIdx !== undefined) {
-    //                 draft.metaEntries[existingIdx] = meta;
-    //               } else {
-    //                 draft.metaEntries.push(meta);
-    //               }
-
-    //               if (erf.geometry || erf.centroid) {
-    //                 draft.geoEntries[id] = {
-    //                   centroid: erf.centroid,
-    //                   bbox: erf.bbox,
-    //                   geometry:
-    //                     typeof erf.geometry === "string"
-    //                       ? JSON.parse(erf.geometry)
-    //                       : erf.geometry,
-    //                 };
-    //               }
-    //             }
-    //           });
-
-    //           // 🏛️ PERSIST ONLY ON ACTUAL CHANGES
-    //           if (hasChanges) {
-    //             erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-    //             erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-    //           }
-    //         });
-    //       });
-    //     } catch (error) {
-    //       console.error("❌ [STREAM ERROR]:", error);
-    //     }
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
-
-    // getErfsByLmPcode: builder.query({
-    //   async queryFn({ lmPcode }) {
-    //     return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
-    //   },
-    //   async onCacheEntryAdded(
-    //     { lmPcode },
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     let unsubscribe = () => {};
-    //     if (!lmPcode) return;
-
-    //     try {
-    //       await cacheDataLoaded;
-
-    //       // 🛑 STEP 1: HYDRATION (Instant UI from MMKV)
-    //       const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-    //       const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
-    //       updateCachedData((draft) => {
-    //         // Only hydrate if we haven't already filled this cache entry
-    //         if (draft.metaEntries.length === 0) {
-    //           draft.metaEntries = localMeta;
-    //           draft.geoEntries = localGeo;
-    //         }
-    //       });
-
-    //       // 🛑 STEP 2: THE TRINITY STREAM
-    //       const q = query(
-    //         collection(db, "ireps_erfs"),
-    //         where("admin.localMunicipality.pcode", "==", lmPcode),
-    //       );
-
-    //       unsubscribe = onSnapshot(q, (snapshot) => {
-    //         // 🛡️ GUARD 1: If Firestore sends an empty packet, do not open the vault.
-    //         if (snapshot.empty && snapshot.docChanges().length === 0) {
-    //           // console.log("📡 [STREAM]: Received empty snapshot. Guarding disk...");
-    //           return;
-    //         }
-
-    //         updateCachedData((draft) => {
-    //           // 🚀 INDEX ACCELERATION
-    //           const indexMap = new Map(
-    //             draft.metaEntries.map((m, i) => [m.id, i]),
-    //           );
-
-    //           snapshot.docChanges().forEach((change) => {
-    //             const erf = change.doc.data();
-    //             const id = erf.erfId || change.doc.id;
-
-    //             switch (change.type) {
-    //               case "added":
-    //                 if (!indexMap.has(id)) {
-    //                   draft.metaEntries.push(transformToMeta(id, erf));
-    //                 }
-    //                 break;
-    //               case "modified":
-    //                 const modIdx = indexMap.get(id);
-    //                 if (modIdx !== undefined) {
-    //                   draft.metaEntries[modIdx] = transformToMeta(id, erf);
-    //                 }
-    //                 break;
-    //               case "removed":
-    //                 const remIdx = indexMap.get(id);
-    //                 if (remIdx !== undefined) {
-    //                   draft.metaEntries.splice(remIdx, 1);
-    //                   delete draft.geoEntries[id];
-    //                 }
-    //                 break;
-    //             }
-
-    //             // 🛰️ GEOMETRY HANDLER
-    //             if (change.type !== "removed") {
-    //               if (erf.geometry || erf.centroid) {
-    //                 draft.geoEntries[id] = {
-    //                   centroid: erf.centroid,
-    //                   bbox: erf.bbox,
-    //                   geometry:
-    //                     typeof erf.geometry === "string"
-    //                       ? JSON.parse(erf.geometry)
-    //                       : erf.geometry,
-    //                 };
-    //               }
-    //             }
-    //           });
-
-    //           // 🛡️ GUARD 2: THE "NO-WIPE" SHIELD
-    //           // Only save to disk if we actually have data in RAM.
-    //           if (draft.metaEntries.length > 0) {
-    //             erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-    //             erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries);
-    //             erfMemory.saveSyncTimestamp(lmPcode);
+    //             // 🛡️ Ensure initial bulk load is sorted (if not using Firestore orderBy)
+    //             draft.metaEntries.sort((a, b) =>
+    //               (b.metadata?.updatedAt || "").localeCompare(
+    //                 a.metadata?.updatedAt || "",
+    //               ),
+    //             );
     //           }
 
-    //           // 📊 RE-CALCULATE WARDS
-    //           const wardSet = new Set();
-    //           draft.metaEntries.forEach((m) => {
-    //             if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //           });
-    //           draft.wards = ["ALL", ...Array.from(wardSet)].sort();
-    //         });
-    //       });
+    //           // ✅ Any snapshot = last sync time update
+    //           draft.sync.lastSyncAt = Date.now();
 
-    //       // unsubscribe = onSnapshot(q, (snapshot) => {
-    //       //   updateCachedData((draft) => {
-    //       //     const indexMap = new Map(
-    //       //       draft.metaEntries.map((m, i) => [m.id, i]),
-    //       //     );
-
-    //       //     snapshot.docChanges().forEach((change) => {
-    //       //       const erf = change.doc.data();
-    //       //       const id = erf.erfId || change.doc.id;
-
-    //       //       switch (change.type) {
-    //       //         case "added":
-    //       //           if (!indexMap.has(id)) {
-    //       //             draft.metaEntries.push(transformToMeta(id, erf));
-    //       //           }
-    //       //           break;
-
-    //       //         case "modified":
-    //       //           const modIdx = indexMap.get(id);
-    //       //           if (modIdx !== undefined) {
-    //       //             draft.metaEntries[modIdx] = transformToMeta(id, erf);
-    //       //           }
-    //       //           break;
-
-    //       //         case "removed":
-    //       //           const remIdx = indexMap.get(id);
-    //       //           if (remIdx !== undefined) {
-    //       //             draft.metaEntries.splice(remIdx, 1);
-    //       //             delete draft.geoEntries[id];
-    //       //           }
-    //       //           break;
-    //       //       }
-
-    //       //       // 🛰️ GEOMETRY HANDLER (For Added/Modified)
-    //       //       if (change.type !== "removed") {
-    //       //         if (erf.geometry || erf.centroid) {
-    //       //           draft.geoEntries[id] = {
-    //       //             centroid: erf.centroid,
-    //       //             bbox: erf.bbox,
-    //       //             geometry:
-    //       //               typeof erf.geometry === "string"
-    //       //                 ? JSON.parse(erf.geometry)
-    //       //                 : erf.geometry,
-    //       //           };
-    //       //         }
-    //       //       }
-    //       //     });
-
-    //       //     // 🏛️ PERSIST TO DISK (Bulk update)
-    //       //     erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries); // Array of erfs
-    //       //     erfMemory.saveBulkErfGeo(lmPcode, draft.geoEntries); // Object of geos
-
-    //       //     // 📊 RE-CALCULATE WARDS
-    //       //     const wardSet = new Set();
-    //       //     draft.metaEntries.forEach((m) => {
-    //       //       if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //       //     });
-    //       //     draft.wards = ["ALL", ...Array.from(wardSet)].sort();
-    //       //   });
-    //       // });
-    //     } catch (error) {
-    //       console.error("❌ [ERF STREAM ERROR]:", error);
-    //     }
-
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
-
-    // getErfsByLmPcode: builder.query({
-    //   async queryFn({ lmPcode }) {
-    //     return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
-    //   },
-
-    //   keepUnusedDataFor: 3600,
-
-    //   async onCacheEntryAdded(
-    //     { lmPcode },
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     let unsubscribe = () => {};
-    //     if (!lmPcode) return;
-
-    //     try {
-    //       await cacheDataLoaded;
-
-    //       // 🛑 STEP 1: INSTANT HYDRATION FROM VAULT
-    //       const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-    //       const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
-    //       const lastSync = erfMemory.getLastSyncTimestamp(lmPcode);
-
-    //       updateCachedData((draft) => {
-    //         if (draft.metaEntries.length === 0) {
-    //           const wardSet = new Set();
-    //           localMeta.forEach((m) => {
-    //             if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //           });
-
-    //           draft.metaEntries = localMeta;
-    //           draft.geoEntries = localGeo;
-    //           draft.wards = ["ALL", ...Array.from(wardSet)].sort();
-    //         }
-    //       });
-
-    //       // 🛑 STEP 2: DELTA STRATEGY SETUP
-    //       const lastSyncDate = lastSync ? new Date(lastSync) : new Date(0);
-    //       const isFresh = (new Date() - lastSyncDate) / (1000 * 60 * 60) < 24;
-
-    //       let q = query(
-    //         collection(db, "ireps_erfs"),
-    //         where("admin.localMunicipality.pcode", "==", lmPcode),
-    //         orderBy("metadata.updatedAt", "desc"),
-    //       );
-
-    //       if (isFresh && localMeta.length > 0) {
-    //         q = query(
-    //           q,
-    //           where("metadata.updatedAt", ">", lastSyncDate.toISOString()),
-    //         );
-    //       }
-
-    //       // 🏛️ STEP 3: THE SOVEREIGN SYNC (Optimized for Knysna)
-    //       unsubscribe = onSnapshot(q, (snapshot) => {
-    //         if (snapshot.empty) return;
-
-    //         updateCachedData((draft) => {
-    //           const changes = snapshot.docChanges();
-
-    //           // 🚀 INDEX ACCELERATION: Map current IDs to their array position
-    //           // This stops the O(N) findIndex "CPU Burn" on large datasets
-    //           const indexMap = new Map(
-    //             draft.metaEntries.map((m, i) => [m.id, i]),
-    //           );
+    //           // 🧠 CPU PROTECTION
+    //           // If nothing changed, stop here (but still mark ready above)
+    //           if (changes.length === 0) return;
 
     //           changes.forEach((change) => {
     //             const erf = change.doc.data();
     //             const id = erf.erfId || change.doc.id;
+
+    //             if (change.type === "removed") {
+    //               const idx = draft.metaEntries.findIndex((m) => m.id === id);
+    //               if (idx > -1) draft.metaEntries.splice(idx, 1);
+    //               delete draft.geoEntries[id];
+    //               return;
+    //             }
+
+    //             // ✅ META ENTRY (List data)
     //             const meta = transformToMeta(id, erf);
+    //             const existingIdx = draft.metaEntries.findIndex(
+    //               (m) => m.id === id,
+    //             );
 
-    //             const existingIdx = indexMap.get(id);
-
-    //             if (existingIdx !== undefined) {
+    //             if (existingIdx > -1) {
+    //               // If it exists, update it in place
     //               draft.metaEntries[existingIdx] = meta;
+
+    //               // 🔄 OPTIONAL: If it was modified, move it to the top!
+    //               const [updatedItem] = draft.metaEntries.splice(
+    //                 existingIdx,
+    //                 1,
+    //               );
+    //               draft.metaEntries.unshift(updatedItem);
     //             } else {
-    //               draft.metaEntries.push(meta);
-    //               indexMap.set(id, draft.metaEntries.length - 1);
+    //               // ➕ If it's new, unshift to the TOP of the array
+    //               draft.metaEntries.unshift(meta);
     //             }
 
-    //             // 🛑 REMOVED: erfMemory.saveSingleErfMeta(lmPcode, id, meta);
-    //             // NO DISK I/O IN THE LOOP
+    //             // ✅ GEO ENTRY (Map data)
+    //             if (erf.geometry || erf.centroid) {
+    //               draft.geoEntries[id] = {
+    //                 centroid: erf.centroid,
+    //                 bbox: erf.bbox,
+    //                 geometry:
+    //                   typeof erf.geometry === "string"
+    //                     ? JSON.parse(erf.geometry)
+    //                     : erf.geometry,
+    //               };
+    //             }
     //           });
-
-    //           // 🏛️ THE BULK STRIKE: Save the whole result to MMKV ONCE after the loop
-    //           erfMemory.saveBulkErfMeta(lmPcode, draft.metaEntries);
-    //           erfMemory.saveSyncTimestamp(lmPcode);
-
-    //           // 📊 RE-CALCULATE WARDS (Once per snapshot, not once per doc)
-    //           const wardSet = new Set();
-    //           draft.metaEntries.forEach((m) => {
-    //             if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //           });
-    //           draft.wards = ["ALL", ...Array.from(wardSet)].sort();
     //         });
-    //       });
-    //     } catch (error) {
-    //       console.error("❌ [STREAM ERROR]:", error);
-    //     }
+    //       },
+    //       (error) => {
+    //         console.error("❌ ERFs snapshot error:", error);
 
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
-
-    // getErfsByLmPcode: builder.query({
-    //   // 🎯 Fix: Wrap in queryFn to satisfy fakeBaseQuery requirements
-    //   async queryFn({ lmPcode }) {
-    //     // We return an empty success because the real data flows through onCacheEntryAdded
-    //     return { data: { metaEntries: [], geoEntries: {}, wards: [] } };
-    //   },
-
-    //   keepUnusedDataFor: 3600, // 1 Hour Management Cache
-
-    //   async onCacheEntryAdded(
-    //     { lmPcode },
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     // console.log(`getErfsByLmPcode --onCacheEntryAdded --lmPcode`, lmPcode);
-    //     let unsubscribe = () => {};
-    //     if (!lmPcode) return;
-
-    //     try {
-    //       await cacheDataLoaded;
-
-    //       // 🛑 STEP 1: INSTANT HYDRATION FROM VAULT
-    //       const localMeta = erfMemory.getErfsMetaList(lmPcode) || [];
-    //       const localGeo = erfMemory.getErfsGeoList(lmPcode) || {};
-    //       const lastSync = erfMemory.getLastSyncTimestamp(lmPcode);
-
-    //       updateCachedData((draft) => {
-    //         // Only hydrate if we haven't already filled this cache entry
-    //         if (draft.metaEntries.length === 0) {
-    //           const wardSet = new Set();
-    //           localMeta.forEach((m) => {
-    //             if (m.admin?.ward?.name) wardSet.add(m.admin.ward.name);
-    //           });
-
-    //           draft.metaEntries = localMeta;
-    //           draft.geoEntries = localGeo;
-    //           draft.wards = ["ALL", ...Array.from(wardSet)].sort();
-    //         }
-    //       });
-
-    //       // 🛑 STEP 2: DELTA STRATEGY
-    //       const lastSyncDate = lastSync ? new Date(lastSync) : new Date(0);
-    //       const isFresh = (new Date() - lastSyncDate) / (1000 * 60 * 60) < 24;
-
-    //       let q = query(
-    //         collection(db, "ireps_erfs"),
-    //         where("admin.localMunicipality.pcode", "==", lmPcode),
-    //         orderBy("metadata.updatedAt", "desc"),
-    //       );
-
-    //       if (isFresh && localMeta.length > 0) {
-    //         q = query(
-    //           q,
-    //           where("metadata.updatedAt", ">", lastSyncDate.toISOString()),
-    //         );
-    //       }
-
-    //       // 🏛️ SOVEREIGN SNAPSHOT ENGINE (SURGICAL CASE-BASED)
-    //       unsubscribe = onSnapshot(q, (snapshot) => {
-    //         if (snapshot.empty) return;
-
-    //         // 🎯 Open the Draft Portal ONCE
     //         updateCachedData((draft) => {
-    //           snapshot.docChanges().forEach((change) => {
-    //             const erf = change.doc.data();
-    //             const id = erf.erfId || change.doc.id;
-
-    //             // 🚀 1. META SURGERY (Your Original Schema)
-    //             const meta = transformToMeta(id, erf);
-    //             const idx = draft.metaEntries.findIndex((m) => m.id === id);
-
-    //             if (idx !== -1) {
-    //               draft.metaEntries[idx] = meta;
-    //             } else {
-    //               draft.metaEntries.push(meta);
-    //             }
-
-    //             // ⚡️ DISK SAVE: Surgical and light
-    //             erfMemory.saveSingleErfMeta(lmPcode, id, meta);
-
-    //             // 🚀 2. GEO SURGERY: Keep the Map Alive
-    //             // We only update the key if it's an add or modify.
-    //             // This ensures the other 4,103 stay in RAM!
-    //             // if (change.type === "added" || change.type === "modified") {
-    //             //   if (erf.geometry || erf.centroid) {
-    //             //     draft.geoEntries[id] = {
-    //             //       centroid: erf.centroid,
-    //             //       bbox: erf.bbox,
-    //             //       geometry:
-    //             //         typeof erf.geometry === "string"
-    //             //           ? JSON.parse(erf.geometry)
-    //             //           : erf.geometry,
-    //             //     };
-    //             //   }
-    //             // } else if (change.type === "removed") {
-    //             //   delete draft.geoEntries[id];
-    //             // }
-    //           });
-
-    //           // 🚀 4. TIMESTAMP SECURE
-    //           erfMemory.saveSyncTimestamp(lmPcode);
+    //           draft.sync = draft.sync || {};
+    //           draft.sync.status = "error";
+    //           draft.sync.lastError = String(error?.message || error);
     //         });
-    //       });
-    //     } catch (error) {
-    //       console.error("❌ [STREAM ERROR]:", error);
-    //     }
+    //       },
+    //     );
 
     //     await cacheEntryRemoved;
     //     unsubscribe();
     //   },
     // }),
+    // //   queryFn: (lmPcode) => ({
+    // //     data: {
+    // //       metaEntries: [],
+    // //       geoEntries: {},
+    // //       sync: {
+    // //         status: "idle", // idle | syncing | ready | error
+    // //         lmPcode,
+    // //         lastSyncAt: 0,
+    // //         firstSnapshotAt: 0,
+    // //       },
+    // //     },
+    // //   }),
+
+    // //   async onCacheEntryAdded(
+    // //     lmPcode,
+    // //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+    // //   ) {
+    // //     if (!lmPcode) return;
+    // //     await cacheDataLoaded;
+
+    // //     let first = true;
+
+    // //     // mark syncing as soon as listener starts
+    // //     updateCachedData((draft) => {
+    // //       if (!draft.metaEntries) draft.metaEntries = [];
+    // //       if (!draft.geoEntries) draft.geoEntries = {};
+    // //       draft.sync = draft.sync || {};
+    // //       draft.sync.status = "syncing";
+    // //       draft.sync.lmPcode = lmPcode;
+    // //     });
+
+    // //     const q = query(
+    // //       collection(db, "ireps_erfs"),
+    // //       where("admin.localMunicipality.pcode", "==", lmPcode),
+    // //     );
+
+    // //     const unsubscribe = onSnapshot(
+    // //       q,
+    // //       (snapshot) => {
+    // //         if (snapshot.docChanges().length === 0) return;
+    // //         updateCachedData((draft) => {
+    // //           if (!draft.geoEntries) draft.geoEntries = {};
+
+    // //           // ✅ first snapshot arrived (initial hydration)
+    // //           if (first) {
+    // //             first = false;
+    // //             draft.sync.status = "ready";
+    // //             draft.sync.firstSnapshotAt = Date.now();
+    // //           }
+
+    // //           // ✅ every snapshot = updated sync time
+    // //           draft.sync.lastSyncAt = Date.now();
+
+    // //           snapshot.docChanges().forEach((change) => {
+    // //             const erf = change.doc.data();
+    // //             const id = erf.erfId || change.doc.id;
+
+    // //             if (change.type === "removed") {
+    // //               const idx = draft.metaEntries.findIndex((m) => m.id === id);
+    // //               if (idx > -1) draft.metaEntries.splice(idx, 1);
+    // //               delete draft.geoEntries[id];
+    // //             } else {
+    // //               const meta = transformToMeta(id, erf);
+    // //               const existingIdx = draft.metaEntries.findIndex(
+    // //                 (m) => m.id === id,
+    // //               );
+    // //               if (existingIdx > -1) draft.metaEntries[existingIdx] = meta;
+    // //               else draft.metaEntries.push(meta);
+
+    // //               if (erf.geometry || erf.centroid) {
+    // //                 draft.geoEntries[id] = {
+    // //                   centroid: erf.centroid,
+    // //                   bbox: erf.bbox,
+    // //                   geometry:
+    // //                     typeof erf.geometry === "string"
+    // //                       ? JSON.parse(erf.geometry)
+    // //                       : erf.geometry,
+    // //                 };
+    // //               }
+    // //             }
+    // //           });
+    // //         });
+    // //       },
+    // //       (error) => {
+    // //         console.error("❌ ERFs snapshot error:", error);
+    // //         updateCachedData((draft) => {
+    // //           draft.sync.status = "error";
+    // //           draft.sync.lastError = String(error?.message || error);
+    // //         });
+    // //       },
+    // //     );
+
+    // //     await cacheEntryRemoved;
+    // //     unsubscribe();
+    // //   },
+    // // }),
+
+    // // getErfsByLmPcode: builder.query({
+    // //   async queryFn(lmPcode) {
+    // //     console.log(`getErfsByLmPcode --queryFn started for ${lmPcode}`);
+    // //     return {
+    // //       data: {
+    // //         metaEntries: [],
+    // //         geoEntries: {},
+    // //         sync: {
+    // //           status: "idle",
+    // //           lmPcode,
+    // //           lastSyncAt: 0,
+    // //           firstSnapshotAt: 0,
+    // //         },
+    // //       },
+    // //     };
+    // //   },
+
+    // //   async onCacheEntryAdded(
+    // //     lmPcode,
+    // //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+    // //   ) {
+    // //     if (!lmPcode) return;
+    // //     let unsubscribe = () => {};
+    // //     console.log(
+    // //       `getErfsByLmPcode --onCacheEntryAdded STARTED for ${lmPcode}`,
+    // //     );
+
+    // //     try {
+    // //       await cacheDataLoaded;
+
+    // //       const q = query(
+    // //         collection(db, "ireps_erfs"),
+    // //         where("admin.localMunicipality.pcode", "==", lmPcode),
+    // //         orderBy("metadata.updatedAt", "desc"),
+    // //       );
+
+    // //       unsubscribe = onSnapshot(q, (snapshot) => {
+    // //         // 🛡️ CPU PROTECTION: Only wake up if there's actual movement
+    // //         if (snapshot.docChanges().length === 0) return;
+
+    // //         updateCachedData((draft) => {
+    // //           // 🛡️ REHYDRATION SHIELD: Ensure geoEntries exists in the current draft
+    // //           if (!draft.geoEntries) draft.geoEntries = {};
+
+    // //           snapshot.docChanges().forEach((change) => {
+    // //             const erf = change.doc.data();
+    // //             const id = erf.erfId || change.doc.id;
+
+    // //             if (change.type === "removed") {
+    // //               const idx = draft.metaEntries.findIndex((m) => m.id === id);
+    // //               if (idx > -1) draft.metaEntries.splice(idx, 1);
+    // //               delete draft.geoEntries[id];
+    // //               // ... inside your forEach loop
+    // //             } else {
+    // //               // 🎯 1. ATOMIC MERGE for the List (Array)
+    // //               const meta = transformToMeta(id, erf);
+    // //               const existingIdx = draft.metaEntries.findIndex(
+    // //                 (m) => m.id === id,
+    // //               );
+
+    // //               if (existingIdx > -1) {
+    // //                 draft.metaEntries[existingIdx] = meta;
+    // //               } else {
+    // //                 draft.metaEntries.push(meta);
+    // //               }
+
+    // //               // 🎯 2. GEOMETRY STORAGE for the Map (Object)
+    // //               if (erf.geometry || erf.centroid) {
+    // //                 // ✅ FIX: Use geoEntries (The Object), NOT metaEntries (The Array)
+    // //                 draft.geoEntries[id] = {
+    // //                   centroid: erf.centroid,
+    // //                   bbox: erf.bbox,
+    // //                   geometry:
+    // //                     typeof erf.geometry === "string"
+    // //                       ? JSON.parse(erf.geometry)
+    // //                       : erf.geometry,
+    // //                 };
+    // //               }
+    // //             }
+    // //           });
+    // //         });
+    // //       });
+    // //     } catch (e) {
+    // //       console.error("❌ [ERF_VAULT_STREAM_ERROR]:", e);
+    // //     }
+    // //     console.log(
+    // //       `getErfsByLmPcode --onCacheEntryAdded ENDED for ${lmPcode}`,
+    // //     );
+    // //     await cacheEntryRemoved;
+    // //     unsubscribe();
+    // //   },
+    // // }),
 
     getErfsByCountryCode: builder.query({
       async queryFn() {
@@ -1128,6 +574,7 @@ export const erfsApi = createApi({
           const q = query(
             collection(db, "ireps_erfs"),
             where("admin.country.pcode", "==", id),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {

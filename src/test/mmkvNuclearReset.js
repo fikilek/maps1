@@ -1,63 +1,74 @@
 import { useRouter } from "expo-router";
+import { useRef } from "react";
 import { Alert } from "react-native";
 import { Button } from "react-native-paper";
 import { useDispatch } from "react-redux";
+
 import { useGeo } from "../context/GeoContext";
+import { reduxKV } from "../redux/mmkv";
+import { persistor } from "../redux/store";
+
 import { astsApi } from "../redux/astsApi";
+import { authApi } from "../redux/authApi";
 import { erfsApi } from "../redux/erfsApi";
+import { geoApi } from "../redux/geoApi";
 import { premisesApi } from "../redux/premisesApi";
-import { erfMemory } from "../storage/erfMemory";
-import { geoMemory } from "../storage/geoMemory";
-import { premiseMemory } from "../storage/premiseMemory";
+import { salesApi } from "../redux/salesApi";
+import { settingsApi } from "../redux/settingsApi";
+import { spApi } from "../redux/spApi";
+import { trnsApi } from "../redux/trnsApi";
+import { usersApi } from "../redux/usersApi";
 
 export const HandleNuclearReset = () => {
-  const { updateGeo } = useGeo(); // 🎯 Swap setGeoState for updateGeo
+  const { resetGeo } = useGeo();
   const router = useRouter();
   const dispatch = useDispatch();
+  const wipingRef = useRef(false);
 
-  const handleNuclearReset = () => {
-    Alert.alert(
-      "☢️ Nuclear Reset",
-      "This will permanently delete ALL local data. Proceed?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "WIPE EVERYTHING",
-          style: "destructive",
-          onPress: () => {
-            console.log("☢️ [NUCLEAR]: Initiating wipe...");
+  const doWipe = async () => {
+    if (wipingRef.current) return;
+    wipingRef.current = true;
 
-            // 1. CLEAR REDUX CACHE (RAM)
-            dispatch(erfsApi.util.resetApiState());
-            dispatch(premisesApi.util.resetApiState());
-            dispatch(astsApi.util.resetApiState());
+    try {
+      console.log("☢️ [FRESH-SLATE]: Starting wipe...");
 
-            // 2. CLEAR CONTEXT (Using the Doctrine)
-            // We use updateGeo with nulls. This ensures the flight signal
-            // clears and all cascade rules in the provider run.
-            updateGeo({
-              selectedLm: null,
-              selectedWard: null,
-              selectedErf: null,
-              selectedPremise: null,
-              selectedMeter: null,
-              lastSelectionType: null, // 🛡️ Stops the Pilot from trying to fly
-            });
+      // 🧠 Stop persistence while wiping
+      persistor.pause();
+      await persistor.flush();
 
-            // 3. WIPE MMKV (DISK)
-            erfMemory.clearAll();
-            geoMemory.clearAll();
-            premiseMemory.clearAll();
+      // 🔥 Clear RTK Query RAM
+      dispatch(erfsApi.util.resetApiState());
+      dispatch(premisesApi.util.resetApiState());
+      dispatch(astsApi.util.resetApiState());
+      dispatch(trnsApi.util.resetApiState());
+      dispatch(usersApi.util.resetApiState());
+      dispatch(salesApi.util.resetApiState());
+      dispatch(settingsApi.util.resetApiState());
+      dispatch(spApi.util.resetApiState());
+      dispatch(geoApi.util.resetApiState());
+      dispatch(authApi.util.resetApiState());
 
-            console.log("✅ [NUCLEAR]: Disk and RAM zeroed out.");
+      // 🌍 Reset Geo Context
+      resetGeo();
 
-            // 4. EJECT & REBOOT
-            // router.replace("/") is good, but sometimes a full refresh is safer
-            router.replace("/");
-          },
-        },
-      ],
-    );
+      // 💾 Remove persisted Redux state
+      await persistor.purge();
+
+      // 💣 HARD WIPE MMKV (SAFE in your app)
+      reduxKV.clearAll();
+
+      // ▶️ Resume persistence
+      persistor.persist();
+
+      console.log("✅ [FRESH-SLATE]: Completed.");
+
+      router.replace("/");
+    } catch (e) {
+      console.error("❌ Reset failed:", e);
+      Alert.alert("Reset failed", String(e?.message || e));
+    } finally {
+      wipingRef.current = false;
+    }
   };
 
   return (
@@ -65,10 +76,19 @@ export const HandleNuclearReset = () => {
       mode="contained"
       buttonColor="#dc2626"
       icon="trash-can"
-      onPress={handleNuclearReset}
+      onPress={() =>
+        Alert.alert(
+          "☢️ Fresh Slate Reset",
+          "This will wipe ALL local data. Proceed?",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "WIPE EVERYTHING", style: "destructive", onPress: doWipe },
+          ],
+        )
+      }
       style={{ margin: 10 }}
     >
-      Nuclear Reset (Wipe MMKV)
+      Fresh Slate Reset
     </Button>
   );
 };

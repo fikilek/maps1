@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import LmPremiseReportHeader from "./components/LmPremiseReportHeader";
+import LmPremiseReportHeader from "../../../../components/LmPremiseReportHeader";
 
 export default function NoAccessReport() {
   // 🏛️ DYNAMIC SCOPE: Pull the current active workbase from the profile
@@ -19,10 +19,9 @@ export default function NoAccessReport() {
   const lmName = profile?.access?.activeWorkbase?.name || "Municipality";
 
   // 🛰️ API FETCH: Only runs if lmPcode exists
-  const { data: trns = [], isLoading } = useGetTrnsByLmPcodeQuery(
-    { lmPcode },
-    { skip: !lmPcode },
-  );
+  const { data: trns = [], isLoading } = useGetTrnsByLmPcodeQuery(lmPcode, {
+    skip: !lmPcode,
+  });
 
   const [activeTab, setActiveTab] = useState("LIST");
 
@@ -32,7 +31,7 @@ export default function NoAccessReport() {
       .filter((t) => t?.accessData?.access?.hasAccess === "no")
       .map((t) => ({
         id: t?.id,
-        erfNo: t?.accessData?.premise?.erfNo || "N/A",
+        erfNo: t?.accessData?.erfNo || "N/A",
         address: t?.accessData?.premise?.address || "Unknown Adr",
         reason: t?.accessData?.access?.reason || "No reason provided",
         agent: t?.accessData?.metadata?.updated?.byUser || "Field Agent",

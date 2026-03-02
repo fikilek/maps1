@@ -90,7 +90,7 @@ const PremiseCard = memo(
     // 🏛️ THE DUPLICATE TRIGGER
     const handleLongPressDuplicate = () => {
       console.log(`handleLongPressDuplicate pressed`);
-      Alert.aleprt(
+      Alert.alert(
         "Duplicate Unit",
         "This will create a new Flat Unit using this unit as a template. All data except the Unit Number, No Access and Services will be copied.",
         [

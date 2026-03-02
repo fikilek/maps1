@@ -5,10 +5,10 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
-  orderBy,
   query,
   where,
 } from "firebase/firestore";
+import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
 import { transformGeoData } from "../utils/geo/parseGeometry";
 import { authApi } from "./authApi";
@@ -21,6 +21,11 @@ import { fsError, fsLog } from "./firestoreLogger";
 export const geoApi = createApi({
   reducerPath: "geoApi",
   baseQuery: fakeBaseQuery(),
+  extractRehydrationInfo(action, { reducerPath }) {
+    if (action.type === REHYDRATE) {
+      return action.payload?.[reducerPath];
+    }
+  },
   // 🔥 Keep data in cache for 24 hours (86400 seconds)
   keepUnusedDataFor: 86400,
   tagTypes: [
@@ -354,27 +359,108 @@ export const geoApi = createApi({
     }),
 
     /* =========================
-       GET WARDS BY LOCAL MUNICIPALITY
-    ========================= */
+   GET WARDS BY LOCAL MUNICIPALITY (OBJECT-STANDARD)
+========================= */
+
+    // getWardsByLocalMunicipality: builder.query({
+    //   queryFn: (lmPcode) => ({
+    //     data: {
+    //       entries: [], // full ward docs (WITH geometry)
+    //       sync: {
+    //         status: "idle", // idle | syncing | ready | error
+    //         lmPcode,
+    //         firstSnapshotAt: 0,
+    //         lastSyncAt: 0,
+    //         lastError: null,
+    //       },
+    //     },
+    //   }),
+
+    //   async onCacheEntryAdded(
+    //     lmPcode,
+    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+    //   ) {
+    //     if (!lmPcode) return;
+    //     await cacheDataLoaded;
+
+    //     let first = true;
+
+    //     updateCachedData((draft) => {
+    //       draft.sync.status = "syncing";
+    //       draft.sync.lmPcode = lmPcode;
+    //       draft.sync.lastError = null;
+    //     });
+
+    //     const q = query(
+    //       collection(db, "wards"),
+    //       where("parents.localMunicipalityId", "==", lmPcode),
+    //     );
+
+    //     const unsubscribe = onSnapshot(
+    //       q,
+    //       (snap) => {
+    //         updateCachedData((draft) => {
+    //           if (first) {
+    //             first = false;
+    //             draft.sync.status = "ready";
+    //             draft.sync.firstSnapshotAt = Date.now();
+    //           }
+    //           draft.sync.lastSyncAt = Date.now();
+
+    //           // simplest + stable: rebuild list each snapshot
+    //           draft.entries = snap.docs
+    //             .map((d) => transformGeoData(d))
+    //             .sort((a, b) => (a.code ?? 0) - (b.code ?? 0));
+    //         });
+    //       },
+    //       (error) => {
+    //         console.error("❌ WARDS snapshot error:", error);
+    //         updateCachedData((draft) => {
+    //           draft.sync.status = "error";
+    //           draft.sync.lastError = String(error?.message || error);
+    //         });
+    //       },
+    //     );
+
+    //     await cacheEntryRemoved;
+    //     unsubscribe();
+    //   },
+    // }),
+
     getWardsByLocalMunicipality: builder.query({
-      async queryFn(lmPcode) {
-        // console.log(`getWardsByLocalMunicipality ----lmPcode`, lmPcode);
-        if (!lmPcode) return { data: null };
-        try {
-          const q = query(
-            collection(db, "wards"),
-            where("parents.localMunicipalityId", "==", lmPcode),
-            orderBy("code", "asc"),
-          );
-          const snap = await getDocs(q);
-          const wards = snap.docs.map((d) => transformGeoData(d));
-          // console.log(`getWardsByLocalMunicipality ----wards`, wards);
-          return { data: wards };
-        } catch (error) {
-          return { error };
-        }
+      queryFn: (lmPcode) => ({ data: [] }),
+
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        if (!lmPcode) return;
+        await cacheDataLoaded;
+
+        const q = query(
+          collection(db, "wards"),
+          where("parents.localMunicipalityId", "==", lmPcode),
+        );
+
+        const unsubscribe = onSnapshot(
+          q,
+          (snap) => {
+            console.log("✅ wards snap size:", snap.size, "lmPcode:", lmPcode);
+            const wards = snap.docs
+              .map((d) => transformGeoData(d))
+              .sort((a, b) => (a.code ?? 0) - (b.code ?? 0));
+            updateCachedData(() => wards);
+          },
+          (error) => {
+            console.error("❌ WARDS onSnapshot error:", error);
+          },
+        );
+
+        await cacheEntryRemoved;
+        unsubscribe();
       },
     }),
+
     /* =========================
        GET WARDS BY LOCAL MUNICIPALITY
     ========================= */

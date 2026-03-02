@@ -26,6 +26,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function UserStatsReport() {
   const { user, activeWorkbase } = useAuth();
+  const lmPcode = activeWorkbase?.id;
 
   // 🛰️ State Management
   const [filterMode, setFilterMode] = useState("THIS MONTH");
@@ -33,9 +34,7 @@ export default function UserStatsReport() {
   const [tempDate, setTempDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   // 🛰️ Data Fetching
-  const { data: allTrns = [], isLoading } = useGetTrnsByLmPcodeQuery({
-    lmPcode: activeWorkbase?.id || "ZA1048",
-  });
+  const { data: allTrns = [], isLoading } = useGetTrnsByLmPcodeQuery(lmPcode);
 
   const productionData = useMemo(() => {
     const now = new Date();

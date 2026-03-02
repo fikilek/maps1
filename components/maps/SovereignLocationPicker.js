@@ -211,7 +211,7 @@ const SovereignLocationPicker = ({
                   <View style={styles.activeMarker}>
                     <MaterialCommunityIcons
                       name={icon}
-                      size={48}
+                      size={58}
                       color="#0f172a"
                     />
                     <View style={styles.markerShadow} />

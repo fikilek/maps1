@@ -17,6 +17,7 @@ import { spApi } from "./spApi";
 import { trnsApi } from "./trnsApi";
 import { usersApi } from "./usersApi";
 // import uiReducer from "./uiSlice";
+import newTrnsReducer from "./newTrnsSlice";
 
 /* =====================================================
    ROOT REDUCER
@@ -26,7 +27,7 @@ const rootReducer = combineReducers({
   [geoApi.reducerPath]: geoApi.reducer,
   [authApi.reducerPath]: authApi.reducer,
   [usersApi.reducerPath]: usersApi.reducer,
-  [spApi.reducerPath]: spApi.reducer, // ✅ ADD THIS
+  [spApi.reducerPath]: spApi.reducer,
   [erfsApi.reducerPath]: erfsApi.reducer,
   [premisesApi.reducerPath]: premisesApi.reducer,
   [trnsApi.reducerPath]: trnsApi.reducer,
@@ -35,6 +36,7 @@ const rootReducer = combineReducers({
   [salesApi.reducerPath]: salesApi.reducer,
   // App-level slices (example)
   offline: offlineReducer,
+  newTrns: newTrnsReducer,
   // ui: uiReducer,
 });
 
@@ -43,23 +45,23 @@ const rootReducer = combineReducers({
 ===================================================== */
 const persistConfig = {
   key: "root",
-  version: 1,
+  version: 2, // <-- bump this
   storage: reduxStorage,
-
-  // 👇 Persist ONLY non-RTK Query slices
-  whitelist: ["offline", geoApi],
-
-  blacklist: [
-    // geoApi.reducerPath,
-    authApi.reducerPath,
+  whitelist: [
+    "offline",
     usersApi.reducerPath,
     spApi.reducerPath,
     erfsApi.reducerPath,
-    premisesApi.reducerPath,
     trnsApi.reducerPath,
     settingsApi.reducerPath,
     astsApi.reducerPath,
+  ],
+  blacklist: [
+    authApi.reducerPath,
+    geoApi.reducerPath,
+    premisesApi.reducerPath,
     salesApi.reducerPath,
+    "newTrns",
   ],
 };
 
@@ -76,7 +78,8 @@ export const store = configureStore({
 
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: false, // required for redux-persist
+      serializableCheck: false,
+      immutableCheck: false,
     }).concat(
       geoApi.middleware,
       authApi.middleware,

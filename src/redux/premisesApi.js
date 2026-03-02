@@ -3,238 +3,243 @@ import {
   collection,
   doc,
   onSnapshot,
+  orderBy,
   query,
-  serverTimestamp,
   setDoc,
   where,
 } from "firebase/firestore";
+import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
-import { erfMemory } from "../storage/erfMemory";
-import { premiseMemory } from "../storage/premiseMemory";
 
 export const premisesApi = createApi({
   reducerPath: "premisesApi",
   baseQuery: fakeBaseQuery(),
+  extractRehydrationInfo(action, { reducerPath }) {
+    if (action.type === REHYDRATE) {
+      return action.payload?.[reducerPath];
+    }
+  },
   endpoints: (builder) => ({
     getPremisesByLmPcode: builder.query({
-      async queryFn({ lmPcode }) {
-        // ✅ Correct: Uses Object
-        return { data: [] };
-      },
+      queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
-        arg,
+        lmPcode,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
         try {
           await cacheDataLoaded;
-          const { lmPcode } = arg; // ✅ Extract from object
+
           const q = query(
             collection(db, "premises"),
             where("parents.lmId", "==", lmPcode),
+            orderBy("metadata.updated.at", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
-            const rawPremises = snapshot.docs.map((doc) => ({
-              id: doc.id,
-              ...doc.data(),
-            }));
             updateCachedData((draft) => {
-              return rawPremises;
+              // 🎯 1. INITIAL SYNC: Direct mapping
+              if (snapshot.docChanges().length === snapshot.docs.length) {
+                return snapshot.docs.map((doc) => ({
+                  id: doc.id,
+                  ...doc.data(),
+                }));
+              }
+
+              // 🎯 2. SURGICAL UPDATES: Only care about the Premise itself
+              snapshot.docChanges().forEach((change) => {
+                const p = { id: change.doc.id, ...change.doc.data() };
+                const index = draft.findIndex((item) => item.id === p.id);
+
+                if (change.type === "added") {
+                  if (index === -1) draft.unshift(p);
+                } else if (change.type === "modified") {
+                  if (index > -1) draft[index] = p;
+                } else if (change.type === "removed") {
+                  if (index > -1) draft.splice(index, 1);
+                }
+              });
             });
-            if (rawPremises.length > 0) {
-              premiseMemory.saveLmList(lmPcode, rawPremises);
-            }
+            // ✂️ THE PULSE ERF SECTION IS REMOVED
           });
         } catch (e) {
-          console.error(e);
+          console.error("❌ [PREMISE_STREAM_ERROR]:", e);
         }
         await cacheEntryRemoved;
         unsubscribe();
       },
     }),
-
-    syncPremise: builder.mutation({
-      async queryFn(premiseData) {
-        try {
-          console.log(
-            `📡 [CLOUD]: Attempting to sync premise ${premiseData.id}`,
-          );
-
-          // 1. Reference the doc using the ID we generated in the form
-          const docRef = doc(db, "premises", premiseData.id);
-
-          // 2. Upload the full rich object + a server timestamp
-          await setDoc(
-            docRef,
-            {
-              ...premiseData,
-              _syncInfo: {
-                syncedAt: serverTimestamp(),
-                status: "SYNCED",
-              },
-            },
-            { merge: true },
-          );
-          console.log(
-            `📡 [CLOUD]: Succesfully synced premise ${premiseData.id}`,
-          );
-          return { data: "SUCCESS" };
-        } catch (error) {
-          console.error("❌ [CLOUD SYNC FAILED]:", error);
-          return { error: error.message };
-        }
-      },
-    }),
-
     addPremise: builder.mutation({
       async queryFn(newPremise) {
         try {
-          const docRef = doc(db, "premises", newPremise.id);
-
-          // 🎯 CRITICAL: We use { merge: true } to ensure we don't wipe
-          // out existing fields (like services) during a Discovery update.
-          await setDoc(docRef, newPremise, { merge: true });
-
+          // Use setDoc to ensure the ID we generated in the form is the Firestore ID
+          await setDoc(doc(db, "premises", newPremise.id), newPremise);
           return { data: newPremise };
         } catch (error) {
           return { error: error.message };
         }
       },
-
-      async onQueryStarted(newPremise, { dispatch, queryFulfilled, getState }) {
-        const { erfId, id: premiseId, metadata } = newPremise;
-        const lmPcode = metadata?.lmPcode;
-        const queryArg = { lmPcode };
+      async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
+        // 🎯 Ensure these strings are clean
+        const lmPcode =
+          newPremise.parents?.lmId || newPremise.metadata?.lmPcode;
+        const erfId = newPremise.erfId;
+        const premiseId = newPremise.id;
 
         try {
-          // 1. 💾 DISK: Premise Vault (Optimistic Update)
-          const currentDiskPrems = premiseMemory.getLmList(lmPcode) || [];
-          const existsDisk = currentDiskPrems.find((p) => p.id === premiseId);
-
-          const updatedDiskList = existsDisk
-            ? currentDiskPrems.map((p) => (p.id === premiseId ? newPremise : p))
-            : [...currentDiskPrems, newPremise];
-
-          premiseMemory.saveLmList(lmPcode, updatedDiskList);
-
-          // 2. 💉 RAM PATCH: Premise List (Optimistic Update)
+          // 🎯 OPTIMISTIC PREMISE
           dispatch(
             premisesApi.util.updateQueryData(
               "getPremisesByLmPcode",
-              queryArg,
+              lmPcode,
               (draft) => {
-                if (Array.isArray(draft)) {
-                  const index = draft.findIndex((p) => p.id === premiseId);
-                  if (index !== -1) {
-                    // 🎯 UPDATE: Merge existing data with new data
-                    draft[index] = { ...draft[index], ...newPremise };
-                  } else {
-                    // 🎯 ADD: Insert new record
-                    draft.push(newPremise);
-                  }
-                }
+                // Ensure we aren't pushing into a non-array rehydrated state
+                if (!Array.isArray(draft)) return [newPremise];
+                draft.push(newPremise);
               },
             ),
           );
 
-          // 3. 💉 RAM PATCH: Erf Link
+          // 🎯 OPTIMISTIC ERF COUNT
           const { erfsApi } = require("./erfsApi");
           dispatch(
             erfsApi.util.updateQueryData(
               "getErfsByLmPcode",
-              queryArg,
+              lmPcode,
               (draft) => {
                 const targetErf = draft?.metaEntries?.find(
                   (e) => e.id === erfId,
                 );
                 if (targetErf) {
                   if (!targetErf.premises) targetErf.premises = [];
-                  if (!targetErf.premises.includes(premiseId)) {
-                    targetErf.premises.push(premiseId);
-                  }
+                  targetErf.premises.push(premiseId);
                 }
               },
             ),
           );
 
-          // 🎯 4. 📍 META-ONLY DISK SYNC (Respecting Domain Isolation)
-          // 🎯 4. SAFE DISK SYNC
           await queryFulfilled;
-          const state = getState();
-          const result =
-            erfsApi.endpoints.getErfsByLmPcode.select(queryArg)(state);
-          const latestErfRam = result?.data;
-
-          // 🛡️ THE SOVEREIGN GUARD: Only save if RAM is actually populated (e.g., > 1 Erf)
-          if (latestErfRam?.metaEntries?.length > 1) {
-            const metaUpdate = {
-              metaEntries: [...latestErfRam.metaEntries],
-              wards: latestErfRam.wards ? [...latestErfRam.wards] : [],
-              // 🚫 WE DO NOT TOUCH GEO HERE
-            };
-            erfMemory.saveErfsMetaList(lmPcode, metaUpdate);
-            console.log(
-              `✅ [STABLE SYNC]: Premise linked. No refetch triggered.`,
-            );
-          }
         } catch (err) {
-          console.error("❌ [OPTIMISTIC UPDATE FAILED]:", err);
+          console.error("❌ [OPTIMISTIC_FAIL]:", err);
         }
       },
     }),
+
+    // addPremise: builder.mutation({
+    //   async queryFn(newPremise) {
+    //     try {
+    //       const docRef = doc(db, "premises", newPremise.id);
+    //       await setDoc(docRef, newPremise, { merge: true });
+    //       return { data: newPremise };
+    //     } catch (error) {
+    //       return { error: error.message };
+    //     }
+    //   },
+    //   async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
+    //     const { erfId, id: premiseId, metadata } = newPremise;
+    //     const lmPcode = metadata?.lmPcode;
+
+    //     try {
+    //       // 🎯 1. RAM: Premises List (Optimistic)
+    //       dispatch(
+    //         premisesApi.util.updateQueryData(
+    //           "getPremisesByLmPcode",
+    //           lmPcode,
+    //           (draft) => {
+    //             if (!Array.isArray(draft)) return;
+    //             const index = draft.findIndex((p) => p.id === premiseId);
+    //             if (index > -1) {
+    //               draft[index] = { ...draft[index], ...newPremise };
+    //             } else {
+    //               draft.push(newPremise);
+    //             }
+    //           },
+    //         ),
+    //       );
+
+    //       // 🎯 2. RAM: Erf Pulse (Optimistic)
+    //       const { erfsApi } = require("./erfsApi");
+    //       dispatch(
+    //         erfsApi.util.updateQueryData(
+    //           "getErfsByLmPcode",
+    //           lmPcode,
+    //           (draft) => {
+    //             const targetErf = draft?.metaEntries?.find(
+    //               (e) => e.id === erfId,
+    //             );
+    //             if (targetErf) {
+    //               if (!targetErf.premises) targetErf.premises = [];
+    //               if (!targetErf.premises.includes(premiseId)) {
+    //                 targetErf.premises.push(premiseId);
+    //               }
+    //               targetErf.metadata = {
+    //                 ...targetErf.metadata,
+    //                 updatedAt: new Date().toISOString(),
+    //                 updatedBy: metadata?.updated?.byUser || "System",
+    //               };
+    //             }
+    //           },
+    //         ),
+    //       );
+
+    //       await queryFulfilled;
+    //     } catch (err) {
+    //       console.error("❌ [OPTIMISTIC_FAIL]:", err);
+    //     }
+    //   },
+    // }),
 
     updatePremise: builder.mutation({
       async queryFn(updatedPremise) {
         try {
           const docRef = doc(db, "premises", updatedPremise.id);
-          // 🛡️ Use merge: true to protect existing fields like 'services' or 'naCount'
           await setDoc(docRef, updatedPremise, { merge: true });
           return { data: updatedPremise };
         } catch (error) {
           return { error: error.message };
         }
       },
-
-      async onQueryStarted(
-        updatedPremise,
-        { dispatch, queryFulfilled, getState },
-      ) {
-        const { id: premiseId, metadata } = updatedPremise;
+      async onQueryStarted(updatedPremise, { dispatch, queryFulfilled }) {
+        const { id: premiseId, erfId, metadata } = updatedPremise;
         const lmPcode = metadata?.lmPcode;
-        const queryArg = { lmPcode };
 
         try {
-          // 1. 💾 DISK PATCH (Optimistic)
-          const currentDiskPrems = premiseMemory.getLmList(lmPcode) || [];
-          const updatedDiskList = currentDiskPrems.map((p) =>
-            p.id === premiseId ? { ...p, ...updatedPremise } : p,
-          );
-          premiseMemory.saveLmList(lmPcode, updatedDiskList);
-
-          // 2. 💉 RAM PATCH (Optimistic)
           dispatch(
             premisesApi.util.updateQueryData(
               "getPremisesByLmPcode",
-              queryArg,
+              lmPcode,
               (draft) => {
                 const index = draft.findIndex((p) => p.id === premiseId);
                 if (index !== -1) {
-                  // 🎯 Merge the update into the existing record in RAM
                   draft[index] = { ...draft[index], ...updatedPremise };
                 }
               },
             ),
           );
 
-          // 3. 🏁 WAIT FOR CLOUD CONFIRMATION
+          if (erfId) {
+            const { erfsApi } = require("./erfsApi");
+            dispatch(
+              erfsApi.util.updateQueryData(
+                "getErfsByLmPcode",
+                lmPcode,
+                (draft) => {
+                  const targetErf = draft?.metaEntries?.find(
+                    (e) => e.id === erfId,
+                  );
+                  if (targetErf) {
+                    targetErf.metadata = {
+                      ...targetErf.metadata,
+                      updatedAt: new Date().toISOString(),
+                    };
+                  }
+                },
+              ),
+            );
+          }
           await queryFulfilled;
-          console.log(
-            `✅ [CLOUD SYNC]: Premise ${premiseId} updated successfully.`,
-          );
         } catch (err) {
-          console.error("❌ [UPDATE FAILED]:", err);
-          // 🛡️ Note: In a production "Nuclear" fail, you would trigger a refetch here
+          console.error("❌ [UPDATE_FAIL]:", err);
         }
       },
     }),
@@ -280,7 +285,6 @@ export const premisesApi = createApi({
 export const {
   useGetPremisesByLmPcodeQuery,
   useGetPremisesByCountryCodeQuery,
-  useSyncPremiseMutation, // The one for raw syncing
   useAddPremiseMutation, // 🎯 THE SMART ONE (Change your Form to use this!)
   useUpdatePremiseMutation,
 } = premisesApi;

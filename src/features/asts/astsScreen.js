@@ -4,19 +4,20 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 // 🎯 THE SOVEREIGN IMPORTS
 import { useAuth } from "../../../src/hooks/useAuth"; // ⬅️ Added for stability
-import { useGetAstsByLmPcodeQuery } from "../../../src/redux/astsApi";
+import { useWarehouse } from "../../context/WarehouseContext";
 import AstItem from "./astItem";
 
 export default function AstsScreen() {
   // 🛡️ THE FIX: Use activeWorkbase so the list is NEVER blank
   const { activeWorkbase } = useAuth();
   const lmPcode = activeWorkbase?.id;
-
-  const {
-    data: asts,
-    isLoading,
-    isError,
-  } = useGetAstsByLmPcodeQuery({ lmPcode }, { skip: !lmPcode });
+  const { filtered, loading: isLoading, isError } = useWarehouse(); // 👈 Ensure warehouse context is initialized
+  const asts = filtered.meters || [];
+  // const {
+  //   data: asts,
+  //   isLoading,
+  //   isError,
+  // } = useGetAstsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
 
   if (isLoading) {
     return (

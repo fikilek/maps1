@@ -66,7 +66,7 @@ export default function ErfDetailScreen() {
       router.push({
         pathname: "/(tabs)/premises/form",
         params: {
-          premiseId: p.id,
+          premiseId: p?.id,
           action: JSON.stringify({ access: "yes", meterType: "" }),
         },
       });
@@ -98,8 +98,8 @@ export default function ErfDetailScreen() {
       router.push({
         pathname: "/erfs/form",
         params: {
-          id: p.erfId,
-          duplicateId: p.id, // 🎯 The "DNA" source for the new record
+          id: p?.erfId,
+          duplicateId: p?.id, // 🎯 The "DNA" source for the new record
         },
       });
     },

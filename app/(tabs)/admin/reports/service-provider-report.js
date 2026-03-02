@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import LmPremiseReportHeader from "./components/LmPremiseReportHeader";
+import LmPremiseReportHeader from "../../../../components/LmPremiseReportHeader";
 
 export default function ServiceProviderReport() {
   const [activeTab, setActiveTab] = useState("LIST");

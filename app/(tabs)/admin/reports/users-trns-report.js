@@ -13,8 +13,8 @@ import {
 } from "react-native";
 import { Divider, Surface, Text } from "react-native-paper";
 import DateRangeModal from "../../../../components/DateRangeModal";
-import GraphsView from "./components/GraphsView";
-import UserTrnsReportHeader from "./components/UserTrnsReportHeader";
+import GraphsView from "../../../../components/GraphsView";
+import UserTrnsReportHeader from "../../../../components/UserTrnsReportHeader";
 
 export default function UsersTrnsReport() {
   const country = { id: "ZA", name: "South Africa" };

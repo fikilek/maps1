@@ -136,10 +136,6 @@ export default function FormMeterDiscovery() {
   // console.log(`handleSubmitDiscovery --accessInitValues`, accessInitValues);
 
   const handleSubmitDiscovery = async (values) => {
-    console.log(
-      `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
-      values?.ast?.normalisation?.actionTaken,
-    );
     if (!premise?.id) {
       Alert.alert("Error", "Premise data not found.");
       return;
@@ -189,12 +185,6 @@ export default function FormMeterDiscovery() {
       );
 
       // --- PHASE 3: DISPATCH ---
-
-      console.log(`handleSubmitDiscovery --cleanPayload`, cleanPayload);
-      console.log(
-        `handleSubmitDiscovery --cleanPayload?.ast?.normalisation?.actionTaken`,
-        cleanPayload?.ast?.normalisation?.actionTaken,
-      );
       await addTrn(cleanPayload).unwrap();
       setShowSuccess(true);
       setTimeout(() => {
@@ -637,12 +627,12 @@ export default function FormMeterDiscovery() {
           //   `handleSubmitDiscovery values`,
           //   JSON.stringify(values, null, 2),
           // );
-          console.log(` `);
-          console.log(`handleSubmitDiscovery --values`, values);
-          console.log(
-            `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
-            values?.ast?.normalisation?.actionTaken,
-          );
+          // console.log(` `);
+          // console.log(`handleSubmitDiscovery --values`, values);
+          // console.log(
+          //   `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
+          //   values?.ast?.normalisation?.actionTaken,
+          // );
           // console.log(`values`, JSON.stringify(values, null, 2));
 
           // console.log(

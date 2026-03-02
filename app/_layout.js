@@ -5,13 +5,15 @@ import { PaperProvider } from "react-native-paper";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Provider } from "react-redux";
 
+import { PersistGate } from "redux-persist/integration/react";
+import { DiscoveryProvider } from "../src/context/DiscoveryContext";
 import { GeoProvider } from "../src/context/GeoContext";
 import { MapProvider } from "../src/context/MapContext";
 import { WarehouseProvider } from "../src/context/WarehouseContext";
 import { auth } from "../src/firebase";
 import { useAuth } from "../src/hooks/useAuth";
 import AuthBootstrap from "../src/navigation/AuthBootstrap";
-import { store } from "../src/redux/store";
+import { persistor, store } from "../src/redux/store";
 
 // ... existing imports ...
 
@@ -162,130 +164,31 @@ const AuthGate = memo(function AuthGate() {
   );
 });
 
-// const AuthGate = memo(function AuthGate() {
-//   // console.log(`AuthGate --mounting`);
-//   const { user: reduxUser, status, isLoading: reduxLoading, isADM } = useAuth();
-//   // console.log(`AuthGate --status`, status);
-//   // console.log(`AuthGate --isADM`, isADM);
-
-//   const segments = useSegments();
-//   const router = useRouter();
-
-//   const user = reduxUser || auth.currentUser;
-//   const isLoading = reduxLoading && !user;
-
-//   const [isLayoutReady, setIsLayoutReady] = useState(false);
-
-//   useEffect(() => {
-//     setIsLayoutReady(true);
-//   }, []);
-
-//   useEffect(() => {
-//     // console.log(`AuthGate --useEffect ---onboarding`);
-
-//     if (!isLayoutReady || isLoading) return;
-
-//     const rootSegment = segments[0];
-//     const isAtWelcome = segments.length === 0;
-//     const inAuthGroup = rootSegment === "(auth)";
-//     const inOnboardingGroup = rootSegment === "onboarding";
-
-//     if (!user) {
-//       if (!inAuthGroup && !isAtWelcome) {
-//         router.replace("/signin");
-//       }
-//       return;
-//     }
-
-//     switch (status) {
-//       case "AWAITING_INITIAL_SIGNUP":
-//         if (isADM) {
-//           // 🛡️ ADM TACTICAL STRIKE: Specialized Conformation
-//           if (rootSegment !== "onboarding" || segments[1] !== "conform-admin") {
-//             router.replace("/onboarding/confirm-admin");
-//           }
-//         } else {
-//           // 📋 STANDARD MISSION: MNG/SPV/FWR Profile Completion
-//           if (
-//             rootSegment !== "onboarding" ||
-//             segments[1] !== "complete-invited-profile"
-//           ) {
-//             router.replace("/onboarding/complete-invited-profile");
-//           }
-//         }
-//         break;
-
-//       case "COMPLETED":
-//         if (inAuthGroup || inOnboardingGroup || isAtWelcome) {
-//           router.replace("/(tabs)/erfs");
-//         }
-//         break;
-
-//       default:
-//         // Syncing...
-//         break;
-//     }
-
-//     // console.log(`AuthGate --useEffect ---going to switch stmt`);
-//     // switch (status) {
-//     //   case "AWAITING_INITIAL_SIGNUP":
-//     //     if (
-//     //       rootSegment !== "onboarding" ||
-//     //       segments[1] !== "complete-invited-profile"
-//     //     ) {
-//     //       // console.log(`AuthGate --/onboarding/AWAITING_INITIAL_SIGNUP`);
-//     //       router.replace("/onboarding/complete-invited-profile");
-//     //     }
-//     //     break;
-
-//     //   case "COMPLETED":
-//     //     if (inAuthGroup || inOnboardingGroup || isAtWelcome) {
-//     //       // console.log(`AuthGate --/onboarding/COMPLETED`);
-//     //       router.replace("/(tabs)/erfs");
-//     //     }
-//     //     break;
-
-//     //   default:
-//     //     // console.log("AuthGate ---- Syncing profile data...");
-//     //     break;
-//     // }
-//   }, [user, status, isLoading, segments, isLayoutReady]);
-
-//   // 🛡️ THE UI FIX: If we are loading or redirecting, show the overlay
-//   // If the user is logged in but status is still pending, we keep the overlay up
-//   const showOverlay = !isLayoutReady || isLoading || (user && !status);
-
-//   if (!showOverlay) return null;
-
-//   return (
-//     <View style={styles.loadingOverlay}>
-//       <ActivityIndicator size="large" color="#2563eb" />
-//       <Text style={styles.loadingText}>Synchronizing iREPS Registry...</Text>
-//     </View>
-//   );
-// });
-
 export default function RootLayout() {
   return (
     <Provider store={store}>
-      <GeoProvider>
-        <WarehouseProvider>
-          <MapProvider>
-            <PaperProvider>
-              <SafeAreaProvider>
-                {/* 1. Bootstrap the Firebase Listeners */}
-                <AuthBootstrap />
+      <PersistGate loading={null} persistor={persistor}>
+        <GeoProvider>
+          <WarehouseProvider>
+            <MapProvider>
+              <PaperProvider>
+                <SafeAreaProvider>
+                  <DiscoveryProvider>
+                    {/* 1. Bootstrap the Firebase Listeners */}
+                    <AuthBootstrap />
 
-                {/* 2. Place the Guard below the listeners */}
-                <AuthGate />
+                    {/* 2. Place the Guard below the listeners */}
+                    <AuthGate />
 
-                {/* 3. Render the Screens */}
-                <Slot />
-              </SafeAreaProvider>
-            </PaperProvider>
-          </MapProvider>
-        </WarehouseProvider>
-      </GeoProvider>
+                    {/* 3. Render the Screens */}
+                    <Slot />
+                  </DiscoveryProvider>
+                </SafeAreaProvider>
+              </PaperProvider>
+            </MapProvider>
+          </WarehouseProvider>
+        </GeoProvider>
+      </PersistGate>
     </Provider>
   );
 }
@@ -305,27 +208,4 @@ const styles = StyleSheet.create({
     color: "#1e293b",
     fontWeight: "600",
   },
-
-  // ... styles ...
-  // const styles = StyleSheet.create({
-  //   loadingOverlay: {
-  //     ...StyleSheet.absoluteFillObject,
-  //     backgroundColor: "white",
-  //     justifyContent: "center",
-  //     alignItems: "center",
-  //     zIndex: 2000,
-  //   },
-  //   loadingText: {
-  //     marginTop: 15,
-  //     fontSize: 16,
-  //     color: "#1e293b",
-  //     fontWeight: "900",
-  //   },
-  //   subLoadingText: {
-  //     marginTop: 5,
-  //     fontSize: 12,
-  //     color: "#64748b",
-  //     fontWeight: "500",
-  //   },
-  // });
 });
