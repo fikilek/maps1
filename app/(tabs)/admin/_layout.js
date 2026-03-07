@@ -27,8 +27,14 @@ export default function AdminLayout() {
       />
       <Stack.Screen
         name="reports/prepaid-revenue-report"
-        options={{ title: "Revenue Audit (WIP)" }}
+        options={{ title: "Revenue Report" }}
       />
+
+      <Stack.Screen
+        name="reports/prepaid-revenue-dashboard"
+        options={{ title: "Revenue Dashboard" }}
+      />
+
       <Stack.Screen
         name="users"
         options={{ title: "Users", headerShown: true }}

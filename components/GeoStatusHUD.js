@@ -12,15 +12,6 @@ export default function GeoStatusHUD() {
     selectedMeter,
   } = geoState;
 
-  // 🎯 THE NUCLEAR RESET: Clears every level of the context
-  const handleClearAll = () => {
-    // 🏛️ The "Nuclear" UI Reset
-    updateGeo({
-      selectedLm: geoState.selectedLm,
-      lastSelectionType: "LM",
-    });
-  };
-
   return (
     <View style={styles.hudContainer}>
       {/* 🏛️ TABLE LAYOUT */}
@@ -65,7 +56,7 @@ export default function GeoStatusHUD() {
       </View>
 
       {/* 🚀 THE INTEGRATED CLEAR BUTTON */}
-      <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll}>
+      <TouchableOpacity style={styles.clearBtn}>
         <MaterialCommunityIcons name="refresh-circle" size={24} color="white" />
         <Text style={styles.clearText}>Clear All</Text>
       </TouchableOpacity>

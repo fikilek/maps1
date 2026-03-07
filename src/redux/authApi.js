@@ -29,6 +29,44 @@ import { auth, db, functions } from "../firebase";
 import { clearAuthState } from "./authStorage";
 // import { geoApi } from "./geoApi";
 
+function tsToMs(ts) {
+  if (!ts) return null;
+
+  // Firestore Timestamp
+  if (typeof ts?.toMillis === "function") return ts.toMillis();
+  if (typeof ts?.seconds === "number") return ts.seconds * 1000;
+
+  // Already a number
+  if (typeof ts === "number") return ts;
+
+  // ISO string
+  if (typeof ts === "string") {
+    const ms = Date.parse(ts);
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  return null;
+}
+
+function normalizeUserProfile(raw) {
+  if (!raw) return null;
+
+  const meta = raw?.metadata || {};
+
+  return {
+    ...raw,
+    // ✅ normalize metadata timestamps (keep original fields optional)
+    metadata: {
+      ...meta,
+      createdAtMs: tsToMs(meta.createdAt),
+      updatedAtMs: tsToMs(meta.updatedAt),
+      // remove raw timestamps so nothing non-serializable enters Redux
+      createdAt: undefined,
+      updatedAt: undefined,
+    },
+  };
+}
+
 export const authApi = createApi({
   reducerPath: "authApi",
   baseQuery: fakeBaseQuery(),
@@ -80,7 +118,11 @@ export const authApi = createApi({
               draft.ready = true;
               draft.isAuthenticated = true;
               draft.auth = { uid: user.uid, email: user.email };
-              draft.profile = snap.exists() ? snap.data() : null;
+              const raw = snap.exists() ? snap.data() : null;
+              draft.profile = raw ? normalizeUserProfile(raw) : null;
+
+              // draft.profile = snap.exists() ? snap.data() : null;
+
               draft.claims = tokenResult.claims;
             });
 

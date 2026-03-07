@@ -429,12 +429,22 @@ export const geoApi = createApi({
 
     getWardsByLocalMunicipality: builder.query({
       queryFn: (lmPcode) => ({ data: [] }),
-
+      keepUnusedDataFor: 0,
       async onCacheEntryAdded(
         lmPcode,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         if (!lmPcode) return;
+
+        // ✅ hard guard: LM pcodes in SA start with "ZA"
+        if (typeof lmPcode !== "string" || !lmPcode.startsWith("ZA")) {
+          console.warn(
+            "⚠️ getWardsByLocalMunicipality called with invalid lmPcode:",
+            lmPcode,
+          );
+          return;
+        }
+
         await cacheDataLoaded;
 
         const q = query(

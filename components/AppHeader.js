@@ -10,6 +10,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { useGeo } from "../src/context/GeoContext";
 import { useAuth } from "../src/hooks/useAuth";
 import {
   useSignoutMutation,
@@ -20,6 +21,7 @@ import { useGetLmsByCountryQuery } from "../src/redux/geoApi";
 export default function AppHeader({ title }) {
   const [menuVisible, setMenuVisible] = useState(false);
   const [wbModalVisible, setWbModalVisible] = useState(false);
+  const { updateGeo } = useGeo();
 
   const { activeWorkbase, profile, user, isSPU } = useAuth();
   const [signout] = useSignoutMutation();
@@ -48,29 +50,52 @@ export default function AppHeader({ title }) {
   const closeWbModal = () => setWbModalVisible(false);
 
   const handleWorkbaseChange = async (wb) => {
-    console.log(` `);
-    console.log(`wb?.id`, wb?.id);
-    console.log(`wb?.name`, wb?.name);
     try {
-      // 🛡️ SCHEMA ENFORCEMENT: Strictly { id, name }
-      // This prevents the geometry/metadata bloat seen in the previous SPU update.
-      const standardWorkbasePointer = {
-        id: wb.id, // Ensure we use the PCode as the ID
-        name: wb.name,
-      };
+      const pointer = { id: wb.id, name: wb.name };
 
+      // 1. close modal immediately
+      closeWbModal();
+
+      // 2. switch local UI immediately
+      updateGeo({
+        selectedLm: wb,
+        lastSelectionType: "LM",
+      });
+
+      // 3. navigate immediately
+      router.replace("/(tabs)/erfs");
+
+      // 4. persist profile in background of the same action flow
       await updateProfile({
         uid: user.uid,
-        update: {
-          "access.activeWorkbase": standardWorkbasePointer,
-        },
+        update: { "access.activeWorkbase": pointer },
       }).unwrap();
-
-      closeWbModal();
     } catch (err) {
       console.error("Standard Schema Update Failed:", err);
     }
   };
+
+  // const handleWorkbaseChange = async (wb) => {
+  //   try {
+  //     const pointer = { id: wb.id, name: wb.name };
+
+  //     await updateProfile({
+  //       uid: user.uid,
+  //       update: { "access.activeWorkbase": pointer },
+  //     }).unwrap();
+
+  //     // ✅ keep full LM in GeoContext (NO downgrade)
+  //     updateGeo({
+  //       selectedLm: wb, // <-- THIS is the key change
+  //       lastSelectionType: "LM",
+  //     });
+
+  //     closeWbModal();
+  //     router.replace("/(tabs)/erfs");
+  //   } catch (err) {
+  //     console.error("Standard Schema Update Failed:", err);
+  //   }
+  // };
 
   return (
     <View style={styles.container}>

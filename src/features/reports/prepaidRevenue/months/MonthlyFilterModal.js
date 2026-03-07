@@ -1,22 +1,15 @@
 // src/features/reports/prepaidRevenue/months/MonthlyFilterModal.js
+// ✅ MONTHLY ONLY: single month RADIO picker
+// ✅ Auto-apply on selection (no Apply button)
+
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import {
   getDefaultLastNMonths,
-  getThreeMonthBatchFromSelected,
   normalizeSelectedMonths,
-  toggleMonthWithMax,
   ymToLabel,
 } from "./monthUtils";
 
-/**
- * Props:
- * - visible: boolean
- * - onClose: () => void
- * - availableYms: string[]  (desc or unsorted ok)
- * - value: string[] (selected yms)
- * - onChange: (nextSelectedYms: string[]) => void
- */
 export default function MonthlyFilterModal({
   visible,
   onClose,
@@ -24,8 +17,6 @@ export default function MonthlyFilterModal({
   value,
   onChange,
 }) {
-  const maxMonths = 3;
-
   const available = useMemo(() => availableYms || [], [availableYms]);
 
   // local draft so user can cancel
@@ -35,16 +26,13 @@ export default function MonthlyFilterModal({
     setDraft(Array.isArray(value) ? value : []);
   }, [value, visible]);
 
-  const default3 = useMemo(
-    () => getDefaultLastNMonths(available, 3),
-    [available],
-  );
+  // Default = latest available month
+  const default1 = useMemo(() => {
+    const arr = getDefaultLastNMonths(available, 1);
+    return arr?.[0] || null;
+  }, [available]);
 
-  const apply = () => {
-    const clean = normalizeSelectedMonths(draft, available);
-    onChange(clean);
-    onClose?.();
-  };
+  const selectedYm = draft?.[0] || null;
 
   const cancel = () => {
     setDraft(Array.isArray(value) ? value : []);
@@ -52,19 +40,19 @@ export default function MonthlyFilterModal({
   };
 
   const resetDefault = () => {
-    setDraft(default3);
+    if (!default1) return;
+
+    const clean = normalizeSelectedMonths([default1], available);
+    onChange(clean); // ⭐ auto apply
+    onClose?.();
   };
 
-  const onToggleCheckbox = (ym) => {
-    setDraft((prev) => toggleMonthWithMax(prev, ym, maxMonths));
+  // ⭐ AUTO-APPLY SELECTION
+  const onPick = (ym) => {
+    const clean = normalizeSelectedMonths([ym], available);
+    onChange(clean); // notify parent
+    onClose?.(); // close immediately
   };
-
-  const onPickBatch = (ym) => {
-    const batch = getThreeMonthBatchFromSelected(available, ym);
-    if (batch.length) setDraft(batch);
-  };
-
-  const selectedCount = draft.length;
 
   return (
     <Modal
@@ -73,13 +61,14 @@ export default function MonthlyFilterModal({
       animationType="fade"
       onRequestClose={cancel}
     >
-      {/* backdrop */}
+      {/* backdrop — CENTERED */}
       <Pressable
         onPress={cancel}
         style={{
           flex: 1,
           backgroundColor: "rgba(0,0,0,0.35)",
-          justifyContent: "flex-end",
+          justifyContent: "center",
+          alignItems: "center",
         }}
       >
         {/* sheet */}
@@ -87,10 +76,11 @@ export default function MonthlyFilterModal({
           onPress={() => {}}
           style={{
             backgroundColor: "#FFFFFF",
-            borderTopLeftRadius: 18,
-            borderTopRightRadius: 18,
+            borderRadius: 18,
             padding: 14,
-            maxHeight: "85%",
+            width: "90%",
+            maxWidth: 420,
+            maxHeight: "80%",
           }}
         >
           {/* header */}
@@ -99,11 +89,11 @@ export default function MonthlyFilterModal({
               <Text
                 style={{ fontSize: 16, fontWeight: "900", color: "#111827" }}
               >
-                Monthly Filter
+                Select Month
               </Text>
               <Text style={{ marginTop: 4, color: "#6B7280", fontSize: 12 }}>
-                Select up to {maxMonths} months • Available: {available.length}{" "}
-                • Selected: {selectedCount}
+                Pick 1 month • Available: {available.length} • Selected:{" "}
+                {selectedYm ? 1 : 0}
               </Text>
             </View>
 
@@ -126,12 +116,11 @@ export default function MonthlyFilterModal({
             </Pressable>
           </View>
 
-          {/* actions */}
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+          {/* actions — ONLY Default now */}
+          <View style={{ marginTop: 12 }}>
             <Pressable
               onPress={resetDefault}
               style={{
-                flex: 1,
                 paddingVertical: 10,
                 borderRadius: 12,
                 alignItems: "center",
@@ -143,180 +132,80 @@ export default function MonthlyFilterModal({
               <Text
                 style={{ fontWeight: "900", color: "#111827", fontSize: 12 }}
               >
-                Default (Last 3)
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={apply}
-              style={{
-                flex: 1,
-                paddingVertical: 10,
-                borderRadius: 12,
-                alignItems: "center",
-                backgroundColor: "#111827",
-              }}
-            >
-              <Text
-                style={{ fontWeight: "900", color: "#FFFFFF", fontSize: 12 }}
-              >
-                Apply
+                Default (Latest)
               </Text>
             </Pressable>
           </View>
 
-          {/* columns */}
-          <View style={{ flexDirection: "row", gap: 12, marginTop: 14 }}>
-            {/* COL 1: checkboxes */}
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{ fontWeight: "900", color: "#111827", marginBottom: 8 }}
-              >
-                Pick up to 3 months
-              </Text>
+          {/* list */}
+          <View style={{ marginTop: 14 }}>
+            <Text
+              style={{ fontWeight: "900", color: "#111827", marginBottom: 8 }}
+            >
+              Pick 1 month
+            </Text>
 
-              <ScrollView
-                style={{
-                  borderWidth: 1,
-                  borderColor: "#E5E7EB",
-                  borderRadius: 14,
-                  backgroundColor: "#FFFFFF",
-                }}
-              >
-                {available.map((ym) => {
-                  const checked = draft.includes(ym);
-                  const disabled = !checked && draft.length >= maxMonths;
+            <ScrollView
+              style={{
+                borderWidth: 1,
+                borderColor: "#E5E7EB",
+                borderRadius: 14,
+                backgroundColor: "#FFFFFF",
+              }}
+            >
+              {available.map((ym) => {
+                const active = selectedYm === ym;
 
-                  return (
-                    <Pressable
-                      key={`cb-${ym}`}
-                      onPress={() => !disabled && onToggleCheckbox(ym)}
+                return (
+                  <Pressable
+                    key={`m-${ym}`}
+                    onPress={() => onPick(ym)}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
+                      borderBottomWidth: 1,
+                      borderBottomColor: "#F3F4F6",
+                      flexDirection: "row",
+                      alignItems: "center",
+                    }}
+                  >
+                    {/* radio */}
+                    <View
                       style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 12,
-                        borderBottomWidth: 1,
-                        borderBottomColor: "#F3F4F6",
-                        flexDirection: "row",
+                        width: 18,
+                        height: 18,
+                        borderRadius: 999,
+                        borderWidth: 2,
+                        borderColor: active ? "#111827" : "#9CA3AF",
+                        marginRight: 10,
                         alignItems: "center",
-                        opacity: disabled ? 0.4 : 1,
+                        justifyContent: "center",
                       }}
                     >
-                      <View
-                        style={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: 4,
-                          borderWidth: 2,
-                          borderColor: checked ? "#111827" : "#9CA3AF",
-                          backgroundColor: checked ? "#111827" : "#FFFFFF",
-                          marginRight: 10,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {checked ? (
-                          <Text
-                            style={{
-                              color: "#FFFFFF",
-                              fontWeight: "900",
-                              fontSize: 12,
-                            }}
-                          >
-                            ✓
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      <Text style={{ color: "#111827", fontWeight: "700" }}>
-                        {ymToLabel(ym)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
-
-            {/* COL 2: radio batches */}
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{ fontWeight: "900", color: "#111827", marginBottom: 8 }}
-              >
-                3-month batches (tap one)
-              </Text>
-
-              <ScrollView
-                style={{
-                  borderWidth: 1,
-                  borderColor: "#E5E7EB",
-                  borderRadius: 14,
-                  backgroundColor: "#FFFFFF",
-                }}
-              >
-                {available.map((ym) => {
-                  const batch = getThreeMonthBatchFromSelected(available, ym);
-                  const active =
-                    batch.length > 0 &&
-                    batch.length === draft.length &&
-                    batch.every((x) => draft.includes(x));
-
-                  return (
-                    <Pressable
-                      key={`rb-${ym}`}
-                      onPress={() => onPickBatch(ym)}
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 12,
-                        borderBottomWidth: 1,
-                        borderBottomColor: "#F3F4F6",
-                        flexDirection: "row",
-                        alignItems: "center",
-                      }}
-                    >
-                      <View
-                        style={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: 999,
-                          borderWidth: 2,
-                          borderColor: active ? "#111827" : "#9CA3AF",
-                          marginRight: 10,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {active ? (
-                          <View
-                            style={{
-                              width: 10,
-                              height: 10,
-                              borderRadius: 999,
-                              backgroundColor: "#111827",
-                            }}
-                          />
-                        ) : null}
-                      </View>
-
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: "#111827", fontWeight: "800" }}>
-                          {ymToLabel(ym)}
-                        </Text>
-                        <Text
+                      {active ? (
+                        <View
                           style={{
-                            marginTop: 2,
-                            color: "#6B7280",
-                            fontSize: 11,
+                            width: 10,
+                            height: 10,
+                            borderRadius: 999,
+                            backgroundColor: "#111827",
                           }}
-                        >
-                          {batch.length === 3
-                            ? `${ymToLabel(batch[2])} • ${ymToLabel(batch[1])} • ${ymToLabel(batch[0])}`
-                            : "Not enough previous months for full batch"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
+                        />
+                      ) : null}
+                    </View>
+
+                    <Text
+                      style={{
+                        color: "#111827",
+                        fontWeight: active ? "900" : "700",
+                      }}
+                    >
+                      {ymToLabel(ym)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </Pressable>
       </Pressable>

@@ -1,12 +1,7 @@
 // src/features/reports/prepaidRevenue/MonthlyListPanel.js
-import { useMemo } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import React, { useCallback, useMemo } from "react";
+import { FlatList, Pressable, Text, View } from "react-native";
+import { MonthlyLoadingState } from "./months/MonthlyLoadingState";
 import { ymToLabel } from "./months/monthUtils";
 
 function normalizeMeter(s) {
@@ -15,162 +10,161 @@ function normalizeMeter(s) {
     .trim();
 }
 
-/**
- * IMPORTANT:
- * - We support GR0 now (0 purchase / 0 total).
- * - This grouping is for TOTAL across selected months (max 3).
- *   If you later want "selected-month grouping", use docs' salesGroupId for activeYm.
- */
-function getGroupFromTotalCents(totalCents) {
-  const rands = Number(totalCents || 0) / 100;
-
-  if (rands <= 0) return "GR0";
-  if (rands <= 99.99) return "GR1";
-  if (rands <= 299.99) return "GR2";
-  if (rands <= 499.99) return "GR3";
-  if (rands <= 999.99) return "GR4";
-  return "GR5";
+function normalizeGroupId(g) {
+  const x = String(g || "")
+    .trim()
+    .toUpperCase();
+  if (!x) return "GR0";
+  if (
+    x === "GR0" ||
+    x === "GR1" ||
+    x === "GR2" ||
+    x === "GR3" ||
+    x === "GR4" ||
+    x === "GR5"
+  )
+    return x;
+  return "GR0";
 }
 
 function formatZarFromCents(cents) {
-  const v = (Number(cents || 0) / 100).toFixed(2);
-  return `R ${v}`;
+  const rands = Number(cents || 0) / 100;
+  return new Intl.NumberFormat("en-ZA", {
+    style: "currency",
+    currency: "ZAR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(rands);
 }
 
 /**
- * MONTHLY LIST (Meter cards)
+ * MONTHLY MODE:
+ * docs are conlog_sales_monthly docs for ONE month:
+ * { lmPcode, meterNo, ym, purchasesCount, amountTotalC, salesGroupId }
  *
- * Input docs are conlog_sales_monthly docs:
- * { lmPcode, meterNo, ym, purchasesCount, amountTotalC, salesGroupId?, ... }
- *
- * We aggregate by meterNo across selectedYms (max 3).
+ * We build ONE card per meter for that month.
  */
-function buildMeterCards(docs, selectedYms) {
-  const yms = Array.isArray(selectedYms) ? selectedYms : [];
-  const ymSet = new Set(yms);
+function buildMonthlyCards(docs) {
+  const safeDocs = Array.isArray(docs) ? docs : [];
 
+  // If Firestore ever returns duplicates per meter/month (shouldn't),
+  // we merge safely by meterNo.
   const byMeter = new Map();
 
-  for (const d of docs || []) {
+  for (const d of safeDocs) {
     const meterNo = String(d?.meterNo || "").trim();
-    const ym = String(d?.ym || "").trim();
-    if (!meterNo || !ym) continue;
-
-    // ✅ Guard: if docs ever include months outside selection, ignore them
-    if (yms.length && !ymSet.has(ym)) continue;
-
-    if (!byMeter.has(meterNo)) {
-      byMeter.set(meterNo, {
-        meterNo,
-        totalPurchases: 0,
-        totalAmountC: 0,
-        months: {}, // ym -> { purchasesCount, amountTotalC, salesGroupId? }
-      });
-    }
-
-    const m = byMeter.get(meterNo);
+    if (!meterNo) continue;
 
     const purchases = Number(d?.purchasesCount || 0);
     const amountC = Number(d?.amountTotalC || 0);
+    const salesGroupId = normalizeGroupId(d?.salesGroupId);
+    const ym = String(d?.ym || "").trim();
 
-    m.totalPurchases += purchases;
-    m.totalAmountC += amountC;
-
-    m.months[ym] = {
-      ym,
-      purchasesCount: purchases,
-      amountTotalC: amountC,
-      salesGroupId: String(d?.salesGroupId || "").toUpperCase() || null,
-    };
+    const existing = byMeter.get(meterNo);
+    if (!existing) {
+      byMeter.set(meterNo, {
+        meterNo,
+        ym,
+        purchasesCount: purchases,
+        amountTotalC: amountC,
+        salesGroupId,
+      });
+    } else {
+      // merge if duplicates (rare)
+      existing.purchasesCount += purchases;
+      existing.amountTotalC += amountC;
+      // keep the "best" / non-empty group
+      existing.salesGroupId = normalizeGroupId(
+        existing.salesGroupId || salesGroupId,
+      );
+      existing.ym = existing.ym || ym;
+    }
   }
 
-  // Convert to cards and align month columns to selectedYms order
-  const cards = Array.from(byMeter.values()).map((m) => {
-    const cols = yms.map((ym) => {
-      const hit = m.months[ym] || null;
-      return {
-        ym,
-        purchasesCount: hit?.purchasesCount || 0,
-        amountTotalC: hit?.amountTotalC || 0,
-      };
-    });
-
-    return {
-      meterNo: m.meterNo,
-      totalPurchases: m.totalPurchases,
-      totalAmountC: m.totalAmountC,
-      // ✅ Group based on TOTAL across selected months
-      group3mId: getGroupFromTotalCents(m.totalAmountC),
-      cols,
-    };
-  });
-
-  return cards;
+  return Array.from(byMeter.values());
 }
 
 export default function MonthlyListPanel({
   docs,
-  selectedYms,
+
   isLoading,
   isError,
   error,
   onRetry,
-  activeGroup, // e.g. ALL, GR0..GR5
+
+  // ✅ NEW: multi-select groups
+  selectedGroups, // string[]; [] means ALL
   meterSearch,
   sortKey,
+  onPressPurchases,
+
+  // Loading state details
+  activeYm,
+  lmPcode,
+  status,
+  isFetching,
 }) {
-  // ✅ Normalize month order: newest-first
-  const normYms = useMemo(() => {
-    const yms = Array.isArray(selectedYms) ? selectedYms : [];
-    return Array.from(new Set(yms)).sort().reverse();
-  }, [selectedYms]);
+  const safeDocs = Array.isArray(docs) ? docs : [];
+  const cachedCount = safeDocs.length;
 
-  const cards = useMemo(
-    () => buildMeterCards(docs || [], normYms),
-    [docs, normYms],
-  );
+  const cards = useMemo(() => buildMonthlyCards(safeDocs), [safeDocs]);
 
+  // ✅ sort
   const sortedCards = useMemo(() => {
+    const key = sortKey || "AMOUNT_ASC";
     const arr = [...cards];
-    const key = sortKey || "AMOUNT_DESC";
 
     if (key === "AMOUNT_DESC")
-      arr.sort((a, b) => Number(b.totalAmountC) - Number(a.totalAmountC));
+      arr.sort((a, b) => b.amountTotalC - a.amountTotalC);
     else if (key === "AMOUNT_ASC")
-      arr.sort((a, b) => Number(a.totalAmountC) - Number(b.totalAmountC));
+      arr.sort((a, b) => a.amountTotalC - b.amountTotalC);
     else if (key === "PURCHASES_DESC")
-      arr.sort((a, b) => Number(b.totalPurchases) - Number(a.totalPurchases));
+      arr.sort((a, b) => b.purchasesCount - a.purchasesCount);
     else if (key === "PURCHASES_ASC")
-      arr.sort((a, b) => Number(a.totalPurchases) - Number(b.totalPurchases));
+      arr.sort((a, b) => a.purchasesCount - b.purchasesCount);
     else if (key === "METER_ASC")
       arr.sort((a, b) => String(a.meterNo).localeCompare(String(b.meterNo)));
 
     return arr;
   }, [cards, sortKey]);
 
+  // ✅ filter (multi-select groups + meter prefix)
   const visibleCards = useMemo(() => {
     const q = normalizeMeter(meterSearch);
+    const groups = Array.isArray(selectedGroups) ? selectedGroups : [];
+    const hasGroupFilter = groups.length > 0;
+    const groupSet = hasGroupFilter
+      ? new Set(groups.map(normalizeGroupId))
+      : null;
 
-    return (sortedCards || []).filter((c) => {
-      // 1) Group filter based on TOTAL across selected months
-      if (activeGroup && activeGroup !== "ALL") {
-        if (c.group3mId !== activeGroup) return false;
+    return sortedCards.filter((c) => {
+      if (hasGroupFilter) {
+        const gid = normalizeGroupId(c.salesGroupId);
+        if (!groupSet.has(gid)) return false;
       }
-
-      // 2) Meter search (prefix)
       if (!q) return true;
       return normalizeMeter(c.meterNo).startsWith(q);
     });
-  }, [sortedCards, activeGroup, meterSearch]);
+  }, [sortedCards, selectedGroups, meterSearch]);
+
+  const renderItem = useCallback(
+    ({ item }) => (
+      <MonthMeterCard item={item} onPressPurchases={onPressPurchases} />
+    ),
+    [onPressPurchases],
+  );
+
+  const keyExtractor = useCallback((x) => x.meterNo, []);
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, paddingTop: 24, alignItems: "center" }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 10, color: "#6B7280" }}>
-          Loading monthly…
-        </Text>
-      </View>
+      <MonthlyLoadingState
+        ym={activeYm}
+        lmPcode={lmPcode}
+        status={status}
+        isFetching={isFetching}
+        cachedCount={cachedCount}
+      />
     );
   }
 
@@ -204,22 +198,28 @@ export default function MonthlyListPanel({
   return (
     <FlatList
       data={visibleCards}
-      keyExtractor={(x) => x.meterNo}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
       contentContainerStyle={{ padding: 12, paddingBottom: 24 }}
       ListEmptyComponent={
         <View style={{ padding: 16 }}>
           <Text style={{ color: "#6B7280" }}>No monthly meters yet.</Text>
         </View>
       }
-      renderItem={({ item }) => <MonthMeterCard item={item} />}
+      // ✅ virtualization tuning for 15k rows
+      initialNumToRender={18}
+      maxToRenderPerBatch={18}
+      updateCellsBatchingPeriod={50}
+      windowSize={9}
+      removeClippedSubviews={true}
     />
   );
 }
 
-function MonthMeterCard({ item }) {
-  const cols = item.cols || [];
-  const colCount = cols.length;
-
+const MonthMeterCard = React.memo(function MonthMeterCard({
+  item,
+  onPressPurchases,
+}) {
   return (
     <View
       style={{
@@ -231,7 +231,7 @@ function MonthMeterCard({ item }) {
         padding: 12,
       }}
     >
-      {/* TOP ROW (meter + purchases + total) */}
+      {/* TOP ROW */}
       <View style={{ flexDirection: "row", alignItems: "center" }}>
         <Text
           style={{ flex: 1, color: "#111827", fontWeight: "900", fontSize: 14 }}
@@ -239,7 +239,8 @@ function MonthMeterCard({ item }) {
           {item.meterNo}
         </Text>
 
-        <View
+        <Pressable
+          onPress={() => onPressPurchases?.(item.meterNo)}
           style={{
             paddingHorizontal: 10,
             paddingVertical: 6,
@@ -249,61 +250,44 @@ function MonthMeterCard({ item }) {
             borderColor: "#E5E7EB",
             marginRight: 10,
           }}
+          hitSlop={10}
         >
           <Text style={{ color: "#111827", fontWeight: "900", fontSize: 11 }}>
-            Purchases {item.totalPurchases}
+            Purchases {Number(item.purchasesCount || 0)}
           </Text>
-        </View>
+        </Pressable>
 
         <Text style={{ color: "#111827", fontWeight: "900", fontSize: 14 }}>
-          {formatZarFromCents(item.totalAmountC)}
+          {formatZarFromCents(item.amountTotalC)}
         </Text>
       </View>
 
-      {/* MONTH COLUMNS */}
-      <View
-        style={{
-          marginTop: 12,
-          flexDirection: "row",
-          gap: 10,
-        }}
-      >
-        {cols.map((c) => {
-          const label = `${ymToLabel(c.ym)} • Purch ${Number(
-            c.purchasesCount || 0,
-          )}`;
-
-          return (
-            <View
-              key={c.ym}
-              style={{
-                flex: colCount ? 1 : undefined,
-                padding: 10,
-                borderRadius: 14,
-                backgroundColor: "#F9FAFB",
-                borderWidth: 1,
-                borderColor: "#E5E7EB",
-              }}
-            >
-              <Text
-                style={{ color: "#6B7280", fontSize: 10, fontWeight: "800" }}
-              >
-                {label}
-              </Text>
-              <Text
-                style={{
-                  marginTop: 6,
-                  color: "#111827",
-                  fontSize: 12,
-                  fontWeight: "900",
-                }}
-              >
-                {formatZarFromCents(c.amountTotalC)}
-              </Text>
-            </View>
-          );
-        })}
+      {/* MONTH STRIP (single month only) */}
+      <View style={{ marginTop: 12 }}>
+        <View
+          style={{
+            padding: 10,
+            borderRadius: 14,
+            backgroundColor: "#F9FAFB",
+            borderWidth: 1,
+            borderColor: "#E5E7EB",
+          }}
+        >
+          <Text style={{ color: "#6B7280", fontSize: 10, fontWeight: "800" }}>
+            {ymToLabel(item.ym)} • Group {normalizeGroupId(item.salesGroupId)}
+          </Text>
+          <Text
+            style={{
+              marginTop: 6,
+              color: "#111827",
+              fontSize: 12,
+              fontWeight: "900",
+            }}
+          >
+            {formatZarFromCents(item.amountTotalC)}
+          </Text>
+        </View>
       </View>
     </View>
   );
-}
+});

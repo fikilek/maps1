@@ -119,7 +119,7 @@ export const astsApi = createApi({
                 if (erfId) {
                   dispatch(
                     erfsApi.util.updateQueryData(
-                      "getErfsByLmPcode",
+                      "getErfsByLmPcodeWardPcode",
                       lmPcode,
                       (draft) => {
                         const targetErf = draft?.metaEntries?.find(

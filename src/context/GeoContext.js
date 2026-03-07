@@ -29,6 +29,17 @@ export const GeoProvider = ({ children }) => {
 
   const [geoState, setGeoState] = useState(INITIAL_GEO);
 
+  useEffect(() => {
+    console.log("GeoProvider -- selectedLm?.name", geoState.selectedLm?.name);
+    console.log("GeoProvider -- selectedWard", geoState.selectedWard);
+    console.log("GeoProvider -- flightSignal", geoState.flightSignal);
+  }, [
+    geoState.selectedLm?.id,
+    geoState.selectedLm?.name,
+    geoState.selectedWard?.id,
+    geoState.flightSignal,
+  ]);
+
   // 1) BOOT: set placeholder LM immediately when workbaseId appears/changes
   useEffect(() => {
     if (!profile) {
@@ -60,13 +71,24 @@ export const GeoProvider = ({ children }) => {
   useEffect(() => {
     if (!profile || !remoteLmDoc) return;
 
+    // ✅ HARD GUARD: ignore late LM docs that don't match current workbaseId
+    if (remoteLmDoc.id !== workbaseId) return;
+
     setGeoState((prev) => {
-      const alreadyHydrated =
-        prev.selectedLm?.id === remoteLmDoc.id &&
-        prev.selectedLm?.name === remoteLmDoc.name;
+      // If already on this LM id, just hydrate the full doc (without reset)
+      if (prev.selectedLm?.id === remoteLmDoc.id) {
+        // upgrade placeholder {id} to full doc
+        const prevHasName = !!prev.selectedLm?.name;
+        if (prevHasName) return prev;
 
-      if (alreadyHydrated) return prev;
+        return {
+          ...prev,
+          selectedLm: remoteLmDoc,
+          flightSignal: prev.flightSignal + 1,
+        };
+      }
 
+      // True LM switch (rare here, because BOOT already set selectedLm.id)
       return {
         ...INITIAL_GEO,
         selectedLm: remoteLmDoc,
@@ -74,7 +96,7 @@ export const GeoProvider = ({ children }) => {
         flightSignal: prev.flightSignal + 1,
       };
     });
-  }, [profile, remoteLmDoc]);
+  }, [profile, remoteLmDoc, workbaseId]);
 
   /**
    * updateGeo(updates, options)
@@ -125,7 +147,7 @@ export const GeoProvider = ({ children }) => {
   }, []);
 
   const value = useMemo(
-    () => ({ geoState, updateGeo, resetGeo }),
+    () => ({ geoState, updateGeo, resetGeo, setGeoState }),
     [geoState, updateGeo, resetGeo],
   );
 

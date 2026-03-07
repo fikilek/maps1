@@ -1,29 +1,36 @@
 import { combineReducers, configureStore } from "@reduxjs/toolkit";
-import { persistReducer, persistStore } from "redux-persist";
-
-import { authApi } from "./authApi";
-import { geoApi } from "./geoApi";
+import { setupListeners } from "@reduxjs/toolkit/query";
+import {
+  FLUSH,
+  PAUSE,
+  PERSIST,
+  persistReducer,
+  persistStore,
+  PURGE,
+  REGISTER,
+  REHYDRATE,
+} from "redux-persist";
 
 import { reduxStorage } from "./reduxStorage";
 
-// Example future slices (if/when you add them)
 import { astsApi } from "./astsApi";
+import { authApi } from "./authApi";
 import { erfsApi } from "./erfsApi";
-import offlineReducer from "./offlineSlice";
+import { geoApi } from "./geoApi";
 import { premisesApi } from "./premisesApi";
 import { salesApi } from "./salesApi";
 import { settingsApi } from "./settingsApi";
 import { spApi } from "./spApi";
 import { trnsApi } from "./trnsApi";
 import { usersApi } from "./usersApi";
-// import uiReducer from "./uiSlice";
+
 import newTrnsReducer from "./newTrnsSlice";
+import offlineReducer from "./offlineSlice";
 
 /* =====================================================
    ROOT REDUCER
 ===================================================== */
 const rootReducer = combineReducers({
-  // RTK Query APIs
   [geoApi.reducerPath]: geoApi.reducer,
   [authApi.reducerPath]: authApi.reducer,
   [usersApi.reducerPath]: usersApi.reducer,
@@ -34,10 +41,9 @@ const rootReducer = combineReducers({
   [settingsApi.reducerPath]: settingsApi.reducer,
   [astsApi.reducerPath]: astsApi.reducer,
   [salesApi.reducerPath]: salesApi.reducer,
-  // App-level slices (example)
+
   offline: offlineReducer,
   newTrns: newTrnsReducer,
-  // ui: uiReducer,
 });
 
 /* =====================================================
@@ -45,18 +51,20 @@ const rootReducer = combineReducers({
 ===================================================== */
 const persistConfig = {
   key: "root",
-  version: 2, // <-- bump this
+  version: 2,
   storage: reduxStorage,
-  whitelist: [
-    "offline",
+
+  // Keep persisted state small + valuable
+  whitelist: ["offline"],
+
+  // Never persist auth + large/sensitive caches
+  blacklist: [
+    erfsApi.reducerPath,
     usersApi.reducerPath,
     spApi.reducerPath,
-    erfsApi.reducerPath,
     trnsApi.reducerPath,
     settingsApi.reducerPath,
     astsApi.reducerPath,
-  ],
-  blacklist: [
     authApi.reducerPath,
     geoApi.reducerPath,
     premisesApi.reducerPath,
@@ -65,9 +73,6 @@ const persistConfig = {
   ],
 };
 
-/* =====================================================
-   PERSISTED REDUCER
-===================================================== */
 const persistedReducer = persistReducer(persistConfig, rootReducer);
 
 /* =====================================================
@@ -78,8 +83,12 @@ export const store = configureStore({
 
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
-      serializableCheck: false,
       immutableCheck: false,
+      serializableCheck: __DEV__
+        ? false
+        : {
+            ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+          },
     }).concat(
       geoApi.middleware,
       authApi.middleware,
@@ -94,9 +103,7 @@ export const store = configureStore({
     ),
 });
 
-/* =====================================================
-   PERSISTOR
-===================================================== */
 export const persistor = persistStore(store);
 
-// console.log("STORE authApi.reducerPath =", authApi.reducerPath);
+// ✅ RTK Query listeners (recommended)
+setupListeners(store.dispatch);

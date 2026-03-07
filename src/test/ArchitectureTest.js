@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -8,21 +7,11 @@ import {
 } from "react-native";
 import { useGeo } from "../context/GeoContext";
 import { useWarehouse } from "../context/WarehouseContext";
-import { geoMemory } from "../storage/geoMemory";
 import { MOCK_LM, MOCK_WARDS } from "./MockData";
 
 const ArchitectureTest = () => {
   const { geoState, updateGeo } = useGeo();
   const { wards, erfs } = useWarehouse();
-
-  useEffect(() => {
-    // 🎯 THE FIX: Manually stock the "General Geography" bucket
-    // so GeoContext doesn't find 'undefined'
-    if (!geoMemory.getMunicipality(MOCK_LM.id)) {
-      console.log("🧪 Test Lab: Seeding Storage with Mock LM...");
-      geoMemory.saveMunicipality(MOCK_LM);
-    }
-  }, []);
 
   return (
     <ScrollView style={styles.container}>

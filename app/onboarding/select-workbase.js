@@ -3,7 +3,6 @@ import { FlashList } from "@shopify/flash-list";
 import { StyleSheet, View } from "react-native";
 import { ActivityIndicator, List, Text, Title } from "react-native-paper";
 import { authApi, useSetActiveWorkbaseMutation } from "../../src/redux/authApi";
-import { geoMemory } from "../../src/redux/mmkv";
 
 export default function SelectWorkbase() {
   const { data: authState } = authApi.endpoints.getAuthState.useQueryState();
@@ -11,7 +10,6 @@ export default function SelectWorkbase() {
 
   const handleSelect = async (workbase) => {
     // 1. Update MMKV immediately (Synchronous)
-    geoMemory.setStep("lmId", workbase.id);
 
     // 2. Update Firestore
     await setActiveWorkbase({

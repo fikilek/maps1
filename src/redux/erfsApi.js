@@ -1,7 +1,7 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
-  getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -10,7 +10,7 @@ import {
 
 import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
-import { transformGeoData } from "../utils/geo/parseGeometry";
+import { fsError, fsLog } from "./firestoreLogger";
 
 const workoutSovereignErf = (id) => {
   if (!id) return { erfNo: "N/A" };
@@ -41,10 +41,12 @@ const transformToMeta = (id, erf) => {
     id,
     admin: erf?.admin,
     erfNo: workoutSovereignErf(id)?.erfNo,
-    premises: erf.premises || [],
-    metadata: erf.metadata,
+    premises: Array.isArray(erf?.premises) ? erf.premises : [],
+    metadata: erf?.metadata || {},
   };
 };
+
+const makeWardPackKey = ({ lmPcode, wardPcode }) => `${lmPcode}__${wardPcode}`;
 
 export const erfsApi = createApi({
   reducerPath: "erfsApi",
@@ -57,58 +59,31 @@ export const erfsApi = createApi({
     }
   },
   endpoints: (builder) => ({
-    getErfsByLmAndWard: builder.query({
-      async queryFn({ lmPcode, wardPcode }) {
-        // console.log("getErfsByLmAndWard ----mounted");
-        try {
-          if (!lmPcode || !wardPcode) return { data: [] };
-
-          const q = query(
-            collection(db, "ireps_erfs"),
-            where("admin.localMunicipality.pcode", "==", lmPcode),
-            where("admin.ward.pcode", "==", wardPcode),
-            orderBy("erfId"),
-          );
-
-          // One-time fetch (no persistent stream)
-          const snapshot = await getDocs(q);
-          const erfs = snapshot.docs.map((d) => transformGeoData(d));
-
-          return { data: erfs };
-        } catch (error) {
-          console.error("❌ getErfsByLmAndWard failed", error);
-          return { error };
-        }
-      },
-      providesTags: (result) =>
-        result
-          ? [
-              ...result.map(({ id }) => ({ type: "ERF", id })),
-              { type: "ERF", id: "LIST" },
-            ]
-          : [{ type: "ERF", id: "LIST" }],
-      // Keep ERFs for only 1 hour if status updates are frequent
-      keepUnusedDataFor: 3600,
-    }),
-
     getErfsByLmPcode: builder.query({
-      queryFn: (lmPcode) => ({
-        data: {
-          metaEntries: [],
-          geoEntries: {},
-          sync: {
-            status: "idle", // idle | syncing | ready | error
-            lmPcode,
-            lastSyncAt: 0,
-            firstSnapshotAt: 0,
+      queryFn: (lmPcode) => {
+        console.log(`erfsApi --getErfsByLmPcode --queryFn --lmPcode`, lmPcode);
+        return {
+          data: {
+            metaEntries: [],
+            geoEntries: {},
+            sync: {
+              status: "idle", // idle | syncing | ready | error
+              lmPcode,
+              lastSyncAt: 0,
+              firstSnapshotAt: 0,
+            },
           },
-        },
-      }),
+        };
+      },
 
       async onCacheEntryAdded(
         lmPcode,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
+        console.log(
+          `erfsApi --getErfsByLmPcode --onCacheEntryAdded --lmPcode`,
+          lmPcode,
+        );
         if (!lmPcode) return;
         await cacheDataLoaded;
 
@@ -128,6 +103,7 @@ export const erfsApi = createApi({
           collection(db, "ireps_erfs"),
           where("admin.localMunicipality.pcode", "==", lmPcode),
           orderBy("metadata.updatedAt", "desc"),
+          limit(100),
         );
 
         const unsubscribe = onSnapshot(
@@ -234,329 +210,6 @@ export const erfsApi = createApi({
       },
     }),
 
-    // getErfsByLmPcode: builder.query({
-    //   queryFn: (lmPcode) => ({
-    //     data: {
-    //       metaEntries: [],
-    //       geoEntries: {},
-    //       sync: {
-    //         status: "idle", // idle | syncing | ready | error
-    //         lmPcode,
-    //         lastSyncAt: 0,
-    //         firstSnapshotAt: 0,
-    //       },
-    //     },
-    //   }),
-
-    //   async onCacheEntryAdded(
-    //     lmPcode,
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     if (!lmPcode) return;
-
-    //     await cacheDataLoaded;
-
-    //     let first = true;
-
-    //     // 🏁 Mark syncing immediately
-    //     updateCachedData((draft) => {
-    //       draft.metaEntries = draft.metaEntries || [];
-    //       draft.geoEntries = draft.geoEntries || {};
-
-    //       draft.sync = draft.sync || {};
-    //       draft.sync.status = "syncing";
-    //       draft.sync.lmPcode = lmPcode;
-    //     });
-
-    //     const q = query(
-    //       collection(db, "ireps_erfs"),
-    //       where("admin.localMunicipality.pcode", "==", lmPcode),
-    //       orderBy("metadata.updatedAt", "desc"),
-    //     );
-
-    //     const unsubscribe = onSnapshot(
-    //       q,
-    //       (snapshot) => {
-    //         const changes = snapshot.docChanges();
-
-    //         updateCachedData((draft) => {
-    //           // 🛡️ Rehydration shields
-    //           draft.metaEntries = draft.metaEntries || [];
-    //           draft.geoEntries = draft.geoEntries || {};
-    //           draft.sync = draft.sync || {};
-
-    //           // ✅ FIRST SNAPSHOT = DATA HYDRATED
-    //           if (first) {
-    //             first = false;
-    //             draft.sync.status = "ready";
-    //             draft.sync.firstSnapshotAt = Date.now();
-
-    //             // 🛡️ Ensure initial bulk load is sorted (if not using Firestore orderBy)
-    //             draft.metaEntries.sort((a, b) =>
-    //               (b.metadata?.updatedAt || "").localeCompare(
-    //                 a.metadata?.updatedAt || "",
-    //               ),
-    //             );
-    //           }
-
-    //           // ✅ Any snapshot = last sync time update
-    //           draft.sync.lastSyncAt = Date.now();
-
-    //           // 🧠 CPU PROTECTION
-    //           // If nothing changed, stop here (but still mark ready above)
-    //           if (changes.length === 0) return;
-
-    //           changes.forEach((change) => {
-    //             const erf = change.doc.data();
-    //             const id = erf.erfId || change.doc.id;
-
-    //             if (change.type === "removed") {
-    //               const idx = draft.metaEntries.findIndex((m) => m.id === id);
-    //               if (idx > -1) draft.metaEntries.splice(idx, 1);
-    //               delete draft.geoEntries[id];
-    //               return;
-    //             }
-
-    //             // ✅ META ENTRY (List data)
-    //             const meta = transformToMeta(id, erf);
-    //             const existingIdx = draft.metaEntries.findIndex(
-    //               (m) => m.id === id,
-    //             );
-
-    //             if (existingIdx > -1) {
-    //               // If it exists, update it in place
-    //               draft.metaEntries[existingIdx] = meta;
-
-    //               // 🔄 OPTIONAL: If it was modified, move it to the top!
-    //               const [updatedItem] = draft.metaEntries.splice(
-    //                 existingIdx,
-    //                 1,
-    //               );
-    //               draft.metaEntries.unshift(updatedItem);
-    //             } else {
-    //               // ➕ If it's new, unshift to the TOP of the array
-    //               draft.metaEntries.unshift(meta);
-    //             }
-
-    //             // ✅ GEO ENTRY (Map data)
-    //             if (erf.geometry || erf.centroid) {
-    //               draft.geoEntries[id] = {
-    //                 centroid: erf.centroid,
-    //                 bbox: erf.bbox,
-    //                 geometry:
-    //                   typeof erf.geometry === "string"
-    //                     ? JSON.parse(erf.geometry)
-    //                     : erf.geometry,
-    //               };
-    //             }
-    //           });
-    //         });
-    //       },
-    //       (error) => {
-    //         console.error("❌ ERFs snapshot error:", error);
-
-    //         updateCachedData((draft) => {
-    //           draft.sync = draft.sync || {};
-    //           draft.sync.status = "error";
-    //           draft.sync.lastError = String(error?.message || error);
-    //         });
-    //       },
-    //     );
-
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
-    // //   queryFn: (lmPcode) => ({
-    // //     data: {
-    // //       metaEntries: [],
-    // //       geoEntries: {},
-    // //       sync: {
-    // //         status: "idle", // idle | syncing | ready | error
-    // //         lmPcode,
-    // //         lastSyncAt: 0,
-    // //         firstSnapshotAt: 0,
-    // //       },
-    // //     },
-    // //   }),
-
-    // //   async onCacheEntryAdded(
-    // //     lmPcode,
-    // //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    // //   ) {
-    // //     if (!lmPcode) return;
-    // //     await cacheDataLoaded;
-
-    // //     let first = true;
-
-    // //     // mark syncing as soon as listener starts
-    // //     updateCachedData((draft) => {
-    // //       if (!draft.metaEntries) draft.metaEntries = [];
-    // //       if (!draft.geoEntries) draft.geoEntries = {};
-    // //       draft.sync = draft.sync || {};
-    // //       draft.sync.status = "syncing";
-    // //       draft.sync.lmPcode = lmPcode;
-    // //     });
-
-    // //     const q = query(
-    // //       collection(db, "ireps_erfs"),
-    // //       where("admin.localMunicipality.pcode", "==", lmPcode),
-    // //     );
-
-    // //     const unsubscribe = onSnapshot(
-    // //       q,
-    // //       (snapshot) => {
-    // //         if (snapshot.docChanges().length === 0) return;
-    // //         updateCachedData((draft) => {
-    // //           if (!draft.geoEntries) draft.geoEntries = {};
-
-    // //           // ✅ first snapshot arrived (initial hydration)
-    // //           if (first) {
-    // //             first = false;
-    // //             draft.sync.status = "ready";
-    // //             draft.sync.firstSnapshotAt = Date.now();
-    // //           }
-
-    // //           // ✅ every snapshot = updated sync time
-    // //           draft.sync.lastSyncAt = Date.now();
-
-    // //           snapshot.docChanges().forEach((change) => {
-    // //             const erf = change.doc.data();
-    // //             const id = erf.erfId || change.doc.id;
-
-    // //             if (change.type === "removed") {
-    // //               const idx = draft.metaEntries.findIndex((m) => m.id === id);
-    // //               if (idx > -1) draft.metaEntries.splice(idx, 1);
-    // //               delete draft.geoEntries[id];
-    // //             } else {
-    // //               const meta = transformToMeta(id, erf);
-    // //               const existingIdx = draft.metaEntries.findIndex(
-    // //                 (m) => m.id === id,
-    // //               );
-    // //               if (existingIdx > -1) draft.metaEntries[existingIdx] = meta;
-    // //               else draft.metaEntries.push(meta);
-
-    // //               if (erf.geometry || erf.centroid) {
-    // //                 draft.geoEntries[id] = {
-    // //                   centroid: erf.centroid,
-    // //                   bbox: erf.bbox,
-    // //                   geometry:
-    // //                     typeof erf.geometry === "string"
-    // //                       ? JSON.parse(erf.geometry)
-    // //                       : erf.geometry,
-    // //                 };
-    // //               }
-    // //             }
-    // //           });
-    // //         });
-    // //       },
-    // //       (error) => {
-    // //         console.error("❌ ERFs snapshot error:", error);
-    // //         updateCachedData((draft) => {
-    // //           draft.sync.status = "error";
-    // //           draft.sync.lastError = String(error?.message || error);
-    // //         });
-    // //       },
-    // //     );
-
-    // //     await cacheEntryRemoved;
-    // //     unsubscribe();
-    // //   },
-    // // }),
-
-    // // getErfsByLmPcode: builder.query({
-    // //   async queryFn(lmPcode) {
-    // //     console.log(`getErfsByLmPcode --queryFn started for ${lmPcode}`);
-    // //     return {
-    // //       data: {
-    // //         metaEntries: [],
-    // //         geoEntries: {},
-    // //         sync: {
-    // //           status: "idle",
-    // //           lmPcode,
-    // //           lastSyncAt: 0,
-    // //           firstSnapshotAt: 0,
-    // //         },
-    // //       },
-    // //     };
-    // //   },
-
-    // //   async onCacheEntryAdded(
-    // //     lmPcode,
-    // //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    // //   ) {
-    // //     if (!lmPcode) return;
-    // //     let unsubscribe = () => {};
-    // //     console.log(
-    // //       `getErfsByLmPcode --onCacheEntryAdded STARTED for ${lmPcode}`,
-    // //     );
-
-    // //     try {
-    // //       await cacheDataLoaded;
-
-    // //       const q = query(
-    // //         collection(db, "ireps_erfs"),
-    // //         where("admin.localMunicipality.pcode", "==", lmPcode),
-    // //         orderBy("metadata.updatedAt", "desc"),
-    // //       );
-
-    // //       unsubscribe = onSnapshot(q, (snapshot) => {
-    // //         // 🛡️ CPU PROTECTION: Only wake up if there's actual movement
-    // //         if (snapshot.docChanges().length === 0) return;
-
-    // //         updateCachedData((draft) => {
-    // //           // 🛡️ REHYDRATION SHIELD: Ensure geoEntries exists in the current draft
-    // //           if (!draft.geoEntries) draft.geoEntries = {};
-
-    // //           snapshot.docChanges().forEach((change) => {
-    // //             const erf = change.doc.data();
-    // //             const id = erf.erfId || change.doc.id;
-
-    // //             if (change.type === "removed") {
-    // //               const idx = draft.metaEntries.findIndex((m) => m.id === id);
-    // //               if (idx > -1) draft.metaEntries.splice(idx, 1);
-    // //               delete draft.geoEntries[id];
-    // //               // ... inside your forEach loop
-    // //             } else {
-    // //               // 🎯 1. ATOMIC MERGE for the List (Array)
-    // //               const meta = transformToMeta(id, erf);
-    // //               const existingIdx = draft.metaEntries.findIndex(
-    // //                 (m) => m.id === id,
-    // //               );
-
-    // //               if (existingIdx > -1) {
-    // //                 draft.metaEntries[existingIdx] = meta;
-    // //               } else {
-    // //                 draft.metaEntries.push(meta);
-    // //               }
-
-    // //               // 🎯 2. GEOMETRY STORAGE for the Map (Object)
-    // //               if (erf.geometry || erf.centroid) {
-    // //                 // ✅ FIX: Use geoEntries (The Object), NOT metaEntries (The Array)
-    // //                 draft.geoEntries[id] = {
-    // //                   centroid: erf.centroid,
-    // //                   bbox: erf.bbox,
-    // //                   geometry:
-    // //                     typeof erf.geometry === "string"
-    // //                       ? JSON.parse(erf.geometry)
-    // //                       : erf.geometry,
-    // //                 };
-    // //               }
-    // //             }
-    // //           });
-    // //         });
-    // //       });
-    // //     } catch (e) {
-    // //       console.error("❌ [ERF_VAULT_STREAM_ERROR]:", e);
-    // //     }
-    // //     console.log(
-    // //       `getErfsByLmPcode --onCacheEntryAdded ENDED for ${lmPcode}`,
-    // //     );
-    // //     await cacheEntryRemoved;
-    // //     unsubscribe();
-    // //   },
-    // // }),
-
     getErfsByCountryCode: builder.query({
       async queryFn() {
         return { data: [] };
@@ -593,11 +246,233 @@ export const erfsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getErfsByLmPcodeWardPcode: builder.query({
+      queryFn: ({ lmPcode, wardPcode }) => ({
+        data: {
+          metaEntries: [],
+          geoEntries: {},
+          sync: {
+            status: "idle", // idle | syncing | ready | error
+            lmPcode: lmPcode || null,
+            wardPcode: wardPcode || null,
+            wardCacheKey:
+              lmPcode && wardPcode
+                ? makeWardPackKey({ lmPcode, wardPcode })
+                : null,
+            firstSnapshotAt: 0,
+            lastSyncAt: 0,
+            lastError: null,
+            size: 0,
+          },
+        },
+      }),
+
+      async onCacheEntryAdded(
+        args,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        const lmPcode = args?.lmPcode;
+        const wardPcode = args?.wardPcode;
+        if (!lmPcode || !wardPcode) return;
+
+        const wardCacheKey = makeWardPackKey({ lmPcode, wardPcode });
+        const scope = `ERFsPackLive(${wardCacheKey})`;
+
+        await cacheDataLoaded;
+
+        // 1) immediately mark syncing
+        updateCachedData((draft) => {
+          draft.sync = draft.sync || {};
+          draft.sync.status = "syncing";
+          draft.sync.lmPcode = lmPcode;
+          draft.sync.wardPcode = wardPcode;
+          draft.sync.wardCacheKey = wardCacheKey;
+          draft.sync.lastError = null;
+        });
+
+        let isFirstSnapshot = true;
+        let unsubscribe = () => {};
+
+        try {
+          const q = query(
+            collection(db, "ireps_erfs"),
+            where("admin.localMunicipality.pcode", "==", lmPcode),
+            where("admin.ward.pcode", "==", wardPcode),
+            orderBy("metadata.updatedAt", "desc"),
+          );
+
+          unsubscribe = onSnapshot(
+            q,
+            (snap) => {
+              // ✅ FIRST SNAPSHOT = full authoritative rebuild
+              if (isFirstSnapshot) {
+                isFirstSnapshot = false;
+
+                const metaEntries = [];
+                const geoEntries = {};
+
+                snap.docs.forEach((docSnap) => {
+                  const erf = docSnap.data() || {};
+                  const id = erf?.erfId || erf?.erf?.erfId || docSnap.id;
+
+                  metaEntries.push(transformToMeta(id, erf));
+
+                  let parsedGeometry = null;
+                  const rawGeometry =
+                    erf?.geometry ?? erf?.erf?.geometry ?? null;
+
+                  if (typeof rawGeometry === "string") {
+                    try {
+                      parsedGeometry = JSON.parse(rawGeometry);
+                    } catch {
+                      parsedGeometry = null;
+                    }
+                  } else {
+                    parsedGeometry = rawGeometry || null;
+                  }
+
+                  geoEntries[id] = {
+                    bbox: erf?.bbox ?? erf?.erf?.bbox ?? null,
+                    centroid: erf?.centroid ?? erf?.erf?.centroid ?? null,
+                    geometry: parsedGeometry,
+                  };
+                });
+
+                // ✅ final sort by updatedAt desc (extra safety)
+                metaEntries.sort((a, b) =>
+                  String(b?.metadata?.updatedAt || "").localeCompare(
+                    String(a?.metadata?.updatedAt || ""),
+                  ),
+                );
+
+                updateCachedData((draft) => {
+                  draft.metaEntries = metaEntries;
+                  draft.geoEntries = geoEntries;
+                  draft.sync.status = "ready";
+                  draft.sync.firstSnapshotAt =
+                    draft.sync.firstSnapshotAt || Date.now();
+                  draft.sync.lastSyncAt = Date.now();
+                  draft.sync.lastError = null;
+                  draft.sync.size = snap.size;
+                });
+
+                fsLog(scope, "first snapshot loaded", { size: snap.size });
+                return;
+              }
+
+              // ✅ LATER SNAPSHOTS = surgical patching via docChanges()
+              const changes = snap.docChanges();
+              if (!changes.length) return;
+
+              updateCachedData((draft) => {
+                draft.metaEntries = draft.metaEntries || [];
+                draft.geoEntries = draft.geoEntries || {};
+                draft.sync = draft.sync || {};
+
+                changes.forEach((change) => {
+                  const erf = change.doc.data() || {};
+                  const id = erf?.erfId || erf?.erf?.erfId || change.doc.id;
+
+                  if (change.type === "removed") {
+                    const idx = draft.metaEntries.findIndex((e) => e.id === id);
+                    if (idx !== -1) draft.metaEntries.splice(idx, 1);
+                    delete draft.geoEntries[id];
+                    return;
+                  }
+
+                  // --- META ---
+                  const nextMeta = transformToMeta(id, erf);
+                  const existingIdx = draft.metaEntries.findIndex(
+                    (e) => e.id === id,
+                  );
+
+                  if (existingIdx !== -1) {
+                    draft.metaEntries[existingIdx] = nextMeta;
+                  } else {
+                    draft.metaEntries.push(nextMeta);
+                  }
+
+                  // --- GEO ---
+                  let parsedGeometry = null;
+                  const rawGeometry =
+                    erf?.geometry ?? erf?.erf?.geometry ?? null;
+
+                  if (typeof rawGeometry === "string") {
+                    try {
+                      parsedGeometry = JSON.parse(rawGeometry);
+                    } catch {
+                      parsedGeometry = null;
+                    }
+                  } else {
+                    parsedGeometry = rawGeometry || null;
+                  }
+
+                  draft.geoEntries[id] = {
+                    bbox: erf?.bbox ?? erf?.erf?.bbox ?? null,
+                    centroid: erf?.centroid ?? erf?.erf?.centroid ?? null,
+                    geometry: parsedGeometry,
+                  };
+                });
+
+                // ✅ ALWAYS RE-SORT AFTER PATCHING
+                // This is what moves a newly updated ERF to the top
+                draft.metaEntries.sort((a, b) =>
+                  String(b?.metadata?.updatedAt || "").localeCompare(
+                    String(a?.metadata?.updatedAt || ""),
+                  ),
+                );
+
+                draft.sync.status = "ready";
+                draft.sync.lastSyncAt = Date.now();
+                draft.sync.lastError = null;
+                draft.sync.size = snap.size;
+              });
+              fsLog(scope, "docChanges applied", {
+                changes: changes.length,
+                ward: wardPcode,
+                lm: lmPcode,
+              });
+            },
+            (error) => {
+              fsError(scope, "onSnapshot error", error);
+
+              updateCachedData((draft) => {
+                draft.sync = draft.sync || {};
+                draft.sync.status = "error";
+                draft.sync.lastError = String(error?.message || error);
+              });
+            },
+          );
+        } catch (error) {
+          fsError(scope, "listener setup error", error);
+
+          updateCachedData((draft) => {
+            draft.sync = draft.sync || {};
+            draft.sync.status = "error";
+            draft.sync.lastError = String(error?.message || error);
+          });
+        }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+
+      serializeQueryArgs: ({ endpointName, queryArgs }) => {
+        const lmPcode = queryArgs?.lmPcode;
+        const wardPcode = queryArgs?.wardPcode;
+        const wardCacheKey =
+          lmPcode && wardPcode ? makeWardPackKey({ lmPcode, wardPcode }) : "NA";
+        return `${endpointName}(${wardCacheKey})`;
+      },
+
+      keepUnusedDataFor: 60 * 60 * 24 * 30,
+    }),
   }),
 });
 
 export const {
   useGetErfsByLmPcodeQuery,
-  useGetErfsByLmAndWardQuery,
   useGetErfsByCountryCodeQuery,
+  useGetErfsByLmPcodeWardPcodeQuery,
 } = erfsApi;
