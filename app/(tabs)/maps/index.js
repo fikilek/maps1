@@ -24,6 +24,7 @@ import { useRouter } from "expo-router";
 import GeoStatusHUD from "../../../components/GeoStatusHUD";
 import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
 import NeighbourhoodPremiseMarker from "../../../components/maps/NeighbourhoodPremiseMarker";
+import PremiseMarkerActionModal from "../../../components/maps/PremiseMarkerActionModal";
 import SelectedErf from "../../../components/maps/SelectedErf";
 import SelecteMeter from "../../../components/maps/SelectedMeter";
 import SelectedPremise from "../../../components/maps/SelectedPremise";
@@ -35,6 +36,7 @@ import {
   useMap,
 } from "../../../src/context/MapContext";
 import { useWarehouse } from "../../../src/context/WarehouseContext";
+import { useUpdatePremiseMutation } from "../../../src/redux/premisesApi";
 import { cutLastWord } from "../../../src/utils/stringsUtils";
 
 function MapScopeState({ title, subtitle }) {
@@ -54,6 +56,7 @@ export default function MapsScreen() {
   const { all, sync } = useWarehouse();
   const { openMissionDiscovery } = useDiscovery();
   const router = useRouter();
+  const [updatePremise] = useUpdatePremiseMutation();
 
   const lastSignalRef = useRef(null);
 
@@ -73,7 +76,9 @@ export default function MapsScreen() {
   /*
   START - Marker Drag Mode
   */
-
+  const [premiseActionPrem, setPremiseActionPrem] = useState(null);
+  const [mapMode, setMapMode] = useState("browse");
+  // "browse" | "edit-premise-marker"
   const [dragPremiseId, setDragPremiseId] = useState(null);
   const [draftCoordsById, setDraftCoordsById] = useState({});
   const [savingDragId, setSavingDragId] = useState(null);
@@ -102,21 +107,13 @@ export default function MapsScreen() {
     [draftCoordsById],
   );
 
-  // Enter drag mode
-  const handlePremiseMarkerLongPress = useCallback((premiseId) => {
-    setDragPremiseId(premiseId);
-  }, []);
-
-  // Normal press - When a marker is already in drag mode, normal press should probably do nothing for now.
-  // When not dragging, it can open the premise actions/details.
   const handlePremiseMarkerPress = useCallback(
-    (prem) => {
-      if (dragPremiseId) return;
-
-      // your existing open-details / open-actions logic here
-      // openPremiseSheet(prem)
+    (prem, e) => {
+      if (mapMode === "edit-premise-marker") return;
+      e?.stopPropagation?.();
+      setPremiseActionPrem(prem);
     },
-    [dragPremiseId],
+    [mapMode],
   );
 
   // Drag end - This stores local draft coordinates only.
@@ -134,38 +131,112 @@ export default function MapsScreen() {
 
   // Exit drag mode without saving - Useful immediately, even before LOCK save is wired.
   const handleCancelPremiseDrag = useCallback(() => {
+    if (dragPremiseId) {
+      setDraftCoordsById((prev) => {
+        const next = { ...prev };
+        delete next[dragPremiseId];
+        return next;
+      });
+    }
+
     setDragPremiseId(null);
-  }, []);
+    setMapMode("browse");
+  }, [dragPremiseId]);
 
-  const getPremiseNeighborhoodCoordinate = useCallback(
-    (prem, pLat, pLng) => {
-      const draft = draftCoordsById[prem?.id];
+  const activeDragPremise = useMemo(() => {
+    if (!dragPremiseId) return null;
+    return all?.prems?.find((p) => p.id === dragPremiseId) || null;
+  }, [all?.prems, dragPremiseId]);
 
-      if (draft?.lat != null && draft?.lng != null) {
-        return {
-          latitude: draft.lat,
-          longitude: draft.lng,
-        };
-      }
+  const handleLockPremiseDrag = useCallback(async () => {
+    if (!dragPremiseId) return;
 
-      if (pLat == null || pLng == null) return null;
+    const prem = all?.prems?.find((p) => p.id === dragPremiseId);
+    if (!prem?.id) return;
 
-      return {
-        latitude: pLat,
-        longitude: pLng,
+    const draft = draftCoordsById[dragPremiseId];
+
+    if (!draft) {
+      setDragPremiseId(null);
+      setMapMode("browse");
+      return;
+    }
+
+    try {
+      setSavingDragId(dragPremiseId);
+
+      const updatedPremise = {
+        ...prem,
+        geometry: {
+          ...(prem?.geometry || {}),
+          centroid: {
+            ...(prem?.geometry?.centroid || {}),
+            lat: draft.lat,
+            lng: draft.lng,
+          },
+        },
+        metadata: {
+          ...(prem?.metadata || {}),
+          updatedAt: new Date().toISOString(),
+        },
       };
-    },
-    [draftCoordsById],
-  );
 
+      await updatePremise(updatedPremise).unwrap();
+
+      setDraftCoordsById((prev) => {
+        const next = { ...prev };
+        delete next[dragPremiseId];
+        return next;
+      });
+
+      setDragPremiseId(null);
+      setMapMode("browse");
+    } catch (err) {
+      console.error("❌ [LOCK_PREMISE_DRAG_FAIL]:", err);
+    } finally {
+      setSavingDragId(null);
+    }
+  }, [all?.prems, dragPremiseId, draftCoordsById, updatePremise]);
   /*
   END - Marker Drag Mode
+  */
+
+  /*
+  START - Marker Drag Moodal
+  */
+
+  const handleClosePremiseActionModal = useCallback(() => {
+    setPremiseActionPrem(null);
+  }, []);
+
+  const handleOpenMeterDiscoveryFromModal = useCallback(() => {
+    const prem = premiseActionPrem;
+    if (!prem?.id) return;
+
+    setPremiseActionPrem(null);
+
+    openMissionDiscovery({
+      premiseId: prem.id,
+    });
+  }, [premiseActionPrem, openMissionDiscovery]);
+
+  const handleAdjustPremisePositionFromModal = useCallback(() => {
+    const prem = premiseActionPrem;
+    if (!prem?.id) return;
+
+    setPremiseActionPrem(null);
+    setMapMode("edit-premise-marker");
+    setDragPremiseId(prem.id);
+  }, [premiseActionPrem]);
+
+  /*
+  END - Marker Drag Moodal
   */
 
   const scopeSync = sync?.scope ?? { status: "idle" };
 
   const hasLm = !!geoState?.selectedLm?.id;
-  const hasWard = !!geoState?.selectedWard?.id;
+  // const hasWard = !!geoState?.selectedWard?.id;
   const scopeReady = scopeSync?.status === "ready";
   const isLmOnly = scopeSync?.status === "lm-only";
 
@@ -258,9 +329,13 @@ export default function MapsScreen() {
 
       case "METER": {
         const meterGps = selectedMeter?.ast?.location?.gps;
+
         const pCentroid = selectedPremise?.geometry?.centroid;
+
         const erfEntry = all?.geoLibrary?.[selectedErf?.id];
+
         const erfCoords = getSafeCoords(erfEntry?.geometry);
+
         const bundleCoords = [];
 
         if (meterGps?.lat && meterGps?.lng) {
@@ -270,10 +345,14 @@ export default function MapsScreen() {
           });
         }
 
-        if (Array.isArray(pCentroid) && pCentroid.length >= 2) {
+        if (
+          pCentroid &&
+          typeof pCentroid.lat === "number" &&
+          typeof pCentroid.lng === "number"
+        ) {
           bundleCoords.push({
-            latitude: pCentroid[0],
-            longitude: pCentroid[1],
+            latitude: pCentroid.lat,
+            longitude: pCentroid.lng,
           });
         }
 
@@ -345,6 +424,11 @@ export default function MapsScreen() {
       if (wardCoords?.length < 3) return null;
 
       const isSelected = geoState?.selectedWard?.id === ward?.id;
+      const wardInteractive =
+        !gcsModalOpen &&
+        !premiseActionPrem &&
+        zoom < 18 &&
+        mapMode === "browse";
 
       return (
         <Polygon
@@ -358,9 +442,9 @@ export default function MapsScreen() {
           }
           strokeWidth={isSelected ? 3 : 1.5}
           zIndex={isSelected ? 100 : 50}
-          tappable={!gcsModalOpen}
+          tappable={wardInteractive}
           onPress={() => {
-            if (gcsModalOpen) return;
+            if (!wardInteractive) return;
 
             updateGeo({
               selectedWard: ward,
@@ -371,6 +455,40 @@ export default function MapsScreen() {
       );
     });
   };
+
+  // const renderWards = () => {
+  //   return wardsList.map((ward, index) => {
+  //     if (!ward?.geometry) return null;
+  //     const wardCoords = getSafeCoords(ward?.geometry);
+  //     if (wardCoords?.length < 3) return null;
+
+  //     const isSelected = geoState?.selectedWard?.id === ward?.id;
+
+  //     return (
+  //       <Polygon
+  //         key={`ward-poly-${ward?.id || index}`}
+  //         coordinates={wardCoords}
+  //         strokeColor={isSelected ? "#2563eb" : "#475569"}
+  //         fillColor={
+  //           isSelected
+  //             ? "rgba(160, 190, 255, 0.2)"
+  //             : "rgba(148, 163, 184, 0.05)"
+  //         }
+  //         strokeWidth={isSelected ? 3 : 1.5}
+  //         zIndex={isSelected ? 100 : 50}
+  //         tappable={!gcsModalOpen}
+  //         onPress={() => {
+  //           if (gcsModalOpen) return;
+
+  //           updateGeo({
+  //             selectedWard: ward,
+  //             lastSelectionType: "WARD",
+  //           });
+  //         }}
+  //       />
+  //     );
+  //   });
+  // };
 
   const renderSelectedErf = () => {
     const selectedId = geoState?.selectedErf?.id;
@@ -521,8 +639,9 @@ export default function MapsScreen() {
   };
 
   const renderPremisesNeighborhood = () => {
-    if (!scopeReady || !showLayers?.premises || !region || zoom < 18)
+    if (!scopeReady || !showLayers?.premises || !region || zoom < 18) {
       return null;
+    }
 
     const latMin = region.latitude - region.latitudeDelta / 2;
     const latMax = region.latitude + region.latitudeDelta / 2;
@@ -533,75 +652,43 @@ export default function MapsScreen() {
       ?.filter((prem) => {
         if (prem?.id === geoState?.selectedPremise?.id) return false;
 
-        const centroid = prem?.geometry?.centroid;
-        if (
-          !centroid ||
-          typeof centroid.lat !== "number" ||
-          typeof centroid.lng !== "number"
-        ) {
+        const coordinate = getPremiseCoordinate(prem);
+
+        if (coordinate?.latitude == null || coordinate?.longitude == null) {
           return false;
         }
 
-        const pLat = centroid.lat;
-        const pLng = centroid.lng;
-
         return (
-          pLat >= latMin && pLat <= latMax && pLng >= lngMin && pLng <= lngMax
+          coordinate.latitude >= latMin &&
+          coordinate.latitude <= latMax &&
+          coordinate.longitude >= lngMin &&
+          coordinate.longitude <= lngMax
         );
       })
       .map((prem) => {
-        const centroid = prem?.geometry?.centroid;
-        const pLat = centroid?.lat;
-        const pLng = centroid?.lng;
+        const coordinate = getPremiseCoordinate(prem);
+
+        if (coordinate?.latitude == null || coordinate?.longitude == null) {
+          return null;
+        }
 
         return (
           <NeighbourhoodPremiseMarker
             key={`nb-prem-${prem?.id}`}
             prem={prem}
             zoom={zoom}
-            coordinate={getPremiseNeighborhoodCoordinate(prem, pLat, pLng)}
-            isDragging={dragPremiseId === prem?.id}
+            coordinate={coordinate}
+            isDragging={
+              mapMode === "edit-premise-marker" && dragPremiseId === prem?.id
+            }
             isSaving={savingDragId === prem?.id}
-            onPress={(e) => {
-              if (dragPremiseId) return;
-
-              e?.stopPropagation?.();
-              updateGeo({
-                selectedPremise: prem,
-                lastSelectionType: "PREMISE",
-              });
-              openMissionDiscovery({
-                premiseId: prem?.id,
-              });
-            }}
-            onLongPress={() => {
-              setDragPremiseId(prem?.id);
-            }}
-            onDragEnd={(coordinate) => {
-              handlePremiseMarkerDragEnd(prem?.id, coordinate);
-            }}
+            onPress={(e) => handlePremiseMarkerPress(prem, e)}
+            onDragEnd={(nextCoordinate) =>
+              handlePremiseMarkerDragEnd(prem?.id, nextCoordinate)
+            }
             showAddressFromZoom={18}
             showTypeFromZoom={18}
           />
-
-          // <NeighbourhoodPremiseMarker
-          //   key={`nb-prem-${prem?.id}`}
-          //   prem={prem}
-          //   zoom={zoom}
-          //   coordinate={{ latitude: pLat, longitude: pLng }}
-          //   onPress={(e) => {
-          //     e?.stopPropagation?.();
-          //     updateGeo({
-          //       selectedPremise: prem,
-          //       lastSelectionType: "PREMISE",
-          //     });
-          //     openMissionDiscovery({
-          //       premiseId: prem?.id,
-          //     });
-          //   }}
-          //   showAddressFromZoom={18}
-          //   showTypeFromZoom={18}
-          // />
         );
       });
   };
@@ -684,12 +771,19 @@ export default function MapsScreen() {
         );
         const pCentroid = parentPrem?.geometry?.centroid;
 
-        if (!pCentroid || !Array.isArray(pCentroid)) return null;
+        if (
+          !pCentroid ||
+          typeof pCentroid.lat !== "number" ||
+          typeof pCentroid.lng !== "number"
+        ) {
+          return null;
+        }
 
         const mLat = m.ast.location.gps.lat;
         const mLng = m.ast.location.gps.lng;
-        const pLat = pCentroid[0];
-        const pLng = pCentroid[1];
+
+        const pLat = pCentroid.lat;
+        const pLng = pCentroid.lng;
 
         const isWater = m.meterType === "water";
         const connectionColor = isWater
@@ -872,6 +966,45 @@ export default function MapsScreen() {
           <Text style={styles.zoomLabel}>ZOOM</Text>
         </View>
       </View>
+
+      {mapMode === "edit-premise-marker" && activeDragPremise ? (
+        <View style={styles.dragEditBar}>
+          <View style={styles.dragEditInfo}>
+            <Text style={styles.dragEditTitle}>
+              Adjusting Erf {activeDragPremise?.erfNo || "?"}
+            </Text>
+            <Text style={styles.dragEditSub}>
+              Drag the marker, then lock to save
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.dragEditBtn, styles.dragCancelBtn]}
+            onPress={handleCancelPremiseDrag}
+            disabled={!!savingDragId}
+          >
+            <Text style={styles.dragCancelText}>CANCEL</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.dragEditBtn, styles.dragLockBtn]}
+            onPress={handleLockPremiseDrag}
+            disabled={!!savingDragId}
+          >
+            <Text style={styles.dragLockText}>
+              {savingDragId ? "SAVING..." : "LOCK"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <PremiseMarkerActionModal
+        visible={!!premiseActionPrem}
+        premise={premiseActionPrem}
+        onClose={handleClosePremiseActionModal}
+        onOpenMeterDiscovery={handleOpenMeterDiscoveryFromModal}
+        onAdjustPosition={handleAdjustPremisePositionFromModal}
+      />
     </View>
   );
 }
@@ -1009,5 +1142,65 @@ const styles = StyleSheet.create({
     shadowColor: "#000",
     shadowOpacity: 0.3,
     shadowRadius: 1,
+  },
+
+  dragEditBar: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 110,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+    zIndex: 120,
+    elevation: 12,
+  },
+
+  dragEditInfo: {
+    marginBottom: 10,
+  },
+
+  dragEditTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+
+  dragEditSub: {
+    marginTop: 2,
+    fontSize: 11,
+    color: "#64748B",
+  },
+
+  dragEditBtn: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+
+  dragCancelBtn: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+  },
+
+  dragLockBtn: {
+    backgroundColor: "#2563EB",
+  },
+
+  dragCancelText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#475569",
+  },
+
+  dragLockText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#FFFFFF",
   },
 });

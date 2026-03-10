@@ -74,7 +74,6 @@ function NeighbourhoodPremiseMarkerBase({
   zoom,
   coordinate,
   onPress,
-  onLongPress,
   onDragEnd,
   isDragging = false,
   isSaving = false,
@@ -119,7 +118,6 @@ function NeighbourhoodPremiseMarkerBase({
       anchor={{ x: 0.5, y: 0.5 }}
       draggable={isDragging}
       onPress={onPress}
-      onLongPress={onLongPress}
       onDragEnd={(e) => {
         const next = e?.nativeEvent?.coordinate;
         if (!next) return;
@@ -163,7 +161,7 @@ function NeighbourhoodPremiseMarkerBase({
             />
           </View>
 
-          {isDragging && (
+          {/* {isDragging && (
             <Text style={styles.dragLabel} numberOfLines={1}>
               MOVE
             </Text>
@@ -173,7 +171,7 @@ function NeighbourhoodPremiseMarkerBase({
             <Text style={styles.savingLabel} numberOfLines={1}>
               SAVING
             </Text>
-          )}
+          )} */}
 
           {/* keep for later if needed
           {showType && !!typeLabel && (
@@ -237,8 +235,8 @@ const styles = StyleSheet.create({
   },
 
   badgeDragging: {
-    borderWidth: 3,
-    borderColor: "#2563EB",
+    borderWidth: 4,
+    borderColor: "#3525eb",
     transform: [{ scale: 1.06 }],
   },
 

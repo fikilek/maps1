@@ -483,6 +483,10 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
                 );
                 const wardDigits = erf?.admin?.ward?.name;
 
+                const name = p?.propertyType?.name;
+                const unitNo = p?.propertyType?.unitNo;
+                const nameUnitNo = `${name} ${unitNo}`;
+
                 return (
                   <TouchableOpacity
                     style={[
@@ -503,7 +507,7 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
                           },
                         ]}
                       >
-                        {`${p?.propertyType?.type || "Res"} - ${p?.address?.strNo || ""} ${p?.address?.strName || ""}`}
+                        {`${p?.propertyType?.type || ""} - ${nameUnitNo || ""} - ${p?.address?.strNo || ""} ${p?.address?.strName || ""}`}
                       </Text>
                       <Text style={styles.subLabel}>
                         {`Erf ${p?.erfNo || "N/A"} - ${wardDigits || ""}`}
