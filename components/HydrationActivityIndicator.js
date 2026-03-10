@@ -70,7 +70,7 @@ function formatMs(ms) {
 }
 
 export default function HydrationActivityIndicator({
-  title = "HYDRATING SOVEREIGN VAULT...",
+  title = "DOWNLOADING LAND PARCEL (ERFS) DATA ...",
   subtitle,
   status = "syncing", // syncing | ready | error | idle
   loadedCount = 0,
@@ -116,7 +116,7 @@ export default function HydrationActivityIndicator({
   }, [loadedCount, totalCount, status, totalKnown]);
 
   const patienceMsg =
-    "First load can take a moment. After this, switching wards is instant.";
+    "First load can take a while. PLEASE BE PATIENT. After this, switching wards is instant.";
 
   return (
     <View

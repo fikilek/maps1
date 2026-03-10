@@ -1,6 +1,7 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik } from "formik";
+import { useMemo } from "react";
 import {
   Dimensions,
   ScrollView,
@@ -11,12 +12,11 @@ import {
   View,
 } from "react-native";
 import { Divider, Surface, Switch } from "react-native-paper";
-
-import { useMemo } from "react";
 import * as Yup from "yup";
 import FormInput from "../../../components/forms/FormInput";
 import FormMapPositioner from "../../../components/forms/FormMapPositioner";
 import FormSelect from "../../../components/forms/FormSelect";
+import { IrepsMedia } from "../../../components/media/IrepsMedia";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import { useAuth } from "../../hooks/useAuth";
@@ -43,11 +43,16 @@ const streetTypeOptions = [
 const propertyTypeOptions = [
   "Select...",
   "Residential",
-  "Business",
+  "Commercial",
   "Industrial",
   "Sectional Title",
+  "Townhouse Complex",
   "Vacant Land",
   "Flats",
+  "Estate",
+  "Church",
+  "School",
+  "Government",
 ];
 
 const premiseOccupancySatusOptions = [
@@ -60,65 +65,54 @@ const premiseOccupancySatusOptions = [
 ];
 
 // 🏛️ Schema Validation (Yup)
-const PremiseSchema = Yup.object().shape({
-  address: Yup.object().shape({
-    strNo: Yup.string().required("Mandatory"),
-    strName: Yup.string().required("Mandatory"),
-    strType: Yup.string()
-      .notOneOf(["Select..."], "Please select a street type")
-      .required("Required"),
-  }),
-  propertyType: Yup.object().shape({
-    type: Yup.string()
-      .notOneOf(["Select..."], "Please select a property type")
-      .required("Required"),
-    // If type is "Sectional Title" (or Flats), name is mandatory
-    name: Yup.string().when("type", {
-      // 🎯 Logic: Check if the value is either Flats or Sectional Title
-      is: (val) =>
-        val === "Flats" || val === "Sectional Title" || val === "Business",
-      then: (schema) => schema.required("Unit Name is mandatory"),
-      otherwise: (schema) => schema.optional(),
-    }),
-    // If type is "Sectional Title", unitNo must have at least one entry
-    unitNo: Yup.string().when("type", {
-      is: (val) => val === "Flats" || val === "Sectional Title",
-      then: (schema) => schema.required("Unit No is mandatory"),
-      otherwise: (schema) => schema.optional(),
-    }),
-  }),
-  context: Yup.string()
-    .oneOf(["Township", "Suburb"], "Please select a valid category")
-    .required("Required"),
-  occupancy: Yup.object().shape({
-    status: Yup.string()
-      .oneOf(
-        [
-          "Occupied",
-          "Unoccupied",
-          "Vandalised",
-          "Under Consrtruction",
-          "Dilapidated",
-          "Accessed",
-        ],
-        "Invalid Status",
-      )
-      .required("Required"),
-  }),
-  metadata: Yup.object().shape({
-    isGpsVerified: Yup.boolean()
-      .oneOf([true], "Field verification is mandatory")
-      .required("Required"),
-  }),
-});
+
+function hasTaggedMedia(media, tag) {
+  if (!Array.isArray(media)) return false;
+
+  return media.some((item) => {
+    if (!item) return false;
+    return item.tag === tag;
+  });
+}
+
+function isFilled(value) {
+  return String(value || "").trim().length > 0;
+}
+
+function isSamePoint(a, b, tolerance = 0.000001) {
+  if (!a || !b) return false;
+
+  const aLat = Number(a?.lat);
+  const aLng = Number(a?.lng);
+  const bLat = Number(b?.lat);
+  const bLng = Number(b?.lng);
+
+  if (
+    Number.isNaN(aLat) ||
+    Number.isNaN(aLng) ||
+    Number.isNaN(bLat) ||
+    Number.isNaN(bLng)
+  ) {
+    return false;
+  }
+
+  return Math.abs(aLat - bLat) < tolerance && Math.abs(aLng - bLng) < tolerance;
+}
 
 export default function FormPremise() {
   // console.log(`FormPremise ----mounted`);
 
   const { all } = useWarehouse();
+
   const router = useRouter();
 
   const { id, premiseId, duplicateId } = useLocalSearchParams();
+  console.log(`FormPremise ----id`, id);
+
+  const auth = useAuth();
+
+  const agentUid = auth?.user?.uid || "unknown_uid";
+  const agentName = auth?.profile?.profile?.displayName || "Field Agent";
 
   // 🕵️ 2. DETERMINE MISSION MODE
   const isEdit = !!premiseId;
@@ -132,17 +126,21 @@ export default function FormPremise() {
     if (!targetId) return null;
     return all?.prems?.find((p) => p.id === targetId);
   }, [premiseId, duplicateId, all?.prems]);
+  console.log(`FormPremise ----sourcePremise`, sourcePremise);
 
   const { authState } = useAuth();
 
-  const { geoState } = useGeo();
+  const { geoState, updateGeo } = useGeo();
   // console.log(`FormPremise ----geoState`, geoState);
 
   /* SELECTED ERF METADATA  */
-  const targetGeo = all?.geoEntries?.[id] || null;
+  const targetGeo =
+    all?.geoLibrary?.[id] || all?.geoLibrary?.[selectedErf?.erfId] || null;
   const selectedErf = geoState?.selectedErf || null;
-  console.log(`FormPremise ----selectedErf`, selectedErf);
+  // console.log(`FormPremise ----selectedErf`, selectedErf);
+  // console.log(`FormPremise ----selectedErf?.centroid`, selectedErf?.centroid);
   // console.log(`FormPremise ----selectedErf?.erfNo`, selectedErf?.erfNo);
+  // console.log(`FormPremise ----targetGeo`, targetGeo);
 
   /* 🏛️ SOVEREIGN SOURCE: Extracting directly from the Erf Object */
   const erfNo = selectedErf?.erfNo || "N/A"; // e.g. "214"
@@ -152,94 +150,331 @@ export default function FormPremise() {
 
   /* 🛰️ GEOMETRY RESOLVER: Tiered Fallback */
   const erfCentroid = useMemo(() => {
-    // 🎯 TIER 1: The Erf's actual SG/GIS Centroid (High Precision)
-    if (targetGeo?.centroid) {
-      return [targetGeo.centroid.lat, targetGeo.centroid.lng];
+    if (targetGeo?.centroid?.lat != null && targetGeo?.centroid?.lng != null) {
+      return {
+        lat: targetGeo.centroid.lat,
+        lng: targetGeo.centroid.lng,
+      };
     }
 
-    // 🎯 TIER 3: The LM's Centroid (Municipal Center)
-    // Pulling from the warehouse metadata
-    if (all?.meta?.centroid) {
-      return [all.meta.centroid.lat, all.meta.centroid.lng];
-    }
-
-    // 🛡️ LAST RESORT: Safe Municipal Default (Knysna area)
-    return [-34.035, 23.048];
-  }, [targetGeo, geoState?.userLocation, all?.meta?.centroid]);
+    return { lat: -34.035, lng: 23.048 };
+  }, [selectedErf, targetGeo, all?.meta?.centroid]);
 
   // 🌍 REGIONAL HIERARCHY: Direct from the Erf's admin block
   const admin = selectedErf?.admin;
-  const lmId = admin?.localMunicipality?.pcode; // e.g. "ZA1048"
-  const dmId = admin?.district?.pcode; // e.g. "ZA104"
-  const provinceId = admin?.province?.pcode; // e.g. "ZA1"
-  const countryId = admin?.country?.pcode; // e.g. "ZA1"
+  // const countryId = admin?.country?.pcode; // e.g. "ZA1"
+  // const provinceId = admin?.province?.pcode; // e.g. "ZA1"
+  // const dmId = admin?.district?.pcode; // e.g. "ZA104"
+  // const lmId = admin?.localMunicipality?.pcode; // e.g. "ZA1048"
+  // const wardId = admin?.ward?.pcode; // e.g. "ZA1048"
+  // const wardNo = admin?.ward?.name?.split(" ")[1];
+  const wardNo =
+    admin?.ward?.name?.match(/\d+/)?.[0] ||
+    admin?.ward?.pcode?.slice(-3) ||
+    "UNK";
 
-  // 🎯 THE INTELLIGENCE RESOLVER
+  const premiseSchema = useMemo(() => {
+    return Yup.object().shape({
+      schemaVersion: Yup.string().required("Schema version is required"),
+
+      address: Yup.object().shape({
+        strNo: Yup.string().trim().required("Mandatory"),
+        strName: Yup.string().trim().required("Mandatory"),
+        strType: Yup.string()
+          .notOneOf(["Select..."], "Please select a street type")
+          .required("Required"),
+      }),
+
+      propertyType: Yup.object().shape({
+        type: Yup.string()
+          .notOneOf(["Select..."], "Please select a property type")
+          .required("Required"),
+
+        name: Yup.string().when("type", {
+          is: (val) =>
+            val === "Flats" ||
+            val === "Sectional Title" ||
+            val === "Commercial",
+          then: (schema) => schema.trim().required("Unit Name is mandatory"),
+          otherwise: (schema) => schema.optional(),
+        }),
+
+        unitNo: Yup.string().when("type", {
+          is: (val) => val === "Flats" || val === "Sectional Title",
+          then: (schema) => schema.trim().required("Unit No is mandatory"),
+          otherwise: (schema) => schema.optional(),
+        }),
+      }),
+
+      context: Yup.string()
+        .oneOf(["Township", "Suburb"], "Please select a valid category")
+        .required("Required"),
+
+      occupancy: Yup.object().shape({
+        status: Yup.string()
+          .oneOf(
+            [
+              "Occupied",
+              "Unoccupied",
+              "Vandalised",
+              "Under Construction",
+              "Dilapidated",
+              "Accessed",
+            ],
+            "Invalid Status",
+          )
+          .required("Required"),
+      }),
+
+      geometry: Yup.object().shape({
+        centroid: Yup.object()
+          .shape({
+            lat: Yup.number().required("Latitude is required"),
+            lng: Yup.number().required("Longitude is required"),
+          })
+          .test(
+            "moved-from-erf-centroid",
+            "You must move the GPS pin away from the default ERF position",
+            function (value) {
+              const hasValidPoint =
+                typeof value?.lat === "number" &&
+                typeof value?.lng === "number";
+
+              if (!hasValidPoint) return false;
+
+              const hasDefaultPoint =
+                typeof erfCentroid?.lat === "number" &&
+                typeof erfCentroid?.lng === "number";
+
+              if (!hasDefaultPoint) return true;
+
+              return !isSamePoint(value, erfCentroid);
+            },
+          ),
+      }),
+
+      media: Yup.array()
+        .default([])
+        .test(
+          "property-type-photo-required",
+          "Property Type photo is mandatory once property type is selected",
+          function (media) {
+            const propertyType = this.parent?.propertyType?.type;
+
+            const propertyTypeChosen =
+              !!propertyType &&
+              propertyType !== "Select..." &&
+              String(propertyType).trim() !== "";
+
+            if (!propertyTypeChosen) return true;
+
+            return hasTaggedMedia(media, "propertyTypePhoto");
+          },
+        )
+        .test(
+          "property-address-photo-required",
+          "Property Address photo is mandatory once street number and street name are completed",
+          function (media) {
+            const strNo = this.parent?.address?.strNo;
+            const strName = this.parent?.address?.strName;
+
+            const addressCompleted = isFilled(strNo) && isFilled(strName);
+
+            if (!addressCompleted) return true;
+
+            return hasTaggedMedia(media, "propertyAdrPhoto");
+          },
+        ),
+    });
+  }, [erfCentroid]);
 
   const initialValues = useMemo(() => {
     const timestamp = new Date().toISOString();
+
     const agentStamp = {
       at: timestamp,
       byUser: authState?.user?.displayName || "Field Agent",
       byUid: authState?.user?.uid || "unknown_uid",
     };
 
-    // 🛡️ MODE A: THE EDIT (Preserve Identity & History)
+    const baseParents = {
+      countryPcode: admin?.country?.pcode || null,
+      provincePcode: admin?.province?.pcode || null,
+      dmPcode: admin?.district?.pcode || null,
+      lmPcode: admin?.localMunicipality?.pcode || null,
+      wardPcode: admin?.ward?.pcode || null,
+    };
+
+    const baseGeometry = {
+      centroid: {
+        lat: erfCentroid?.lat,
+        lng: erfCentroid?.lng,
+      },
+    };
+
+    const baseContext = selectedErf?.isTownship ? "Township" : "Suburb";
+
+    // EDIT
     if (isEdit && sourcePremise) {
       return {
         ...sourcePremise,
+
+        schemaVersion: sourcePremise?.schemaVersion || "1.0.0",
+
+        erfId: sourcePremise?.erfId || id,
+        erfNo: sourcePremise?.erfNo || erfNo,
+
+        context: sourcePremise?.context || baseContext,
+
+        parents: {
+          ...baseParents,
+        },
+
+        address: {
+          strNo: sourcePremise?.address?.strNo || "",
+          strName: sourcePremise?.address?.strName || "",
+          strType: sourcePremise?.address?.strType || "Select...",
+        },
+
+        propertyType: {
+          type: sourcePremise?.propertyType?.type || "Select...",
+          name: sourcePremise?.propertyType?.name || "",
+          unitNo: sourcePremise?.propertyType?.unitNo || "",
+        },
+
+        occupancy: {
+          status: sourcePremise?.occupancy?.status || "Occupied",
+        },
+
+        geometry: sourcePremise?.geometry?.centroid
+          ? {
+              centroid: {
+                lat: sourcePremise.geometry.centroid.lat,
+                lng: sourcePremise.geometry.centroid.lng,
+              },
+            }
+          : baseGeometry,
+
+        media: Array.isArray(sourcePremise?.media) ? sourcePremise.media : [],
+
+        services: {
+          electricityMeters: Array.isArray(
+            sourcePremise?.services?.electricityMeters,
+          )
+            ? sourcePremise.services.electricityMeters
+            : [],
+          waterMeters: Array.isArray(sourcePremise?.services?.waterMeters)
+            ? sourcePremise.services.waterMeters
+            : [],
+        },
+
         metadata: {
-          ...sourcePremise.metadata,
-          updated: agentStamp, // Only the update pulse changes
+          ...sourcePremise?.metadata,
+          created: sourcePremise?.metadata?.created || agentStamp,
+          updated: agentStamp,
+          noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
+            ? sourcePremise.metadata.noAccessTrnIds
+            : [],
         },
       };
     }
 
-    // 👯 MODE B: THE DUPLICATE (Selective Cloning)
+    // DUPLICATE
     if (isDuplicate && sourcePremise) {
       return {
         ...sourcePremise,
-        // 🎯 NEW IDENTITY
-        id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
 
-        // 🎯 FRESH START: Wipe Meters & Specific Unit Number
-        services: { electricityMeters: [], waterMeters: [] },
-        propertyType: { ...sourcePremise.propertyType, unitNo: "" },
+        schemaVersion: "1.0.0",
+
+        id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`,
+
+        erfId: id,
+        erfNo: erfNo,
+
+        context: sourcePremise?.context || baseContext,
+
+        parents: {
+          ...baseParents,
+        },
+
+        address: {
+          strNo: sourcePremise?.address?.strNo || "",
+          strName: sourcePremise?.address?.strName || "",
+          strType: sourcePremise?.address?.strType || "Select...",
+        },
+
+        propertyType: {
+          type: sourcePremise?.propertyType?.type || "Select...",
+          name: sourcePremise?.propertyType?.name || "",
+          unitNo: "",
+        },
+
+        occupancy: {
+          status: sourcePremise?.occupancy?.status || "Occupied",
+        },
+
+        geometry: baseGeometry,
+
+        media: [],
+
+        services: {
+          electricityMeters: [],
+          waterMeters: [],
+        },
 
         metadata: {
-          ...sourcePremise.metadata,
-          // 🛡️ THE NA RESET: The new twin has no visit history
-          naCount: [],
-
-          // 🏛️ AUDIT TRAIL: New birth event
+          ...sourcePremise?.metadata,
           created: agentStamp,
           updated: agentStamp,
-          isGpsVerified: true, // We trust the parent structure's location
+          noAccessTrnIds: [],
         },
       };
     }
 
+    // NEW
     return {
-      id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeErfNo}`,
+      schemaVersion: "1.0.0",
+
+      id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`,
+
       erfId: id,
       erfNo: erfNo,
-      address: { strNo: "", strName: "", strType: "" },
-      propertyType: { type: "", name: "", unitNo: "" },
+
+      context: baseContext,
+
+      parents: {
+        ...baseParents,
+      },
+
+      address: {
+        strNo: "",
+        strName: "",
+        strType: "Select...",
+      },
+
+      propertyType: {
+        type: "Select...",
+        name: "",
+        unitNo: "",
+      },
+
+      occupancy: {
+        status: "Occupied",
+      },
+
+      geometry: baseGeometry,
+
+      media: [],
+
+      services: {
+        electricityMeters: [],
+        waterMeters: [],
+      },
+
       metadata: {
         created: agentStamp,
         updated: agentStamp,
-        lmPcode: lmId,
-        isGpsVerified: false,
-      },
-      geometry: { centroid: erfCentroid },
-      services: { electricityMeters: [], waterMeters: [] },
-      occupancy: { status: "Occupied" },
-      context: selectedErf?.isTownship ? "Township" : "Suburb",
-      parents: {
-        lmId: lmId || null,
-        dmId: dmId || null,
-        provinceId: provinceId || null,
-        countryId: countryId || null,
+        noAccessTrnIds: [],
       },
     };
   }, [
@@ -249,26 +484,18 @@ export default function FormPremise() {
     id,
     erfNo,
     safeErfNo,
+    wardNo,
+    admin,
     erfCentroid,
-    lmId,
-    dmId,
-    provinceId,
+    selectedErf?.isTownship,
     authState?.user,
   ]);
-
-  // console.log(`FormPremise ----initialValues`, initialValues);
-  // console.log(`FormPremise ---sourcePremise`, sourcePremise);
 
   const [addPremise] = useAddPremiseMutation();
   const [updatePremise] = useUpdatePremiseMutation(); // 🎯 Ensure this is in your API slice
 
   const handleSubmit = async (values, { setSubmitting }) => {
-    // 🕵️ Determine if this is an Edit or a New Capture
-    const isEdit = !!values?.id;
-
     try {
-      // 🛰️ 1. PREPARE SOVEREIGN METADATA
-      // We ensure the 'updated' block follows the nested standard: { at, byUser, byUid }
       const finalValues = {
         ...values,
         metadata: {
@@ -281,37 +508,65 @@ export default function FormPremise() {
         },
       };
 
-      // 🛰️ 2. EXECUTE THE CORRECT MUTATION
       if (isEdit) {
-        // console.log(`FormPremise ---EDIT FORM ---finalValues`, finalValues);
         await updatePremise(finalValues).unwrap();
       } else {
-        // console.log(`FormPremise ---NEW FORM ---finalValues`, finalValues);
         await addPremise(finalValues).unwrap();
       }
 
-      // 🏛️ 3. SUCCESS NAVIGATION
-      // Tactical retreat to the Erf details screen to view the updated stack
-      router.replace(`/(tabs)/erfs/${values?.erfId}`);
-    } catch (err) {
-      // 🛡️ 4. OFFLINE-FIRST RESILIENCE
-      // console.warn(`🛰️ Signal Lost but Data Vaulted: ${err.message}`);
+      updateGeo({
+        selectedPremise: finalValues,
+        lastSelectionType: "PREMISE",
+      });
 
-      ToastAndroid.show("Saved Locally - Will sync when signal returns.");
-      router.replace(`/(tabs)/erfs/${values?.erfId}`);
+      router.replace("/(tabs)/premises");
+    } catch (err) {
+      console.warn(`🛰️Could not save premise form: ${err.message}`);
+      ToastAndroid.show("Could not save premise form.", ToastAndroid.LONG);
     } finally {
       setSubmitting(false);
     }
   };
 
+  // const handleSubmit = async (values, { setSubmitting }) => {
+  //   try {
+  //     const finalValues = {
+  //       ...values,
+  //       metadata: {
+  //         ...values.metadata,
+  //         updated: {
+  //           at: new Date().toISOString(),
+  //           byUser: authState?.user?.displayName || "Field Agent",
+  //           byUid: authState?.user?.uid || "unknown_uid",
+  //         },
+  //       },
+  //     };
+
+  //     if (isEdit) {
+  //       await updatePremise(finalValues).unwrap();
+  //     } else {
+  //       await addPremise(finalValues).unwrap();
+  //     }
+
+  //     router.replace(`/(tabs)/premises`);
+  //   } catch (err) {
+  //     console.warn(`🛰️Could not save premise form: ${err.message}`);
+  //     ToastAndroid.show("Could not save premise form.", ToastAndroid.LONG);
+  //   } finally {
+  //     setSubmitting(false);
+  //   }
+  // };
+
   return (
     <Formik
       initialValues={initialValues}
-      validationSchema={PremiseSchema}
+      validationSchema={premiseSchema}
       validateOnMount={true}
       onSubmit={handleSubmit}
     >
       {({ setFieldValue, values, isSubmitting, errors }) => {
+        console.log(`FormPremise --errors`, errors);
+        console.log(`FormPremise --values`, values);
         return (
           <View style={styles.container}>
             <Stack.Screen
@@ -324,15 +579,10 @@ export default function FormPremise() {
                 ),
                 headerLeft: () => (
                   <TouchableOpacity
-                    // 🎯 THE FIX: Instead of router.back(), use replace to go back to the Anchor
-                    onPress={() => router.replace(`/(tabs)/erfs/${id}`)}
-                    style={styles.closeBtnBorder}
+                    onPress={() => router.back()}
+                    style={styles.backBtn}
                   >
-                    <MaterialCommunityIcons
-                      name="close"
-                      size={20}
-                      color="#000"
-                    />
+                    <Ionicons name="chevron-back" size={46} color="#1e293b" />
                   </TouchableOpacity>
                 ),
               }}
@@ -358,26 +608,44 @@ export default function FormPremise() {
                     style={styles.toggleRow}
                     activeOpacity={0.7}
                     onPress={() =>
-                      setFieldValue("isTownship", !values.isTownship)
+                      setFieldValue(
+                        "context",
+                        values.context === "Township" ? "Suburb" : "Township",
+                      )
                     }
+
+                    // onPress={() =>
+                    //   setFieldValue("isTownship", !values.isTownship)
+                    // }
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.toggleLabel}>
-                        {values.isTownship ? "Township" : "Suburb"}
+                        {values.context === "Township" ? "Township" : "Suburb"}
                       </Text>
+                      {/* <Text style={styles.toggleLabel}>
+                        {values.isTownship ? "Township" : "Suburb"}
+                      </Text> */}
                       <Text style={{ fontSize: 10, color: "#94a3b8" }}>
                         Tap row to toggle geographic context
                       </Text>
                     </View>
 
                     <Switch
+                      value={values.context === "Township"}
+                      color="#059669"
+                      onValueChange={(v) =>
+                        setFieldValue("context", v ? "Township" : "Suburb")
+                      }
+                    />
+
+                    {/* <Switch
                       value={values.isTownship}
                       color="#059669"
                       // Keep this for direct toggle hits
                       onValueChange={(v) => setFieldValue("isTownship", v)}
                       // 🛡️ Prevent the Switch from blocking the row tap on some Android versions
                       pointerEvents="none"
-                    />
+                    /> */}
                   </TouchableOpacity>
                 </Surface>
                 <FormSelect
@@ -420,6 +688,12 @@ export default function FormPremise() {
                       </>
                     )}
                 </Surface>
+
+                <IrepsMedia
+                  tag={"propertyTypePhoto"}
+                  agentName={agentName}
+                  agentUid={agentUid}
+                />
               </Surface>
 
               {/* STREET ADDRESS */}
@@ -458,6 +732,12 @@ export default function FormPremise() {
                     options={streetTypeOptions}
                   />
                 </Surface>
+
+                <IrepsMedia
+                  tag={"propertyAdrPhoto"}
+                  agentName={agentName}
+                  agentUid={agentUid}
+                />
 
                 <Surface style={styles.card} elevation={1}>
                   <FormMapPositioner

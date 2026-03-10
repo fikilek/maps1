@@ -29,18 +29,22 @@ export const GeoProvider = ({ children }) => {
 
   const [geoState, setGeoState] = useState(INITIAL_GEO);
 
-  useEffect(() => {
-    console.log("GeoProvider -- selectedLm?.name", geoState.selectedLm?.name);
-    console.log("GeoProvider -- selectedWard", geoState.selectedWard);
-    console.log("GeoProvider -- flightSignal", geoState.flightSignal);
-  }, [
-    geoState.selectedLm?.id,
-    geoState.selectedLm?.name,
-    geoState.selectedWard?.id,
-    geoState.flightSignal,
-  ]);
+  // useEffect(() => {
+  //   console.log(` `);
+  //   console.log("GeoProvider -- selectedLm?.name", geoState.selectedLm?.name);
+  //   console.log("GeoProvider -- selectedWard", geoState.selectedWard);
+  //   console.log("GeoProvider -- flightSignal", geoState.flightSignal);
+  // }, [
+  //   geoState.selectedLm?.id,
+  //   geoState.selectedLm?.name,
+  //   geoState.selectedWard?.id,
+  //   geoState.flightSignal,
+  // ]);
 
   // 1) BOOT: set placeholder LM immediately when workbaseId appears/changes
+  // IMPORTANT:
+  // only do this when there is no current LM yet.
+  // This avoids stomping on manual LM+Ward scope switches.
   useEffect(() => {
     if (!profile) {
       setGeoState(INITIAL_GEO);
@@ -50,10 +54,9 @@ export const GeoProvider = ({ children }) => {
     if (!workbaseId) return;
 
     setGeoState((prev) => {
-      // already aligned
-      if (prev.selectedLm?.id === workbaseId) return prev;
+      // if a selection already exists, don't overwrite it here
+      if (prev.selectedLm) return prev;
 
-      // new workbase => reset below + trigger pilot once
       return {
         ...INITIAL_GEO,
         selectedLm: { id: workbaseId },
@@ -71,28 +74,19 @@ export const GeoProvider = ({ children }) => {
   useEffect(() => {
     if (!profile || !remoteLmDoc) return;
 
-    // ✅ HARD GUARD: ignore late LM docs that don't match current workbaseId
+    // ignore late docs that don't match profile workbase
     if (remoteLmDoc.id !== workbaseId) return;
 
     setGeoState((prev) => {
-      // If already on this LM id, just hydrate the full doc (without reset)
-      if (prev.selectedLm?.id === remoteLmDoc.id) {
-        // upgrade placeholder {id} to full doc
-        const prevHasName = !!prev.selectedLm?.name;
-        if (prevHasName) return prev;
+      // only hydrate the current LM if it matches and is still placeholder
+      if (prev.selectedLm?.id !== remoteLmDoc.id) return prev;
 
-        return {
-          ...prev,
-          selectedLm: remoteLmDoc,
-          flightSignal: prev.flightSignal + 1,
-        };
-      }
+      const prevHasName = !!prev.selectedLm?.name;
+      if (prevHasName) return prev;
 
-      // True LM switch (rare here, because BOOT already set selectedLm.id)
       return {
-        ...INITIAL_GEO,
+        ...prev,
         selectedLm: remoteLmDoc,
-        lastSelectionType: "LM",
         flightSignal: prev.flightSignal + 1,
       };
     });
@@ -108,7 +102,7 @@ export const GeoProvider = ({ children }) => {
 
       let next = { ...prev, ...updates };
 
-      // cascade clears (IMPORTANT: use "in" so null is still treated as update)
+      // cascade clears
       if ("selectedLm" in updates) {
         next.selectedWard = null;
         next.selectedErf = null;
@@ -134,21 +128,45 @@ export const GeoProvider = ({ children }) => {
   }, []);
 
   /**
+   * setActiveWorkbaseWard({ lm, ward })
+   * Atomic LM + Ward switch.
+   * This is the new AppHeader switch path.
+   */
+  const setActiveWorkbaseWard = useCallback(({ lm, ward }) => {
+    if (!lm?.id || !ward?.id) return;
+
+    setGeoState((prev) => ({
+      ...INITIAL_GEO,
+      selectedLm: lm,
+      selectedWard: ward,
+      lastSelectionType: "WARD",
+      flightSignal: prev.flightSignal + 1,
+    }));
+  }, []);
+
+  /**
    * resetGeo()
    * Clears UI selection WITHOUT triggering Pilot.
-   * Keeps LM (so app doesn't go blank after reset).
+   * Keeps LM + Ward so the active scope remains stable.
    */
   const resetGeo = useCallback(() => {
     setGeoState((prev) => ({
       ...INITIAL_GEO,
-      selectedLm: prev.selectedLm, // ✅ keep LM
-      flightSignal: prev.flightSignal, // ✅ no signal bump
+      selectedLm: prev.selectedLm,
+      selectedWard: prev.selectedWard,
+      flightSignal: prev.flightSignal,
     }));
   }, []);
 
   const value = useMemo(
-    () => ({ geoState, updateGeo, resetGeo, setGeoState }),
-    [geoState, updateGeo, resetGeo],
+    () => ({
+      geoState,
+      updateGeo,
+      resetGeo,
+      setGeoState,
+      setActiveWorkbaseWard,
+    }),
+    [geoState, updateGeo, resetGeo, setActiveWorkbaseWard],
   );
 
   return <GeoContext.Provider value={value}>{children}</GeoContext.Provider>;

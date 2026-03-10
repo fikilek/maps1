@@ -12,15 +12,30 @@ import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
 import { erfsApi } from "./erfsApi";
 
+function buildWardPremisesQuery(lmPcode, wardPcode) {
+  return query(
+    collection(db, "premises"),
+    where("parents.lmPcode", "==", lmPcode),
+    where("parents.wardPcode", "==", wardPcode),
+    orderBy("metadata.updated.at", "desc"),
+  );
+}
+
 export const premisesApi = createApi({
   reducerPath: "premisesApi",
   baseQuery: fakeBaseQuery(),
+
   extractRehydrationInfo(action, { reducerPath }) {
     if (action.type === REHYDRATE) {
       return action.payload?.[reducerPath];
     }
   },
+
   endpoints: (builder) => ({
+    // -------------------------------------------------
+    // OLD LM-WIDE ENDPOINT
+    // Keep only temporarily for reports / backward compatibility
+    // -------------------------------------------------
     getPremisesByLmPcode: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
@@ -28,44 +43,122 @@ export const premisesApi = createApi({
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
+
         try {
           await cacheDataLoaded;
+          if (!lmPcode) return;
 
           const q = query(
             collection(db, "premises"),
-            where("parents.lmId", "==", lmPcode),
+            where("parents.lmPcode", "==", lmPcode),
             orderBy("metadata.updated.at", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData((draft) => {
-              // 🎯 1. INITIAL SYNC: Direct mapping
               if (snapshot.docChanges().length === snapshot.docs.length) {
-                return snapshot.docs.map((doc) => ({
-                  id: doc.id,
-                  ...doc.data(),
+                return snapshot.docs.map((snap) => ({
+                  id: snap.id,
+                  ...snap.data(),
                 }));
               }
 
-              // 🎯 2. SURGICAL UPDATES: Only care about the Premise itself
               snapshot.docChanges().forEach((change) => {
-                const p = { id: change.doc.id, ...change.doc.data() };
-                const index = draft.findIndex((item) => item.id === p.id);
+                const premise = {
+                  id: change.doc.id,
+                  ...change.doc.data(),
+                };
+
+                const index = draft.findIndex((item) => item.id === premise.id);
 
                 if (change.type === "added") {
-                  if (index === -1) draft.unshift(p);
+                  if (index === -1) draft.unshift(premise);
                 } else if (change.type === "modified") {
-                  if (index > -1) draft[index] = p;
+                  if (index > -1) draft[index] = premise;
                 } else if (change.type === "removed") {
                   if (index > -1) draft.splice(index, 1);
                 }
               });
             });
-            // ✂️ THE PULSE ERF SECTION IS REMOVED
           });
         } catch (e) {
-          console.error("❌ [PREMISE_STREAM_ERROR]:", e);
+          console.error("❌ [PREMISE_STREAM_ERROR][LM]:", e);
         }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
+
+    // -------------------------------------------------
+    // NEW LM + WARD LIVE STREAM ENDPOINT
+    // THIS is the operational architecture endpoint
+    // -------------------------------------------------
+    getPremisesByLmPcodeWardPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+      serializeQueryArgs: ({ endpointName, queryArgs }) => {
+        const lmPcode = queryArgs?.lmPcode || "none";
+        const wardPcode = queryArgs?.wardPcode || "none";
+        return `${endpointName}(${lmPcode}__${wardPcode})`;
+      },
+      async onCacheEntryAdded(
+        arg,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          const lmPcode = arg?.lmPcode || null;
+
+          const wardPcode = arg?.wardPcode || null;
+
+          if (!lmPcode || !wardPcode) return;
+
+          const q = buildWardPremisesQuery(lmPcode, wardPcode);
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData((draft) => {
+              // Initial hydration
+              if (snapshot.docChanges().length === snapshot.docs.length) {
+                return snapshot.docs.map((snap) => ({
+                  id: snap.id,
+                  ...snap.data(),
+                }));
+              }
+
+              // Incremental updates
+              snapshot.docChanges().forEach((change) => {
+                const premise = {
+                  id: change.doc.id,
+                  ...change.doc.data(),
+                };
+
+                const index = draft.findIndex((item) => item.id === premise.id);
+
+                if (change.type === "added") {
+                  if (index === -1) {
+                    draft.unshift(premise);
+                  }
+                } else if (change.type === "modified") {
+                  if (index > -1) {
+                    draft[index] = premise;
+                  } else {
+                    draft.unshift(premise);
+                  }
+                } else if (change.type === "removed") {
+                  if (index > -1) {
+                    draft.splice(index, 1);
+                  }
+                }
+              });
+            });
+          });
+        } catch (e) {
+          console.error("❌ [PREMISE_STREAM_ERROR][WARD]:", e);
+        }
+
         await cacheEntryRemoved;
         unsubscribe();
       },
@@ -82,274 +175,87 @@ export const premisesApi = createApi({
       },
 
       async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
-        const lmPcode =
-          newPremise.parents?.lmId ||
-          newPremise.parents?.lmPcode ||
-          newPremise.metadata?.lmPcode;
+        const lmPcode = newPremise.metadata?.lmPcode || null;
 
-        const wardPcode =
-          newPremise.parents?.wardPcode ||
-          newPremise.parents?.wardId ||
-          newPremise.metadata?.wardPcode;
+        const wardPcode = newPremise.parents?.wardPcode || null;
 
         const erfId = newPremise.erfId;
+
         const premiseId = newPremise.id;
 
-        // ✅ This MUST match exactly how your ERFs query is called now
+        const premisesArg = { lmPcode, wardPcode };
+
         const erfsArg = { lmPcode, wardPcode };
 
         try {
-          // (1) Optimistic Premise list (if you still use this query)
-          dispatch(
-            premisesApi.util.updateQueryData(
-              "getPremisesByLmPcode",
-              lmPcode,
-              (draft) => {
-                if (!Array.isArray(draft)) return;
-                // avoid duplicates if mutation retriggers
-                const exists = draft.some((p) => p.id === premiseId);
-                if (!exists) draft.push(newPremise);
-              },
-            ),
-          );
+          // optimistic update: NEW ward-scoped premises cache
+          if (lmPcode && wardPcode) {
+            dispatch(
+              premisesApi.util.updateQueryData(
+                "getPremisesByLmPcodeWardPcode",
+                premisesArg,
+                (draft) => {
+                  if (!Array.isArray(draft)) return;
+                  const exists = draft.some((p) => p.id === premiseId);
+                  if (!exists) draft.unshift(newPremise);
+                },
+              ),
+            );
+          }
 
-          // (2) ✅ Optimistic ERF update on the NEW endpoint
-          dispatch(
-            erfsApi.util.updateQueryData(
-              "getErfsByLmPcodeWardPcode",
-              erfsArg,
-              (draft) => {
-                // Your draft shape might be either:
-                // A) { metaEntries: [...] }  OR  B) array
-                const list = Array.isArray(draft)
-                  ? draft
-                  : Array.isArray(draft?.metaEntries)
-                    ? draft.metaEntries
-                    : Array.isArray(draft?.items)
-                      ? draft.items
-                      : null;
+          // optional backward compatibility: old LM cache
+          if (lmPcode) {
+            dispatch(
+              premisesApi.util.updateQueryData(
+                "getPremisesByLmPcode",
+                lmPcode,
+                (draft) => {
+                  if (!Array.isArray(draft)) return;
+                  const exists = draft.some((p) => p.id === premiseId);
+                  if (!exists) draft.unshift(newPremise);
+                },
+              ),
+            );
+          }
 
-                if (!list) return;
+          // optimistic ERF pack update
+          if (lmPcode && wardPcode && erfId) {
+            dispatch(
+              erfsApi.util.updateQueryData(
+                "getErfsByLmPcodeWardPcode",
+                erfsArg,
+                (draft) => {
+                  const list = Array.isArray(draft)
+                    ? draft
+                    : Array.isArray(draft?.metaEntries)
+                      ? draft.metaEntries
+                      : Array.isArray(draft?.items)
+                        ? draft.items
+                        : null;
 
-                const targetErf = list.find((e) => e?.id === erfId);
-                if (!targetErf) return;
+                  if (!list) return;
 
-                if (!Array.isArray(targetErf.premises)) targetErf.premises = [];
+                  const targetErf = list.find((e) => e?.id === erfId);
+                  if (!targetErf) return;
 
-                // prevent double push
-                if (!targetErf.premises.includes(premiseId)) {
-                  targetErf.premises.push(premiseId);
-                }
-              },
-            ),
-          );
+                  if (!Array.isArray(targetErf.premises)) {
+                    targetErf.premises = [];
+                  }
+
+                  if (!targetErf.premises.includes(premiseId)) {
+                    targetErf.premises.push(premiseId);
+                  }
+                },
+              ),
+            );
+          }
 
           await queryFulfilled;
         } catch (err) {
-          console.error("❌ [OPTIMISTIC_FAIL]:", err);
+          console.error("❌ [ADD_PREMISE_OPTIMISTIC_FAIL]:", err);
         }
       },
     }),
-
-    // addPremise: builder.mutation({
-    //   async queryFn(newPremise) {
-    //     try {
-    //       await setDoc(doc(db, "premises", newPremise.id), newPremise);
-    //       return { data: newPremise };
-    //     } catch (error) {
-    //       return { error: error.message };
-    //     }
-    //   },
-
-    //   async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
-    //     const lmPcode =
-    //       newPremise.parents?.lmId ||
-    //       newPremise.parents?.lmPcode ||
-    //       newPremise.metadata?.lmPcode;
-
-    //     const wardPcode =
-    //       newPremise.parents?.wardPcode ||
-    //       newPremise.parents?.wardId ||
-    //       newPremise.metadata?.wardPcode;
-
-    //     const erfId = newPremise.erfId;
-    //     const premiseId = newPremise.id;
-
-    //     // ✅ This MUST match exactly how your ERFs query is called now
-    //     const erfsArg = { lmPcode, wardPcode };
-
-    //     try {
-    //       // (1) Optimistic Premise list (if you still use this query)
-    //       dispatch(
-    //         premisesApi.util.updateQueryData(
-    //           "getPremisesByLmPcode",
-    //           lmPcode,
-    //           (draft) => {
-    //             if (!Array.isArray(draft)) return;
-    //             // avoid duplicates if mutation retriggers
-    //             const exists = draft.some((p) => p.id === premiseId);
-    //             if (!exists) draft.push(newPremise);
-    //           },
-    //         ),
-    //       );
-
-    //       // (2) ✅ Optimistic ERF update on the NEW endpoint
-    //       dispatch(
-    //         erfsApi.util.updateQueryData(
-    //           "getErfsByLmPcodeWardPcode",
-    //           erfsArg,
-    //           (draft) => {
-    //             // Your draft shape might be either:
-    //             // A) { metaEntries: [...] }  OR  B) array
-    //             const list = Array.isArray(draft)
-    //               ? draft
-    //               : Array.isArray(draft?.metaEntries)
-    //                 ? draft.metaEntries
-    //                 : Array.isArray(draft?.items)
-    //                   ? draft.items
-    //                   : null;
-
-    //             if (!list) return;
-
-    //             const targetErf = list.find((e) => e?.id === erfId);
-    //             if (!targetErf) return;
-
-    //             if (!Array.isArray(targetErf.premises)) targetErf.premises = [];
-
-    //             // prevent double push
-    //             if (!targetErf.premises.includes(premiseId)) {
-    //               targetErf.premises.push(premiseId);
-    //             }
-    //           },
-    //         ),
-    //       );
-
-    //       await queryFulfilled;
-    //     } catch (err) {
-    //       console.error("❌ [OPTIMISTIC_FAIL]:", err);
-    //     }
-    //   },
-    // }),
-
-    // addPremise: builder.mutation({
-    //   async queryFn(newPremise) {
-    //     try {
-    //       // Use setDoc to ensure the ID we generated in the form is the Firestore ID
-    //       await setDoc(doc(db, "premises", newPremise.id), newPremise);
-    //       return { data: newPremise };
-    //     } catch (error) {
-    //       return { error: error.message };
-    //     }
-    //   },
-    //   async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
-    //     // 🎯 Ensure these strings are clean
-    //     const lmPcode =
-    //       newPremise.parents?.lmId || newPremise.metadata?.lmPcode;
-    //     const erfId = newPremise.erfId;
-    //     const premiseId = newPremise.id;
-
-    //     try {
-    //       // 🎯 OPTIMISTIC PREMISE
-    //       dispatch(
-    //         premisesApi.util.updateQueryData(
-    //           "getPremisesByLmPcode",
-    //           lmPcode,
-    //           (draft) => {
-    //             // Ensure we aren't pushing into a non-array rehydrated state
-    //             if (!Array.isArray(draft)) return [newPremise];
-    //             draft.push(newPremise);
-    //           },
-    //         ),
-    //       );
-
-    //       // 🎯 OPTIMISTIC ERF COUNT
-    //       const { erfsApi } = require("./erfsApi");
-    //       dispatch(
-    //         erfsApi.util.updateQueryData(
-    //           "getErfsByLmPcode",
-    //           lmPcode,
-    //           (draft) => {
-    //             const targetErf = draft?.metaEntries?.find(
-    //               (e) => e.id === erfId,
-    //             );
-    //             if (targetErf) {
-    //               if (!targetErf.premises) targetErf.premises = [];
-    //               targetErf.premises.push(premiseId);
-    //             }
-    //           },
-    //         ),
-    //       );
-
-    //       await queryFulfilled;
-    //     } catch (err) {
-    //       console.error("❌ [OPTIMISTIC_FAIL]:", err);
-    //     }
-    //   },
-    // }),
-
-    // addPremise: builder.mutation({
-    //   async queryFn(newPremise) {
-    //     try {
-    //       const docRef = doc(db, "premises", newPremise.id);
-    //       await setDoc(docRef, newPremise, { merge: true });
-    //       return { data: newPremise };
-    //     } catch (error) {
-    //       return { error: error.message };
-    //     }
-    //   },
-    //   async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
-    //     const { erfId, id: premiseId, metadata } = newPremise;
-    //     const lmPcode = metadata?.lmPcode;
-
-    //     try {
-    //       // 🎯 1. RAM: Premises List (Optimistic)
-    //       dispatch(
-    //         premisesApi.util.updateQueryData(
-    //           "getPremisesByLmPcode",
-    //           lmPcode,
-    //           (draft) => {
-    //             if (!Array.isArray(draft)) return;
-    //             const index = draft.findIndex((p) => p.id === premiseId);
-    //             if (index > -1) {
-    //               draft[index] = { ...draft[index], ...newPremise };
-    //             } else {
-    //               draft.push(newPremise);
-    //             }
-    //           },
-    //         ),
-    //       );
-
-    //       // 🎯 2. RAM: Erf Pulse (Optimistic)
-    //       const { erfsApi } = require("./erfsApi");
-    //       dispatch(
-    //         erfsApi.util.updateQueryData(
-    //           "getErfsByLmPcode",
-    //           lmPcode,
-    //           (draft) => {
-    //             const targetErf = draft?.metaEntries?.find(
-    //               (e) => e.id === erfId,
-    //             );
-    //             if (targetErf) {
-    //               if (!targetErf.premises) targetErf.premises = [];
-    //               if (!targetErf.premises.includes(premiseId)) {
-    //                 targetErf.premises.push(premiseId);
-    //               }
-    //               targetErf.metadata = {
-    //                 ...targetErf.metadata,
-    //                 updatedAt: new Date().toISOString(),
-    //                 updatedBy: metadata?.updated?.byUser || "System",
-    //               };
-    //             }
-    //           },
-    //         ),
-    //       );
-
-    //       await queryFulfilled;
-    //     } catch (err) {
-    //       console.error("❌ [OPTIMISTIC_FAIL]:", err);
-    //     }
-    //   },
-    // }),
 
     updatePremise: builder.mutation({
       async queryFn(updatedPremise) {
@@ -361,46 +267,85 @@ export const premisesApi = createApi({
           return { error: error.message };
         }
       },
+
       async onQueryStarted(updatedPremise, { dispatch, queryFulfilled }) {
-        const { id: premiseId, erfId, metadata } = updatedPremise;
-        const lmPcode = metadata?.lmPcode;
+        const premiseId = updatedPremise?.id;
+
+        const erfId = updatedPremise?.erfId;
+
+        const lmPcode = updatedPremise?.metadata?.lmPcode || null;
+
+        const wardPcode = updatedPremise?.metadata?.wardPcode || null;
+
+        const premisesArg = { lmPcode, wardPcode };
+
+        const erfsArg = { lmPcode, wardPcode };
 
         try {
-          dispatch(
-            premisesApi.util.updateQueryData(
-              "getPremisesByLmPcode",
-              lmPcode,
-              (draft) => {
-                const index = draft.findIndex((p) => p.id === premiseId);
-                if (index !== -1) {
-                  draft[index] = { ...draft[index], ...updatedPremise };
-                }
-              },
-            ),
-          );
-
-          if (erfId) {
+          // optimistic update: NEW ward-scoped cache
+          if (lmPcode && wardPcode) {
             dispatch(
-              erfsApi.util.updateQueryData(
-                "getErfsByLmPcodeWardPcode",
-                lmPcode,
+              premisesApi.util.updateQueryData(
+                "getPremisesByLmPcodeWardPcode",
+                premisesArg,
                 (draft) => {
-                  const targetErf = draft?.metaEntries?.find(
-                    (e) => e.id === erfId,
-                  );
-                  if (targetErf) {
-                    targetErf.metadata = {
-                      ...targetErf.metadata,
-                      updatedAt: new Date().toISOString(),
-                    };
+                  const index = draft.findIndex((p) => p.id === premiseId);
+                  if (index !== -1) {
+                    draft[index] = { ...draft[index], ...updatedPremise };
                   }
                 },
               ),
             );
           }
+
+          // optional backward compatibility: old LM cache
+          if (lmPcode) {
+            dispatch(
+              premisesApi.util.updateQueryData(
+                "getPremisesByLmPcode",
+                lmPcode,
+                (draft) => {
+                  const index = draft.findIndex((p) => p.id === premiseId);
+                  if (index !== -1) {
+                    draft[index] = { ...draft[index], ...updatedPremise };
+                  }
+                },
+              ),
+            );
+          }
+
+          // optimistic ERF pack metadata touch
+          if (lmPcode && wardPcode && erfId) {
+            dispatch(
+              erfsApi.util.updateQueryData(
+                "getErfsByLmPcodeWardPcode",
+                erfsArg,
+                (draft) => {
+                  const list = Array.isArray(draft)
+                    ? draft
+                    : Array.isArray(draft?.metaEntries)
+                      ? draft.metaEntries
+                      : Array.isArray(draft?.items)
+                        ? draft.items
+                        : null;
+
+                  if (!list) return;
+
+                  const targetErf = list.find((e) => e?.id === erfId);
+                  if (!targetErf) return;
+
+                  targetErf.metadata = {
+                    ...targetErf.metadata,
+                    updatedAt: new Date().toISOString(),
+                  };
+                },
+              ),
+            );
+          }
+
           await queryFulfilled;
         } catch (err) {
-          console.error("❌ [UPDATE_FAIL]:", err);
+          console.error("❌ [UPDATE_PREMISE_OPTIMISTIC_FAIL]:", err);
         }
       },
     }),
@@ -410,15 +355,15 @@ export const premisesApi = createApi({
         return { data: [] };
       },
       async onCacheEntryAdded(
-        { id }, // 🎯 THE SOVEREIGN OBJECT ARGUMENT
+        { id },
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
+
         try {
           await cacheDataLoaded;
           if (!id) return;
 
-          // 🛡️ Guard: Querying by National Hierarchy
           const q = query(
             collection(db, "premises"),
             where("parents.countryId", "==", id),
@@ -426,9 +371,9 @@ export const premisesApi = createApi({
 
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData(() => {
-              return snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
+              return snapshot.docs.map((snap) => ({
+                id: snap.id,
+                ...snap.data(),
               }));
             });
           });
@@ -444,8 +389,9 @@ export const premisesApi = createApi({
 });
 
 export const {
-  useGetPremisesByLmPcodeQuery,
+  useGetPremisesByLmPcodeQuery, // temporary backward compatibility
+  useGetPremisesByLmPcodeWardPcodeQuery, // ✅ new operational endpoint
   useGetPremisesByCountryCodeQuery,
-  useAddPremiseMutation, // 🎯 THE SMART ONE (Change your Form to use this!)
+  useAddPremiseMutation,
   useUpdatePremiseMutation,
 } = premisesApi;

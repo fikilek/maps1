@@ -10,7 +10,7 @@ const SelectedPremise = ({ coordinate, erfNo, adrLn1, adrLn2, premiseId }) => {
       // 🎯 Anchor to the center-bottom
       // anchor={{ x: 0.5, y: 1 }}
       anchor={{ x: 0.4, y: 0.3 }}
-      zIndex={1500}
+      zIndex={6500}
       // tracksViewChanges={false}
     >
       <View style={styles.premiseMarkerContainer}>

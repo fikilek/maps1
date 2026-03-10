@@ -18,7 +18,6 @@ const toMillis = (v) => {
 export const buildGeoLibrary = ({ wards = [], erfGeoEntries = {} }) => {
   const geoLibrary = { ...(erfGeoEntries || {}) };
 
-  // 🛡️ wards must be an array
   const wardsArr = Array.isArray(wards) ? wards : [];
 
   wardsArr.forEach((w) => {
@@ -31,17 +30,15 @@ export const buildGeoLibrary = ({ wards = [], erfGeoEntries = {} }) => {
 export const selectFilteredWards = ({ wards = [] }, geo) => {
   const wardsArr = Array.isArray(wards) ? wards : [];
 
-  // optional: stable sort by ward code (nice UX)
-  const sorted = [...wardsArr].sort((a, b) => (a.code ?? 0) - (b.code ?? 0));
-
-  if (!geo.selectedWard) return sorted;
-  return sorted.filter((w) => w.id === geo.selectedWard.id);
+  // Always return the full LM ward pool.
+  // Do NOT collapse to selectedWard only.
+  // This keeps GCS, ErfsScreen, and MapsScreen able to switch wards freely.
+  return [...wardsArr].sort((a, b) => (a.code ?? 0) - (b.code ?? 0));
 };
 
 export const selectFilteredErfs = ({ erfs = [] }, geo) => {
   const erfsArr = Array.isArray(erfs) ? erfs : [];
 
-  // 1) filter first (smallest work)
   let pool = erfsArr;
 
   if (geo.selectedErf) {
@@ -53,8 +50,6 @@ export const selectFilteredErfs = ({ erfs = [] }, geo) => {
     );
   }
 
-  // 2) ✅ then sort newest-first (descending)
-  // NOTE: if you want erfNo/erfId sorting instead, swap comparator here.
   return [...pool].sort(
     (a, b) =>
       toMillis(b?.metadata?.updatedAt) - toMillis(a?.metadata?.updatedAt),
@@ -64,11 +59,13 @@ export const selectFilteredErfs = ({ erfs = [] }, geo) => {
 export const selectFilteredPrems = ({ prems = [], erfById }, geo) => {
   const premsArr = Array.isArray(prems) ? prems : [];
 
-  if (geo.selectedPremise)
+  if (geo.selectedPremise) {
     return premsArr.filter((p) => p.id === geo.selectedPremise.id);
+  }
 
-  if (geo.selectedErf)
+  if (geo.selectedErf) {
     return premsArr.filter((p) => p.erfId === geo.selectedErf.id);
+  }
 
   if (geo.selectedWard) {
     const wardId = geo.selectedWard.id;
@@ -87,21 +84,25 @@ export const selectFilteredPrems = ({ prems = [], erfById }, geo) => {
 export const selectFilteredMeters = ({ meters = [] }, geo) => {
   const metersArr = Array.isArray(meters) ? meters : [];
 
-  if (geo.selectedMeter)
+  if (geo.selectedMeter) {
     return metersArr.filter((m) => m.id === geo.selectedMeter.id);
+  }
 
-  if (geo.selectedPremise)
+  if (geo.selectedPremise) {
     return metersArr.filter(
       (m) => m.accessData?.premise?.id === geo.selectedPremise.id,
     );
+  }
 
-  if (geo.selectedErf)
+  if (geo.selectedErf) {
     return metersArr.filter((m) => m.accessData?.erfId === geo.selectedErf.id);
+  }
 
-  if (geo.selectedWard)
+  if (geo.selectedWard) {
     return metersArr.filter(
       (m) => m.accessData?.wardId === geo.selectedWard.id,
     );
+  }
 
   return metersArr;
 };
@@ -109,16 +110,19 @@ export const selectFilteredMeters = ({ meters = [] }, geo) => {
 export const selectFilteredTrns = ({ trns = [] }, geo) => {
   const trnsArr = Array.isArray(trns) ? trns : [];
 
-  if (geo.selectedPremise)
+  if (geo.selectedPremise) {
     return trnsArr.filter(
       (t) => t.accessData?.premise?.id === geo.selectedPremise.id,
     );
+  }
 
-  if (geo.selectedErf)
+  if (geo.selectedErf) {
     return trnsArr.filter((t) => t.accessData?.erfId === geo.selectedErf.id);
+  }
 
-  if (geo.selectedWard)
+  if (geo.selectedWard) {
     return trnsArr.filter((t) => t.accessData?.wardId === geo.selectedWard.id);
+  }
 
   return trnsArr;
 };

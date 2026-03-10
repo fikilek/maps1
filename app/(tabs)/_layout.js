@@ -23,7 +23,15 @@ export default function TabsLayout() {
       <Tabs
         screenOptions={({ route }) => ({
           header: () => (
-            <AppHeader title={titles[route.name]} user={{ profile }} />
+            <AppHeader
+              title={titles[route.name]}
+              onConfirmScope={({ lm, ward }) => {
+                console.log("FINAL HEADER SCOPE", {
+                  lm,
+                  ward,
+                });
+              }}
+            />
           ),
           tabBarActiveTintColor: "#4CAF50",
           tabBarInactiveTintColor: "#888",

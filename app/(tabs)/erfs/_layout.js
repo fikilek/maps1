@@ -1,18 +1,15 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { Stack, useRouter } from "expo-router";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { useGeo } from "../../../src/context/GeoContext";
+import { Stack } from "expo-router";
 
 export default function ErfsLayout() {
-  const router = useRouter();
-  const { geoState } = useGeo();
+  // const router = useRouter();
+  // const { geoState } = useGeo();
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
 
       {/* 🏛️ THE ENHANCED DETAIL HEADER */}
-      <Stack.Screen
+      {/* <Stack.Screen
         name="[id]"
         options={({ route }) => ({
           headerShown: true,
@@ -48,47 +45,33 @@ export default function ErfsLayout() {
             </TouchableOpacity>
           ),
         })}
-      />
-
-      <Stack.Screen
-        name="form"
-        options={{
-          title: "Capture Premise",
-          presentation: "modal",
-          headerShown: true,
-          headerLeft: () => (
-            <TouchableOpacity onPress={() => router.back()}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-          ),
-        }}
-      />
+      /> */}
     </Stack>
   );
 }
 
-const styles = StyleSheet.create({
-  headerTitleContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerErfLabel: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#1e293b",
-    letterSpacing: 1,
-  },
-  backBtn: {
-    marginLeft: 5,
-    padding: 5,
-  },
-  addHeaderBtn: {
-    marginRight: 10,
-    padding: 5,
-  },
-  cancelText: {
-    color: "#DC3545",
-    marginLeft: 10,
-    fontWeight: "600",
-  },
-});
+// const styles = StyleSheet.create({
+//   headerTitleContainer: {
+//     alignItems: "center",
+//     justifyContent: "center",
+//   },
+//   headerErfLabel: {
+//     fontSize: 18,
+//     fontWeight: "900",
+//     color: "#1e293b",
+//     letterSpacing: 1,
+//   },
+//   backBtn: {
+//     marginLeft: 5,
+//     padding: 5,
+//   },
+//   addHeaderBtn: {
+//     marginRight: 10,
+//     padding: 5,
+//   },
+//   cancelText: {
+//     color: "#DC3545",
+//     marginLeft: 10,
+//     fontWeight: "600",
+//   },
+// });

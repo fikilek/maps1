@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   ScrollView,
@@ -14,10 +14,23 @@ import { useGeo } from "../../src/context/GeoContext";
 import { useMap } from "../../src/context/MapContext";
 import { useWarehouse } from "../../src/context/WarehouseContext";
 
-export default function GeoCascadingSelector() {
+export default function GeoCascadingSelector({ onModalStateChange }) {
+  console.log(``);
+  console.log(``);
+  console.log(``);
+  // console.log(`GeoCascadingSelector mounting`);
   const { geoState, updateGeo } = useGeo();
-  const { filtered, all } = useWarehouse();
-  // console.log(`filtered?.prems`, filtered?.prems);
+  const { all } = useWarehouse();
+  // console.log(
+  //   `GeoCascadingSelector all?.meters.slice(0,2)`,
+  //   all?.meters.slice(0, 2),
+  // );
+
+  const erfById = useMemo(() => {
+    return new Map((all?.erfs || []).map((e) => [e.id, e]));
+  }, [all?.erfs]);
+
+  // console.log(`GeoCascadingSelector erfById?.`, erfById?.);
 
   const { flyTo } = useMap();
 
@@ -25,6 +38,7 @@ export default function GeoCascadingSelector() {
   const [showErfs, setShowErfs] = useState(false);
   const [showPrems, setShowPrems] = useState(false);
   const [showMeters, setShowMeters] = useState(false);
+  const anyModalOpen = showWards || showErfs || showPrems || showMeters;
 
   const [erfSearchQuery, setErfSearchQuery] = useState("");
   const [premSearchQuery, setPremSearchQuery] = useState("");
@@ -38,65 +52,172 @@ export default function GeoCascadingSelector() {
     selectedMeter,
   } = geoState;
 
-  // --- 🎯 TACTICAL FILTERS ---
-  const filteredErfs = useMemo(() => {
-    const base = filtered?.erfs || [];
-    if (!erfSearchQuery) return base;
-    const q = erfSearchQuery.toLowerCase();
-    return base.filter((e) => `${e?.erfNo} ${e?.id}`.toLowerCase().includes(q));
-  }, [erfSearchQuery, filtered?.erfs]);
+  const canOpenWardSelector = !!selectedLm?.id;
 
-  const filteredPrems = useMemo(() => {
-    const base = filtered?.prems || [];
-    if (!premSearchQuery) return base;
-    const q = premSearchQuery.toLowerCase();
-    return base.filter((p) => {
-      const addr = p?.address;
-      return `${p?.id} ${addr?.strNo} ${addr?.strName} ${p?.propertyType?.type} ${p?.erfNo}`
-        .toLowerCase()
-        .includes(q);
+  useEffect(() => {
+    onModalStateChange?.(anyModalOpen);
+  }, [anyModalOpen, onModalStateChange]);
+
+  // -----------------------------
+  // OPTION POOLS FOR MODALS
+  // These are NOT screen filtered pools.
+  // They are user choice pools.
+  // -----------------------------
+
+  const availableWards = useMemo(() => {
+    return [...(all?.wards || [])].sort((a, b) => {
+      const aCode = Number(a?.code ?? 9999);
+      const bCode = Number(b?.code ?? 9999);
+
+      if (aCode !== bCode) return aCode - bCode;
+
+      return String(a?.name || a?.id || "").localeCompare(
+        String(b?.name || b?.id || ""),
+      );
     });
-  }, [premSearchQuery, filtered?.prems]);
+  }, [all?.wards]);
 
-  const filteredMetersList = useMemo(() => {
-    const base = filtered?.meters || [];
-    if (!meterSearchQuery) return base;
-    const q = meterSearchQuery.toLowerCase();
-    return base.filter((m) =>
-      m?.ast?.astData?.astNo?.toLowerCase().includes(q),
-    );
-  }, [meterSearchQuery, filtered?.meters]);
+  const erfOptions = useMemo(() => {
+    let base = [...(all?.erfs || [])];
 
-  // --- ✈️ SELECTION HANDLERS ---
+    if (selectedWard?.id) {
+      const wardId = selectedWard.id;
+      base = base.filter(
+        (e) =>
+          e?.admin?.ward?.id === wardId || e?.admin?.ward?.pcode === wardId,
+      );
+    }
+
+    if (erfSearchQuery) {
+      const q = erfSearchQuery.toLowerCase();
+      base = base.filter((e) =>
+        `${e?.erfNo || ""} ${e?.id || ""}`.toLowerCase().includes(q),
+      );
+    }
+
+    return base;
+  }, [all?.erfs, selectedWard?.id, erfSearchQuery]);
+
+  const premiseOptions = useMemo(() => {
+    let base = [...(all?.prems || [])];
+
+    if (selectedErf?.id) {
+      base = base.filter((p) => p?.erfId === selectedErf.id);
+    } else if (selectedWard?.id) {
+      const wardId = selectedWard.id;
+
+      const erfIdsInWard = new Set(
+        (all?.erfs || [])
+          .filter(
+            (e) =>
+              e?.admin?.ward?.id === wardId || e?.admin?.ward?.pcode === wardId,
+          )
+          .map((e) => e.id),
+      );
+
+      base = base.filter((p) => erfIdsInWard.has(p?.erfId));
+    }
+
+    if (premSearchQuery) {
+      const q = premSearchQuery.toLowerCase();
+      base = base.filter((p) => {
+        const addr = p?.address;
+        return `${p?.id || ""} ${addr?.strNo || ""} ${addr?.strName || ""} ${p?.propertyType?.type || ""} ${p?.erfNo || ""}`
+          .toLowerCase()
+          .includes(q);
+      });
+    }
+
+    return base;
+  }, [
+    all?.prems,
+    all?.erfs,
+    selectedErf?.id,
+    selectedWard?.id,
+    premSearchQuery,
+  ]);
+  const meterOptions = useMemo(() => {
+    let base = [...(all?.meters || [])];
+    const erfById = new Map((all?.erfs || []).map((e) => [e.id, e]));
+
+    if (selectedPremise?.id) {
+      base = base.filter(
+        (m) => m?.accessData?.premise?.id === selectedPremise.id,
+      );
+    } else if (selectedErf?.id) {
+      base = base.filter((m) => m?.accessData?.erfId === selectedErf.id);
+    } else if (selectedWard?.id) {
+      const wardId = selectedWard.id;
+      base = base.filter((m) => {
+        const parentErf = erfById.get(m?.accessData?.erfId);
+        return (
+          parentErf?.admin?.ward?.id === wardId ||
+          parentErf?.admin?.ward?.pcode === wardId
+        );
+      });
+    }
+
+    if (meterSearchQuery) {
+      const q = meterSearchQuery.toLowerCase();
+      base = base.filter((m) =>
+        (m?.ast?.astData?.astNo || "").toLowerCase().includes(q),
+      );
+    }
+
+    return base;
+  }, [
+    all?.meters,
+    all?.erfs,
+    selectedPremise?.id,
+    selectedErf?.id,
+    selectedWard?.id,
+    meterSearchQuery,
+  ]);
+
+  // -----------------------------
+  // HIERARCHY ACTIONS
+  // GCS updates state only.
+  // MapsScreen pilot handles flights.
+  // -----------------------------
+
   const handleLmReset = () => {
-    updateGeo({ selectedLm, lastSelectionType: "LM" });
+    if (!selectedLm?.id) return;
+
+    updateGeo({
+      selectedLm,
+      lastSelectionType: "LM",
+    });
+
     setShowWards(false);
+    setShowErfs(false);
+    setShowPrems(false);
+    setShowMeters(false);
   };
+
   const selectWard = (ward) => {
-    updateGeo({ selectedWard: ward, lastSelectionType: "WARD" });
+    updateGeo({
+      selectedWard: ward,
+      lastSelectionType: "WARD",
+    });
     setShowWards(false);
   };
+
   const selectErf = (erf) => {
-    updateGeo({ selectedErf: erf, lastSelectionType: "ERF" });
+    updateGeo({
+      selectedErf: erf,
+      lastSelectionType: "ERF",
+    });
     setShowErfs(false);
   };
 
   const selectPremise = (prem) => {
-    console.log(`📡 [GCS]: Initiating Double-Tap for Premise: ${prem.id}`);
-
-    // 1. Find the parent Erf (following the 'id' rule)
     const parentErf = all?.erfs?.find((e) => e.id === prem?.erfId);
 
-    // 🎯 TAP 1: Select the Erf Parent
-    // This satisfies the cascade rule: clears old children and sets HUD to Erf context.
     updateGeo({
       selectedErf: parentErf || null,
       lastSelectionType: "ERF",
     });
 
-    // 🎯 TAP 2: Select the Premise
-    // This lands the specific target. It survives the "wipe" of the first call
-    // because it happens immediately after.
     updateGeo({
       selectedPremise: prem,
       lastSelectionType: "PREMISE",
@@ -110,19 +231,16 @@ export default function GeoCascadingSelector() {
     const parentPremise = all?.prems?.find((p) => p?.id === pId);
     const parentErf = all?.erfs?.find((e) => e.id === parentPremise?.erfId);
 
-    // select erf
     updateGeo({
       selectedErf: parentErf || null,
       lastSelectionType: "ERF",
     });
 
-    // select premise
     updateGeo({
       selectedPremise: parentPremise || null,
       lastSelectionType: "PREMISE",
     });
 
-    // select meter
     updateGeo({
       selectedMeter: meter,
       lastSelectionType: "METER",
@@ -132,13 +250,16 @@ export default function GeoCascadingSelector() {
     setShowMeters(false);
   };
 
+  // Utility action - okay to fly directly
   const handleCenterOnMe = async () => {
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") return;
+
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
+
       flyTo(
         [
           {
@@ -153,22 +274,26 @@ export default function GeoCascadingSelector() {
     }
   };
 
-  // --- 🏷️ LABEL CONSTRUCTION ---
+  // -----------------------------
+  // LABELS
+  // -----------------------------
+
   const lmNameStr = `${selectedLm?.name || "LM"}`;
-  const wardNameStr = `${selectedWard?.name || "All Wards"}`;
+  const wardNameStr = `${selectedWard?.name || "Select Ward"}`;
+
   const adrLn1 = selectedPremise?.address
-    ? `${selectedPremise?.address?.strNo} ${selectedPremise?.address?.strName}`
+    ? `${selectedPremise?.address?.strNo || ""} ${selectedPremise?.address?.strName || ""}`.trim()
     : "Premise";
+
   const adrLn2 = selectedPremise?.address
-    ? `${selectedPremise?.address?.strType}`
+    ? `${selectedPremise?.address?.strType || ""}`.trim()
     : "";
+
   const meterNoStr = selectedMeter?.ast?.astData?.astNo
-    ? `Mtr ${selectedMeter?.ast?.astData?.astNo}`
+    ? `${selectedMeter?.ast?.astData?.astNo}`
     : "Meter";
 
-  const erfLabelStr = selectedErf?.erfNo
-    ? `Erf ${selectedErf?.erfNo} (W${selectedErf?.admin?.ward?.name?.replace(/\D/g, "") || "?"})`
-    : "Erf";
+  const erfLabelStr = selectedErf?.erfNo ? `Erf ${selectedErf?.erfNo}` : "Erf";
 
   return (
     <>
@@ -183,13 +308,20 @@ export default function GeoCascadingSelector() {
             <Text
               style={styles.modalTitle}
             >{`${lmNameStr} : Select Ward`}</Text>
+
             <ScrollView style={{ maxHeight: 400 }}>
               <TouchableOpacity
                 style={[
                   styles.wardItem,
                   !selectedWard && { backgroundColor: "#f1f5f9" },
                 ]}
-                onPress={handleLmReset}
+                onPress={() => {
+                  updateGeo({
+                    selectedWard: null,
+                    lastSelectionType: "WARD",
+                  });
+                  setShowWards(false);
+                }}
               >
                 <Text
                   style={[
@@ -197,33 +329,38 @@ export default function GeoCascadingSelector() {
                     { fontWeight: "800", color: "#6366f1" },
                   ]}
                 >
-                  All Wards (Reset Filter)
+                  All Wards (Ward Reset)
                 </Text>
               </TouchableOpacity>
-              {filtered?.wards?.map((ward, index) => (
-                <TouchableOpacity
-                  key={ward?.id}
-                  style={[
-                    styles.wardItem,
-                    selectedWard?.id === ward?.id && {
-                      backgroundColor: "#eff6ff",
-                    },
-                  ]}
-                  onPress={() => selectWard(ward)}
-                >
-                  <Text
+
+              {availableWards.map((ward, index) => {
+                // console.log(` `);
+                // console.log(`ward`, ward);
+                return (
+                  <TouchableOpacity
+                    key={ward?.id || index}
                     style={[
-                      styles.wardText,
+                      styles.wardItem,
                       selectedWard?.id === ward?.id && {
-                        fontWeight: "bold",
-                        color: "#2563eb",
+                        backgroundColor: "#eff6ff",
                       },
                     ]}
+                    onPress={() => selectWard(ward)}
                   >
-                    {ward?.name || ward?.code || `Ward ${index + 1}`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.wardText,
+                        selectedWard?.id === ward?.id && {
+                          fontWeight: "bold",
+                          color: "#2563eb",
+                        },
+                      ]}
+                    >
+                      {ward?.name || ward?.code || `Ward ${index + 1}`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </Surface>
         </Modal>
@@ -237,20 +374,21 @@ export default function GeoCascadingSelector() {
           <Surface style={styles.modalContent}>
             <Text
               style={styles.modalTitle}
-            >{`Erfs (${filteredErfs?.length})`}</Text>
+            >{`Erfs (${erfOptions?.length})`}</Text>
+
             <Searchbar
               placeholder="Search Erf No..."
               onChangeText={setErfSearchQuery}
               value={erfSearchQuery}
               style={styles.searchBar}
             />
+
             <TouchableOpacity
               style={styles.wardItem}
               onPress={() => {
                 updateGeo({
-                  // selectedWard: selectedWard,
                   selectedErf: null,
-                  lastSelectionType: "WARD",
+                  lastSelectionType: "ERF",
                 });
                 setShowErfs(false);
               }}
@@ -264,8 +402,9 @@ export default function GeoCascadingSelector() {
                 All Erfs (Reset Filter)
               </Text>
             </TouchableOpacity>
+
             <FlatList
-              data={filteredErfs}
+              data={erfOptions}
               keyExtractor={(item) => item?.id}
               style={{ maxHeight: 400 }}
               renderItem={({ item: e }) => (
@@ -286,9 +425,9 @@ export default function GeoCascadingSelector() {
                     ]}
                   >
                     {`ERF ${e?.erfNo} `}
-                    <Text
-                      style={{ fontSize: 12, color: "#94a3b8" }}
-                    >{`(W${e?.admin?.ward?.name?.replace(/\D/g, "") || "?"})`}</Text>
+                    <Text style={{ fontSize: 12, color: "#94a3b8" }}>
+                      {`(W${e?.admin?.ward?.name?.replace(/\D/g, "") || "?"})`}
+                    </Text>
                   </Text>
                 </TouchableOpacity>
               )}
@@ -305,20 +444,21 @@ export default function GeoCascadingSelector() {
           <Surface style={styles.modalContent}>
             <Text
               style={styles.modalTitle}
-            >{`Premises (${filteredPrems?.length})`}</Text>
+            >{`Premises (${premiseOptions?.length})`}</Text>
+
             <Searchbar
               placeholder="Search address or Erf..."
               onChangeText={setPremSearchQuery}
               value={premSearchQuery}
               style={styles.searchBar}
             />
+
             <TouchableOpacity
               style={styles.wardItem}
               onPress={() => {
                 updateGeo({
-                  // selectedErf: selectedErf,
                   selectedPremise: null,
-                  lastSelectionType: "ERF",
+                  lastSelectionType: "PREMISE",
                 });
                 setShowPrems(false);
               }}
@@ -332,13 +472,15 @@ export default function GeoCascadingSelector() {
                 All Premises (Reset Filter)
               </Text>
             </TouchableOpacity>
+
             <FlatList
-              data={filteredPrems}
+              data={premiseOptions}
               keyExtractor={(item) => item?.id}
               style={{ maxHeight: 400 }}
               renderItem={({ item: p }) => {
-                const erfId = p?.erfId || "";
-                const erf = filtered?.erfs?.find((erf) => erf?.id === erfId);
+                const erf = (all?.erfs || []).find(
+                  (erf) => erf?.id === p?.erfId,
+                );
                 const wardDigits = erf?.admin?.ward?.name;
 
                 return (
@@ -361,10 +503,10 @@ export default function GeoCascadingSelector() {
                           },
                         ]}
                       >
-                        {`${p?.propertyType?.type || "Res"} - ${p?.address?.strNo} ${p?.address?.strName}`}
+                        {`${p?.propertyType?.type || "Res"} - ${p?.address?.strNo || ""} ${p?.address?.strName || ""}`}
                       </Text>
                       <Text style={styles.subLabel}>
-                        {`Erf ${p?.erfNo || "N/A"} - ${wardDigits}`}
+                        {`Erf ${p?.erfNo || "N/A"} - ${wardDigits || ""}`}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -383,13 +525,15 @@ export default function GeoCascadingSelector() {
           <Surface style={styles.modalContent}>
             <Text
               style={styles.modalTitle}
-            >{`Meters (${filteredMetersList?.length})`}</Text>
+            >{`Meters (${meterOptions?.length})`}</Text>
+
             <Searchbar
               placeholder="Search meter no..."
               onChangeText={setMeterSearchQuery}
               value={meterSearchQuery}
               style={styles.searchBar}
             />
+
             <TouchableOpacity
               style={[
                 styles.wardItem,
@@ -413,17 +557,19 @@ export default function GeoCascadingSelector() {
                 All Meters (Reset Selection)
               </Text>
             </TouchableOpacity>
+
             <FlatList
-              data={filteredMetersList}
+              data={meterOptions}
               keyExtractor={(item) => item?.id}
               style={{ maxHeight: 400 }}
               renderItem={({ item: m }) => {
                 const addr = m?.accessData?.premise?.address || "No Address";
                 const erfNo = m?.accessData?.erfNo || "N/A";
                 const erfId = m?.accessData?.erfId || "";
-                const erf = filtered?.erfs?.find((erf) => erf?.id === erfId);
+                const erf = erfById.get(erfId);
                 const wardName = erf?.admin?.ward?.name;
                 const ward = wardName?.split(" ").pop() || "?";
+
                 return (
                   <TouchableOpacity
                     style={[
@@ -486,19 +632,23 @@ export default function GeoCascadingSelector() {
           >
             {lmNameStr}
           </Button>
+
           <View style={{ width: 6 }} />
+
           <Button
             mode="contained"
             icon="layers-outline"
-            onPress={() => setShowWards(true)}
+            onPress={() => canOpenWardSelector && setShowWards(true)}
             style={styles.pill}
             labelStyle={styles.labelText}
             contentStyle={styles.buttonContent}
+            disabled={!canOpenWardSelector}
           >
             {wardNameStr}
           </Button>
+
           <View style={{ width: 6 }} />
-          {/* 🎯 THE REFINED 'CENTER ME' BUTTON */}
+
           <TouchableOpacity
             style={[styles.pill, styles.locationButtonRowVersion]}
             onPress={handleCenterOnMe}
@@ -506,7 +656,7 @@ export default function GeoCascadingSelector() {
           >
             <View style={styles.centerMeContent}>
               <MaterialCommunityIcons
-                name="crosshairs-gps" // 🛰️ Changed to a more tactical GPS icon
+                name="crosshairs-gps"
                 size={20}
                 color="white"
               />
@@ -526,7 +676,9 @@ export default function GeoCascadingSelector() {
           >
             {erfLabelStr}
           </Button>
+
           <View style={{ width: 6 }} />
+
           <Button
             mode="contained"
             icon="home-city"
@@ -534,11 +686,15 @@ export default function GeoCascadingSelector() {
             style={styles.pill}
             labelStyle={styles.labelText}
             contentStyle={styles.buttonContent}
-          >{`${adrLn1} ${adrLn2}`}</Button>
+          >
+            {`${adrLn1} ${adrLn2}`.trim()}
+          </Button>
+
           <View style={{ width: 6 }} />
+
           <Button
             mode="contained"
-            icon="water-pump"
+            icon="counter"
             onPress={() => setShowMeters(true)}
             style={styles.pill}
             labelStyle={styles.labelText}
@@ -561,33 +717,12 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   buttonRow: { flexDirection: "row", alignItems: "center" },
-  // pill: {
-  //   flex: 1,
-  //   borderRadius: 12,
-  //   backgroundColor: "rgba(241, 245, 249, 0.95)",
-  //   elevation: 4,
-  //   borderWidth: 1,
-  //   borderColor: "rgba(203, 213, 225, 0.5)",
-  // },
-  // buttonContent: { height: 52 },
   labelText: {
     fontSize: 11,
     fontWeight: "800",
     color: "#334155",
     letterSpacing: 0.1,
   },
-  // locationButtonRowVersion: {
-  //   backgroundColor: "#ef4444",
-  //   flexDirection: "row",
-  //   justifyContent: "center",
-  //   alignItems: "center",
-  // },
-  // locationTextSmall: {
-  //   color: "white",
-  //   fontSize: 11,
-  //   fontWeight: "900",
-  //   marginLeft: 4,
-  // },
   modalContainer: { padding: 10, justifyContent: "center" },
   modalContent: {
     backgroundColor: "white",
@@ -613,23 +748,22 @@ const styles = StyleSheet.create({
 
   pill: {
     flex: 1,
-    borderRadius: 14, // Slightly rounder for modern iREPS look
+    borderRadius: 14,
     backgroundColor: "rgba(241, 245, 249, 0.98)",
     elevation: 4,
     borderWidth: 1,
     borderColor: "rgba(203, 213, 225, 0.8)",
-    overflow: "hidden", // Ensures background colors don't bleed past borders
+    overflow: "hidden",
   },
 
-  // 🛰️ CENTER ME SPECIFIC CSS
   locationButtonRowVersion: {
-    backgroundColor: "#ef4444", // Tactical Red
+    backgroundColor: "#ef4444",
     borderColor: "#dc2626",
     borderWidth: 1,
   },
 
   centerMeContent: {
-    height: 52, // 🎯 MATCHES buttonContent height exactly
+    height: 52,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
@@ -645,6 +779,6 @@ const styles = StyleSheet.create({
   },
 
   buttonContent: {
-    height: 52, // Ensures uniform height across the whole row
+    height: 52,
   },
 });

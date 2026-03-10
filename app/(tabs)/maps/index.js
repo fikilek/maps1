@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Platform,
   StyleSheet,
@@ -13,15 +19,14 @@ import MapView, {
   PROVIDER_GOOGLE,
 } from "react-native-maps";
 
-// 🎯 Context & Utilities
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import GeoStatusHUD from "../../../components/GeoStatusHUD"; // ⬅️ Restored
-import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector"; // ⬅️ Restored
+import GeoStatusHUD from "../../../components/GeoStatusHUD";
+import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
 import NeighbourhoodPremiseMarker from "../../../components/maps/NeighbourhoodPremiseMarker";
-import SelectedErf from "../../../components/maps/SelectedErf"; // ⬅️ Restored
-import SelecteMeter from "../../../components/maps/SelectedMeter"; // ⬅️ Restored
-import SelectedPremise from "../../../components/maps/SelectedPremise"; // ⬅️ Restored
+import SelectedErf from "../../../components/maps/SelectedErf";
+import SelecteMeter from "../../../components/maps/SelectedMeter";
+import SelectedPremise from "../../../components/maps/SelectedPremise";
 import { useDiscovery } from "../../../src/context/DiscoveryContext";
 import { useGeo } from "../../../src/context/GeoContext";
 import {
@@ -30,36 +35,33 @@ import {
   useMap,
 } from "../../../src/context/MapContext";
 import { useWarehouse } from "../../../src/context/WarehouseContext";
-import { useAuth } from "../../../src/hooks/useAuth";
 import { cutLastWord } from "../../../src/utils/stringsUtils";
+
+function MapScopeState({ title, subtitle }) {
+  return (
+    <View style={styles.scopeStateOverlay}>
+      <View style={styles.scopeStateCard}>
+        <Text style={styles.scopeStateTitle}>{title}</Text>
+        <Text style={styles.scopeStateSubtitle}>{subtitle}</Text>
+      </View>
+    </View>
+  );
+}
 
 export default function MapsScreen() {
   const { mapRef, flyTo } = useMap();
   const { geoState, updateGeo } = useGeo();
-  const { all } = useWarehouse();
-  const { activeWorkbase } = useAuth(); // 🎯 THE STABILITY ANCHOR
+  const { all, sync } = useWarehouse();
+  const { openMissionDiscovery } = useDiscovery();
   const router = useRouter();
 
   const lastSignalRef = useRef(null);
 
-  // 🎯 THE INITIAL LAUNCH REGION
-  // Uses the BBox from the active workbase to ensure the map never starts at [0,0]
-  const initialRegion = useMemo(() => {
-    const targetBBox = geoState?.selectedLm?.bbox || activeWorkbase?.bbox;
-    return targetBBox
-      ? bboxToRegion(targetBBox)
-      : {
-          latitude: -34.035,
-          longitude: 23.0483,
-          latitudeDelta: 0.1,
-          longitudeDelta: 0.1,
-        };
-  }, [geoState?.selectedLm?.bbox, activeWorkbase?.bbox]);
-
-  const wardsList = all?.wards || [];
   const [region, setRegion] = useState(null);
-  // console.log(`region`, region);
   const [zoom, setZoom] = useState(10);
+  const [mapType, setMapType] = useState("standard");
+
+  const [gcsModalOpen, setGcsModalOpen] = useState(false);
 
   const [showLayers, setShowLayers] = useState({
     erfs: true,
@@ -68,13 +70,127 @@ export default function MapsScreen() {
     sc: true,
   });
 
+  /*
+  START - Marker Drag Mode
+  */
+
+  const [dragPremiseId, setDragPremiseId] = useState(null);
+  const [draftCoordsById, setDraftCoordsById] = useState({});
+  const [savingDragId, setSavingDragId] = useState(null);
+
+  const getPremiseCoordinate = useCallback(
+    (prem) => {
+      const draft = draftCoordsById[prem.id];
+
+      if (draft?.lat != null && draft?.lng != null) {
+        return {
+          latitude: draft.lat,
+          longitude: draft.lng,
+        };
+      }
+
+      const lat = prem?.geometry?.centroid?.lat;
+      const lng = prem?.geometry?.centroid?.lng;
+
+      if (lat == null || lng == null) return null;
+
+      return {
+        latitude: lat,
+        longitude: lng,
+      };
+    },
+    [draftCoordsById],
+  );
+
+  // Enter drag mode
+  const handlePremiseMarkerLongPress = useCallback((premiseId) => {
+    setDragPremiseId(premiseId);
+  }, []);
+
+  // Normal press - When a marker is already in drag mode, normal press should probably do nothing for now.
+  // When not dragging, it can open the premise actions/details.
+  const handlePremiseMarkerPress = useCallback(
+    (prem) => {
+      if (dragPremiseId) return;
+
+      // your existing open-details / open-actions logic here
+      // openPremiseSheet(prem)
+    },
+    [dragPremiseId],
+  );
+
+  // Drag end - This stores local draft coordinates only.
+  const handlePremiseMarkerDragEnd = useCallback((premiseId, coordinate) => {
+    if (!coordinate) return;
+
+    setDraftCoordsById((prev) => ({
+      ...prev,
+      [premiseId]: {
+        lat: coordinate.latitude,
+        lng: coordinate.longitude,
+      },
+    }));
+  }, []);
+
+  // Exit drag mode without saving - Useful immediately, even before LOCK save is wired.
+  const handleCancelPremiseDrag = useCallback(() => {
+    setDragPremiseId(null);
+  }, []);
+
+  const getPremiseNeighborhoodCoordinate = useCallback(
+    (prem, pLat, pLng) => {
+      const draft = draftCoordsById[prem?.id];
+
+      if (draft?.lat != null && draft?.lng != null) {
+        return {
+          latitude: draft.lat,
+          longitude: draft.lng,
+        };
+      }
+
+      if (pLat == null || pLng == null) return null;
+
+      return {
+        latitude: pLat,
+        longitude: pLng,
+      };
+    },
+    [draftCoordsById],
+  );
+
+  /*
+  END - Marker Drag Mode
+  */
+
+  const scopeSync = sync?.scope ?? { status: "idle" };
+
+  const hasLm = !!geoState?.selectedLm?.id;
+  const hasWard = !!geoState?.selectedWard?.id;
+  const scopeReady = scopeSync?.status === "ready";
+  const isLmOnly = scopeSync?.status === "lm-only";
+
+  const initialRegion = useMemo(() => {
+    const targetBBox =
+      geoState?.selectedWard?.bbox || geoState?.selectedLm?.bbox || null;
+
+    return targetBBox
+      ? bboxToRegion(targetBBox)
+      : {
+          latitude: -34.035,
+          longitude: 23.0483,
+          latitudeDelta: 0.1,
+          longitudeDelta: 0.1,
+        };
+  }, [geoState?.selectedLm?.bbox, geoState?.selectedWard?.bbox]);
+
+  const wardsList = all?.wards || [];
+
   const handleRegionChange = (newRegion) => {
     const currentZoom = Math.round(Math.log2(360 / newRegion?.longitudeDelta));
     setZoom(currentZoom);
     setRegion(newRegion);
   };
 
-  // 🚀 THE PILOT EFFECT: Handles all "Flights" across the LM
   useEffect(() => {
     const signal = geoState?.flightSignal;
     if (!signal || signal === lastSignalRef.current) return;
@@ -88,16 +204,10 @@ export default function MapsScreen() {
       selectedMeter,
     } = geoState;
 
-    // 🛡️ RESET SAFE-GUARD:
-    // If wipe/reset cleared selections, do NOT fly.
     if (!lastSelectionType) {
-      lastSignalRef.current = signal; // consume the signal so we don't loop
+      lastSignalRef.current = signal;
       return;
     }
-
-    console.log(
-      `🚀 [PILOT]: Command Received: ${lastSelectionType} | Signal: ${signal}`,
-    );
 
     switch (lastSelectionType) {
       case "LM": {
@@ -122,10 +232,15 @@ export default function MapsScreen() {
         const pErfCoords = getSafeCoords(pErfEntry?.geometry);
         const pBundle = [];
 
-        if (Array.isArray(premisePoint) && premisePoint.length >= 2) {
-          const pLat = premisePoint[0] < 0 ? premisePoint[0] : premisePoint[1];
-          const pLng = premisePoint[0] > 0 ? premisePoint[0] : premisePoint[1];
-          pBundle.push({ latitude: pLat, longitude: pLng });
+        if (
+          premisePoint &&
+          typeof premisePoint.lat === "number" &&
+          typeof premisePoint.lng === "number"
+        ) {
+          pBundle.push({
+            latitude: premisePoint.lat,
+            longitude: premisePoint.lng,
+          });
         }
 
         if (pErfCoords?.length > 0) {
@@ -148,7 +263,7 @@ export default function MapsScreen() {
         const erfCoords = getSafeCoords(erfEntry?.geometry);
         const bundleCoords = [];
 
-        if (meterGps?.lat) {
+        if (meterGps?.lat && meterGps?.lng) {
           bundleCoords.push({
             latitude: meterGps.lat,
             longitude: meterGps.lng,
@@ -156,9 +271,10 @@ export default function MapsScreen() {
         }
 
         if (Array.isArray(pCentroid) && pCentroid.length >= 2) {
-          const pLat = pCentroid[0] < 0 ? pCentroid[0] : pCentroid[1];
-          const pLng = pCentroid[0] > 0 ? pCentroid[0] : pCentroid[1];
-          bundleCoords.push({ latitude: pLat, longitude: pLng });
+          bundleCoords.push({
+            latitude: pCentroid[0],
+            longitude: pCentroid[1],
+          });
         }
 
         if (erfCoords?.length > 0) {
@@ -179,21 +295,13 @@ export default function MapsScreen() {
     }
 
     lastSignalRef.current = signal;
-  }, [geoState?.flightSignal, all?.geoLibrary, flyTo, mapRef]);
+  }, [geoState?.flightSignal, geoState, all?.geoLibrary, flyTo, mapRef]);
 
   const renderLM = () => {
-    // 🏛️ Ensure we have a Target ID
-    const lmId = geoState?.selectedLm?.id || activeWorkbase?.id;
+    const lmId = geoState?.selectedLm?.id || null;
     if (!lmId) return null;
 
-    // 🏛️ Look in the Warehouse GeoLibrary
     const lmEntry = all?.geoLibrary?.[lmId];
-
-    // 🕵️ FORENSIC SEARCH: Where is the geometry hiding?
-    // We check:
-    // 1. lmEntry.geometry.coordinates (Parsed)
-    // 2. lmEntry.coordinates (Direct)
-    // 3. lmEntry.geometry (Raw)
     const targetGeo =
       lmEntry?.geometry?.coordinates ||
       lmEntry?.coordinates ||
@@ -203,9 +311,7 @@ export default function MapsScreen() {
     const lmCoords = getSafeCoords(targetGeo);
 
     if (!lmCoords || lmCoords.length < 3) {
-      // If still failing, check the direct objects as a last resort
-      const fallbackGeo =
-        geoState?.selectedLm?.geometry || activeWorkbase?.geometry;
+      const fallbackGeo = geoState?.selectedLm?.geometry;
       const fallbackCoords = getSafeCoords(fallbackGeo);
       if (fallbackCoords?.length < 3) return null;
 
@@ -246,11 +352,21 @@ export default function MapsScreen() {
           coordinates={wardCoords}
           strokeColor={isSelected ? "#2563eb" : "#475569"}
           fillColor={
-            isSelected ? "rgba(37, 99, 235, 0.2)" : "rgba(148, 163, 184, 0.05)"
+            isSelected
+              ? "rgba(160, 190, 255, 0.2)"
+              : "rgba(148, 163, 184, 0.05)"
           }
           strokeWidth={isSelected ? 3 : 1.5}
           zIndex={isSelected ? 100 : 50}
-          tappable={true}
+          tappable={!gcsModalOpen}
+          onPress={() => {
+            if (gcsModalOpen) return;
+
+            updateGeo({
+              selectedWard: ward,
+              lastSelectionType: "WARD",
+            });
+          }}
         />
       );
     });
@@ -259,6 +375,7 @@ export default function MapsScreen() {
   const renderSelectedErf = () => {
     const selectedId = geoState?.selectedErf?.id;
     if (!selectedId) return null;
+
     const heavyEntry = all?.geoLibrary?.[selectedId];
     const borderCoords = getSafeCoords(heavyEntry?.geometry);
     const centroid = heavyEntry?.centroid;
@@ -270,7 +387,7 @@ export default function MapsScreen() {
         <Polygon
           key={`sovereign-border-${selectedId}`}
           coordinates={borderCoords}
-          strokeColor="#FFD700" // 🟡 Sovereign Gold
+          strokeColor="#FFD700"
           fillColor="rgba(255, 215, 0, 0.15)"
           strokeWidth={4}
           zIndex={1000}
@@ -286,17 +403,25 @@ export default function MapsScreen() {
   const renderSelectedPremise = () => {
     const selectedPremise = geoState?.selectedPremise;
     const centroid = selectedPremise?.geometry?.centroid;
-    if (!selectedPremise?.id || !centroid || centroid?.length < 2) return null;
+
+    if (
+      !selectedPremise?.id ||
+      !centroid ||
+      typeof centroid.lat !== "number" ||
+      typeof centroid.lng !== "number"
+    ) {
+      return null;
+    }
 
     const addr = selectedPremise?.address;
     const adrLn1 = addr
-      ? `${addr?.strNo || ""} ${addr?.strName}`?.trim()
+      ? `${addr?.strNo || ""} ${addr?.strName}`.trim()
       : "NO ADR";
-    const adrLn2 = addr ? ` ${addr?.strType || ""}`?.trim() : "";
+    const adrLn2 = addr ? `${addr?.strType || ""}`.trim() : "";
 
     return (
       <SelectedPremise
-        coordinate={{ latitude: centroid[0], longitude: centroid[1] }}
+        coordinate={{ latitude: centroid.lat, longitude: centroid.lng }}
         erfNo={selectedPremise?.erfNo}
         adrLn1={adrLn1}
         adrLn2={adrLn2}
@@ -308,7 +433,7 @@ export default function MapsScreen() {
   const renderAssetMarker = () => {
     const selectedMeter = geoState?.selectedMeter;
     const gps = selectedMeter?.ast?.location?.gps;
-    if (!gps?.lat) return null;
+    if (!gps?.lat || !gps?.lng) return null;
 
     return (
       <SelecteMeter
@@ -324,7 +449,7 @@ export default function MapsScreen() {
   };
 
   const renderErfsNeighborhood = () => {
-    if (!showLayers?.erfs || !region || zoom < 16) return null;
+    if (!scopeReady || !showLayers?.erfs || !region || zoom < 18) return null;
 
     const latMin = region.latitude - region.latitudeDelta / 2;
     const latMax = region.latitude + region.latitudeDelta / 2;
@@ -343,6 +468,7 @@ export default function MapsScreen() {
         const cLng =
           rawCentroid?.lng ||
           (Array.isArray(rawCentroid) ? rawCentroid[1] : null);
+
         return (
           cLat >= latMin && cLat <= latMax && cLng >= lngMin && cLng <= lngMax
         );
@@ -355,7 +481,7 @@ export default function MapsScreen() {
 
         return (
           <React.Fragment key={`nb-erf-${erf?.id}`}>
-            {isLevel1 && (
+            {isLevel1 ? (
               <Polygon
                 coordinates={getSafeCoords(heavyEntry?.geometry)}
                 strokeColor="#94a3b8"
@@ -363,21 +489,20 @@ export default function MapsScreen() {
                 strokeWidth={0.5}
                 zIndex={900}
               />
-            )}
+            ) : null}
+
             <Marker
               coordinate={{ latitude: cLat, longitude: cLng }}
               anchor={{ x: 0.5, y: 0.5 }}
               onPress={(e) => {
-                e?.stopPropagation();
-                const parentWard = all?.wards?.find(
-                  (w) => w.id === erf?.admin?.ward?.id,
-                );
-                updateGeo({
-                  selectedWard: parentWard || null,
-                  lastSelectionType: "WARD",
-                });
+                e?.stopPropagation?.();
                 updateGeo({ selectedErf: erf, lastSelectionType: "ERF" });
-                router.push(`/erfs/${erf?.id}`);
+                router.push({
+                  pathname: "/premises/formPremise",
+                  params: {
+                    id: erf?.id, // The parent Erf ID (Anchor)
+                  },
+                });
               }}
             >
               {isLevel1 ? (
@@ -395,11 +520,9 @@ export default function MapsScreen() {
       });
   };
 
-  const RenderPremisesNeighborhood = () => {
-    // 🛡️ Guard: Precision zoom (18+) and active layer check
-    const { openMissionDiscovery } = useDiscovery();
-
-    if (!showLayers?.premises || !region || zoom < 18) return null;
+  const renderPremisesNeighborhood = () => {
+    if (!scopeReady || !showLayers?.premises || !region || zoom < 18)
+      return null;
 
     const latMin = region.latitude - region.latitudeDelta / 2;
     const latMax = region.latitude + region.latitudeDelta / 2;
@@ -411,26 +534,37 @@ export default function MapsScreen() {
         if (prem?.id === geoState?.selectedPremise?.id) return false;
 
         const centroid = prem?.geometry?.centroid;
-        if (!centroid || !Array.isArray(centroid)) return false;
+        if (
+          !centroid ||
+          typeof centroid.lat !== "number" ||
+          typeof centroid.lng !== "number"
+        ) {
+          return false;
+        }
 
-        const pLat = centroid[0];
-        const pLng = centroid[1];
+        const pLat = centroid.lat;
+        const pLng = centroid.lng;
 
         return (
           pLat >= latMin && pLat <= latMax && pLng >= lngMin && pLng <= lngMax
         );
       })
       .map((prem) => {
-        const [pLat, pLng] = prem?.geometry?.centroid;
+        const centroid = prem?.geometry?.centroid;
+        const pLat = centroid?.lat;
+        const pLng = centroid?.lng;
 
         return (
           <NeighbourhoodPremiseMarker
             key={`nb-prem-${prem?.id}`}
             prem={prem}
             zoom={zoom}
-            coordinate={{ latitude: pLat, longitude: pLng }}
-            // If you want click-to-select later, enable this:
+            coordinate={getPremiseNeighborhoodCoordinate(prem, pLat, pLng)}
+            isDragging={dragPremiseId === prem?.id}
+            isSaving={savingDragId === prem?.id}
             onPress={(e) => {
+              if (dragPremiseId) return;
+
               e?.stopPropagation?.();
               updateGeo({
                 selectedPremise: prem,
@@ -440,24 +574,40 @@ export default function MapsScreen() {
                 premiseId: prem?.id,
               });
             }}
-            // onLongPress={(e) => {
-            //   e?.stopPropagation?.();
-
-            //   updateGeo({
-            //     selectedPremise: prem,
-            //     lastSelectionType: "PREMISE",
-            //   });
-
-            // }}
+            onLongPress={() => {
+              setDragPremiseId(prem?.id);
+            }}
+            onDragEnd={(coordinate) => {
+              handlePremiseMarkerDragEnd(prem?.id, coordinate);
+            }}
             showAddressFromZoom={18}
             showTypeFromZoom={18}
           />
+
+          // <NeighbourhoodPremiseMarker
+          //   key={`nb-prem-${prem?.id}`}
+          //   prem={prem}
+          //   zoom={zoom}
+          //   coordinate={{ latitude: pLat, longitude: pLng }}
+          //   onPress={(e) => {
+          //     e?.stopPropagation?.();
+          //     updateGeo({
+          //       selectedPremise: prem,
+          //       lastSelectionType: "PREMISE",
+          //     });
+          //     openMissionDiscovery({
+          //       premiseId: prem?.id,
+          //     });
+          //   }}
+          //   showAddressFromZoom={18}
+          //   showTypeFromZoom={18}
+          // />
         );
       });
   };
 
   const renderMetersNeighborhood = () => {
-    if (!showLayers?.asts || !region || zoom < 18) return null;
+    if (!scopeReady || !showLayers?.asts || !region || zoom < 18) return null;
 
     const latMin = region.latitude - region.latitudeDelta / 2;
     const latMax = region.latitude + region.latitudeDelta / 2;
@@ -490,7 +640,6 @@ export default function MapsScreen() {
           <Marker
             key={`nb-meter-${m.id}`}
             coordinate={coordinate}
-            // anchor={{ x: 0.5, y: 0.5 }}
             anchor={{ x: 0.1, y: 0.1 }}
             zIndex={1200}
           >
@@ -499,7 +648,7 @@ export default function MapsScreen() {
                 styles.meterMarkerCircle,
                 {
                   backgroundColor: isWater ? "#3B82F6" : "#EAB308",
-                  borderColor: isAnomaly ? "#EF4444" : "#FFFFFF", // Red ring for Bypassed/Illegal
+                  borderColor: isAnomaly ? "#EF4444" : "#FFFFFF",
                   borderWidth: isAnomaly ? 2 : 1,
                 },
               ]}
@@ -510,8 +659,7 @@ export default function MapsScreen() {
   };
 
   const renderServiceConnections = () => {
-    // 🛡️ Guard: Precision Tactical View (Zoom 18+)
-    if (!showLayers?.sc || !region || zoom < 18) return null;
+    if (!scopeReady || !showLayers?.sc || !region || zoom < 18) return null;
 
     const latMin = region.latitude - region.latitudeDelta / 2;
     const latMax = region.latitude + region.latitudeDelta / 2;
@@ -523,22 +671,17 @@ export default function MapsScreen() {
         const mLat = m?.ast?.location?.gps?.lat;
         const mLng = m?.ast?.location?.gps?.lng;
 
-        // 🛰️ Bounding Box Spatial Cull for Meters
         const inView =
           mLat >= latMin && mLat <= latMax && mLng >= lngMin && mLng <= lngMax;
 
-        // Check if there is a valid premise link
         const hasPremiseLink = !!m.accessData?.premise?.id;
 
         return inView && hasPremiseLink;
       })
       .map((m) => {
-        // console.log(`meter`, m);
-        // Find the parent premise in the warehouse
         const parentPrem = all?.prems?.find(
           (p) => p.id === m.accessData.premise.id,
         );
-        // console.log(`parentPrem`, parentPrem);
         const pCentroid = parentPrem?.geometry?.centroid;
 
         if (!pCentroid || !Array.isArray(pCentroid)) return null;
@@ -562,8 +705,8 @@ export default function MapsScreen() {
             ]}
             strokeColor={connectionColor}
             strokeWidth={2}
-            lineDashPattern={[4, 4]} // 🎯 Dashed to distinguish from physical boundaries
-            zIndex={850} // Below markers, above erfs
+            lineDashPattern={[4, 4]}
+            zIndex={850}
           />
         );
       });
@@ -572,30 +715,39 @@ export default function MapsScreen() {
   const renderAssetLink = () => {
     const meter = geoState?.selectedMeter;
     const premise = geoState?.selectedPremise;
+
     if (
       !meter?.id ||
       !premise?.id ||
       meter?.accessData?.premise?.id !== premise?.id
-    )
+    ) {
       return null;
+    }
 
     const meterGps = meter?.ast?.location?.gps;
     const pCentroid = premise?.geometry?.centroid;
-    if (!meterGps?.lat || !pCentroid) return null;
+
+    if (
+      !meterGps?.lat ||
+      !meterGps?.lng ||
+      !pCentroid ||
+      typeof pCentroid.lat !== "number" ||
+      typeof pCentroid.lng !== "number"
+    ) {
+      return null;
+    }
 
     return (
-      <>
-        <Polyline
-          coordinates={[
-            { latitude: meterGps.lat, longitude: meterGps.lng },
-            { latitude: pCentroid[0], longitude: pCentroid[1] },
-          ]}
-          strokeColor="#3b82f6"
-          strokeWidth={3}
-          lineDashPattern={[5, 5]}
-          zIndex={1200}
-        />
-      </>
+      <Polyline
+        coordinates={[
+          { latitude: meterGps.lat, longitude: meterGps.lng },
+          { latitude: pCentroid.lat, longitude: pCentroid.lng },
+        ]}
+        strokeColor="#3b82f6"
+        strokeWidth={3}
+        lineDashPattern={[5, 5]}
+        zIndex={1200}
+      />
     );
   };
 
@@ -604,13 +756,15 @@ export default function MapsScreen() {
       <View style={styles.hudOverlay}>
         <GeoStatusHUD />
       </View>
+
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
+        mapType={mapType}
         initialRegion={initialRegion}
         onRegionChangeComplete={handleRegionChange}
-        showsUserLocation={true}
+        showsUserLocation
       >
         {renderLM()}
         {renderWards()}
@@ -618,16 +772,33 @@ export default function MapsScreen() {
         {renderAssetLink()}
         {renderSelectedPremise()}
         {renderErfsNeighborhood()}
-        {RenderPremisesNeighborhood()}
+        {renderPremisesNeighborhood()}
         {renderMetersNeighborhood()}
         {renderServiceConnections()}
         {renderAssetMarker()}
       </MapView>
+
+      {!hasLm ? (
+        <MapScopeState
+          title="NO ACTIVE WORKBASE"
+          subtitle="Select a workbase and ward to begin."
+        />
+      ) : isLmOnly ? (
+        <MapScopeState
+          title="LM OVERVIEW"
+          subtitle="Select a ward to drill into this local municipality."
+        />
+      ) : scopeSync?.status === "invalid-ward" ? (
+        <MapScopeState
+          title="INVALID WARD"
+          subtitle="The selected ward does not belong to the active workbase."
+        />
+      ) : null}
+
       <View style={styles.gcsOverlay}>
-        <GeoCascadingSelector />
+        <GeoCascadingSelector onModalStateChange={setGcsModalOpen} />
       </View>
 
-      {/* 🛠️ LAYER CONTROL POD */}
       <View style={styles.layerControl}>
         <TouchableOpacity
           style={[styles.layerBtn, showLayers.erfs && styles.layerBtnActive]}
@@ -639,6 +810,7 @@ export default function MapsScreen() {
             color={showLayers.erfs ? "#fff" : "#64748b"}
           />
         </TouchableOpacity>
+
         <TouchableOpacity
           style={[
             styles.layerBtn,
@@ -654,6 +826,7 @@ export default function MapsScreen() {
             color={showLayers.premises ? "#fff" : "#64748b"}
           />
         </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.layerBtn, showLayers.asts && styles.layerBtnActive]}
           onPress={() => setShowLayers((p) => ({ ...p, asts: !p.asts }))}
@@ -673,6 +846,24 @@ export default function MapsScreen() {
             name="vector-line"
             size={20}
             color={showLayers.sc ? "#fff" : "#64748b"}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.layerBtn,
+            mapType !== "standard" && styles.layerBtnActive,
+          ]}
+          onPress={() =>
+            setMapType((prev) =>
+              prev === "standard" ? "satellite" : "standard",
+            )
+          }
+        >
+          <MaterialCommunityIcons
+            name={mapType === "standard" ? "satellite-variant" : "map-outline"}
+            size={20}
+            color={mapType !== "standard" ? "#fff" : "#64748b"}
           />
         </TouchableOpacity>
 
@@ -704,6 +895,35 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 10,
   },
+  scopeStateOverlay: {
+    position: "absolute",
+    top: 120,
+    left: 20,
+    right: 20,
+    zIndex: 120,
+    alignItems: "center",
+  },
+  scopeStateCard: {
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    minWidth: 220,
+  },
+  scopeStateTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#0F172A",
+    textAlign: "center",
+  },
+  scopeStateSubtitle: {
+    marginTop: 6,
+    fontSize: 11,
+    color: "#64748B",
+    textAlign: "center",
+  },
   layerControl: {
     position: "absolute",
     top: 80,
@@ -720,6 +940,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 6,
+    borderWidth: 0.5,
     marginBottom: 4,
   },
   layerBtnActive: { backgroundColor: "#2563eb" },
@@ -734,8 +955,6 @@ const styles = StyleSheet.create({
   },
   neighborhoodLabel: {
     backgroundColor: "white",
-    // paddingHorizontal: 8,
-    // paddingVertical: 4,:
     padding: 8,
     borderRadius: 6,
     borderWidth: 1,
@@ -744,13 +963,12 @@ const styles = StyleSheet.create({
   },
   neighborhoodLabelText: { fontSize: 9, fontWeight: "400", color: "#1e293b" },
   zoomDisplay: {
-    marginTop: 10,
     backgroundColor: "rgba(15, 23, 42, 0.9)",
     borderRadius: 8,
     paddingVertical: 6,
     alignItems: "center",
     justifyContent: "center",
-    minWidth: 44,
+    minWidth: 40,
   },
   zoomText: {
     color: "#4CD964",
@@ -773,29 +991,21 @@ const styles = StyleSheet.create({
   distanceText: { color: "white", fontSize: 8, fontWeight: "900" },
 
   premiseSquare: {
-    width: 15, // Small and precise
+    width: 15,
     height: 15,
-    backgroundColor: "#3B82F6", // Command Blue
+    backgroundColor: "#3B82F6",
     borderWidth: 1.5,
-    borderColor: "#FFFFFF", // White border for visibility against any map background
-    borderRadius: 1, // Sharp corners for a technical feel
+    borderColor: "#FFFFFF",
+    borderRadius: 1,
     elevation: 2,
   },
-  // meterMarkerCircle: {
-  //   width: 8,
-  //   height: 8,
-  //   borderRadius: 4, // ⚪ Circle vs 🟦 Square
-  //   borderWidth: 1,
-  //   borderColor: '#FFFFFF',
-  //   elevation: 6,
-  // },
   meterMarkerCircle: {
     width: 10,
     height: 10,
-    borderRadius: 4, // Perfect Circle
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: "#FFFFFF",
-    elevation: 5, // Highest elevation
+    elevation: 5,
     shadowColor: "#000",
     shadowOpacity: 0.3,
     shadowRadius: 1,

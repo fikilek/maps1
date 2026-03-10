@@ -22,19 +22,22 @@ export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
   const mediaArray = getIn(values, name) || [];
   const capturedPhoto = mediaArray.find((m) => m?.tag === tag);
 
-  // 🎯 3. Sync the error lookup
   const mediaError = getIn(errors, name);
+  const mediaErrorText = typeof mediaError === "string" ? mediaError : "";
 
   const isTargetedError =
-    (tag === "astNoPhoto" && mediaError?.includes("Meter")) ||
-    (tag === "anomalyPhoto" && mediaError?.includes("Anomaly")) ||
-    (tag === "noAccessPhoto" && mediaError?.includes("No Access")) ||
-    (tag === "keypadPhoto" && mediaError?.includes("Keypad")) ||
-    (tag === "astCbPhoto" && mediaError?.includes("Circuit Breaker")) ||
-    (tag === "ogsPhoto" && mediaError?.includes("Off Grid Supply")) ||
-    (tag === "normalisationPhoto" && mediaError?.includes("Normalisation"));
+    (tag === "astNoPhoto" && mediaErrorText.includes("Meter")) ||
+    (tag === "anomalyPhoto" && mediaErrorText.includes("Anomaly")) ||
+    (tag === "noAccessPhoto" && mediaErrorText.includes("No Access")) ||
+    (tag === "keypadPhoto" && mediaErrorText.includes("Keypad")) ||
+    (tag === "astCbPhoto" && mediaErrorText.includes("Circuit Breaker")) ||
+    (tag === "ogsPhoto" && mediaErrorText.includes("Off Grid Supply")) ||
+    (tag === "normalisationPhoto" &&
+      mediaErrorText.includes("Normalisation")) ||
+    (tag === "propertyTypePhoto" && mediaErrorText.includes("Property Type")) ||
+    (tag === "propertyAdrPhoto" && mediaErrorText.includes("Property Address"));
 
-  const hasError = !!mediaError && isTargetedError && !capturedPhoto;
+  const hasError = !!mediaErrorText && isTargetedError && !capturedPhoto;
 
   const removeImage = () => {
     const newMedia = mediaArray.filter((m) => m?.tag !== tag);

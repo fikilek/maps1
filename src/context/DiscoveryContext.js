@@ -11,7 +11,6 @@ const DiscoveryContext = createContext(null);
 
 export function DiscoveryProvider({ children }) {
   const [isVisible, setIsVisible] = useState(false);
-  console.log(`isVisible`, isVisible);
 
   // Mission payload
   const [mission, setMission] = useState({

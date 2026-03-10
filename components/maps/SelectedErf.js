@@ -7,7 +7,7 @@ const SelectedErf = ({ coordinate, erfNo }) => {
     <Marker
       coordinate={coordinate}
       pinColor="blue" // Makes the pin blue
-      // tracksViewChanges={false} // Optional: prevents blinking
+      tracksViewChanges={false} // Optional: prevents blinking
       titleVisibility={"visible "}
       titel="ErfNo"
       anchor={{ x: 0.4, y: 0.3 }}

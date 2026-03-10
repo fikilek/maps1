@@ -51,7 +51,7 @@ const PremiseCard = memo(
     const isFlat = item?.propertyType?.type === "Flats";
     const erfId = item?.erfId; // 🎯 The link to the sovereign
 
-    const { updateGeo } = useGeo(); // 🛰️ THE COMMANDER
+    const { updateGeo, geoState } = useGeo(); // 🛰️ THE COMMANDER
     const { all } = useWarehouse(); // 🕵️ THE INTEL
 
     const router = useRouter();
@@ -89,7 +89,24 @@ const PremiseCard = memo(
 
     // 🏛️ THE DUPLICATE TRIGGER
     const handleLongPressDuplicate = () => {
-      console.log(`handleLongPressDuplicate pressed`);
+      const selectedErf = geoState?.selectedErf || null;
+
+      if (!selectedErf?.id) {
+        Alert.alert(
+          "Select Erf First",
+          "To duplicate this premise, first select the destination Erf. You can go to the Erfs screen now or cancel.",
+          [
+            { text: "CANCEL", style: "cancel" },
+            {
+              text: "SELECT ERF",
+              style: "default",
+              onPress: () => router.push("/(tabs)/erfs"),
+            },
+          ],
+        );
+        return;
+      }
+
       Alert.alert(
         "Duplicate Unit",
         "This will create a new Flat Unit using this unit as a template. All data except the Unit Number, No Access and Services will be copied.",
@@ -97,8 +114,8 @@ const PremiseCard = memo(
           { text: "CANCEL", style: "cancel" },
           {
             text: "PROCEED",
-            onPress: () => onDuplicate?.(item),
             style: "default",
+            onPress: () => onDuplicate?.(item),
           },
         ],
       );
@@ -299,7 +316,10 @@ const PremiseCard = memo(
                 size={16}
                 color="#1E293B"
               />
-              <Text style={styles.compactBtnText}>Discover</Text>
+              <View>
+                <Text style={styles.compactBtnText}>Discover</Text>
+                <Text style={styles.compactBtnSubText}>Meter Audit</Text>
+              </View>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.compactBtn, styles.btnInstall]}
@@ -447,6 +467,7 @@ const styles = StyleSheet.create({
   },
   btnInstall: { backgroundColor: "#007AFF" },
   compactBtnText: { fontSize: 12, fontWeight: "800", color: "#1E293B" },
+  compactBtnSubText: { fontSize: 8, fontWeight: "400", color: "#1E293B" },
 
   geoRow: {
     flexDirection: "row",

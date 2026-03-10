@@ -8,66 +8,130 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps"; // 🛰️ Added Polygon
+import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
 import { Button, Modal, Portal } from "react-native-paper";
 import { useWarehouse } from "../../src/context/WarehouseContext";
 
 const { width, height } = Dimensions.get("window");
 
+function isSamePoint(a, b, tolerance = 0.000001) {
+  if (!a || !b) return false;
+
+  const aLat = Number(a?.lat);
+  const aLng = Number(a?.lng);
+  const bLat = Number(b?.lat);
+  const bLng = Number(b?.lng);
+
+  if (
+    Number.isNaN(aLat) ||
+    Number.isNaN(aLng) ||
+    Number.isNaN(bLat) ||
+    Number.isNaN(bLng)
+  ) {
+    return false;
+  }
+
+  return Math.abs(aLat - bLat) < tolerance && Math.abs(aLng - bLng) < tolerance;
+}
+
 const FormMapPositioner = ({
   label = "Physical Asset Positioning",
   name,
   erfId,
+  defaultLocation,
 }) => {
+  // console.log(`FormMapPositioner --defaultLocation`, defaultLocation);
   const [showMap, setShowMap] = useState(false);
   const { all } = useWarehouse();
-  const { values, setFieldValue } = useFormikContext();
+  const { values, errors, setFieldValue } = useFormikContext();
+  const targetGeo = all?.geoLibrary?.[erfId] || null;
+  // console.log(`FormMapPositioner --targetGeo`, targetGeo);
 
-  // 🏛️ THE SINGLE SOURCE OF TRUTH: targetGeo from geoLibrary
-  const targetGeo = all?.geoLibrary?.[erfId];
+  const startLat = defaultLocation?.lat ?? targetGeo?.centroid?.lat ?? -34.028;
+  // console.log(`FormMapPositioner --startLat`, startLat);
 
-  // 📍 THE MISSION START: Directly from the Centroid
-  const startLat = targetGeo?.centroid?.lat || -34.028;
-  const startLng = targetGeo?.centroid?.lng || 23.076;
+  const startLng = defaultLocation?.lng ?? targetGeo?.centroid?.lng ?? 23.076;
+  // console.log(`FormMapPositioner --startLng`, startLng);
 
-  // 🗺️ THE BOUNDARY REFINERY (Only for the green perimeter lines)
   const erfCoordinates = useMemo(() => {
-    if (!targetGeo?.geometry?.coordinates) return null;
+    if (!targetGeo?.geometry) return null;
+
+    let geometryObj = targetGeo.geometry;
+
+    if (typeof geometryObj === "string") {
+      try {
+        geometryObj = JSON.parse(geometryObj);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    if (!geometryObj?.coordinates) return null;
+
     const raw =
-      targetGeo.geometry.type === "MultiPolygon"
-        ? targetGeo.geometry.coordinates[0][0]
-        : targetGeo.geometry.coordinates[0];
-    return raw.map((c) => ({ latitude: c[1], longitude: c[0] }));
+      geometryObj.type === "MultiPolygon"
+        ? geometryObj.coordinates?.[0]?.[0]
+        : geometryObj.coordinates?.[0];
+
+    if (!Array.isArray(raw)) return null;
+
+    return raw.map((c) => ({
+      latitude: c[1],
+      longitude: c[0],
+    }));
   }, [targetGeo]);
+
+  const fieldError = getIn(errors, name);
+  const hasError = !!fieldError;
+
+  const currentLocation = getIn(values, name); // { lat, lng }
+  // console.log(`FormMapPositioner --currentLocation`, currentLocation);
+
+  const resolvedLocation =
+    currentLocation &&
+    typeof currentLocation === "object" &&
+    typeof currentLocation.lat === "number" &&
+    typeof currentLocation.lng === "number"
+      ? currentLocation
+      : { lat: startLat, lng: startLng };
+  // console.log(`FormMapPositioner --resolvedLocation`, resolvedLocation);
+
+  const hasValidCurrentPoint =
+    currentLocation &&
+    typeof currentLocation === "object" &&
+    typeof currentLocation.lat === "number" &&
+    typeof currentLocation.lng === "number";
+
+  const hasValidDefaultPoint =
+    defaultLocation &&
+    typeof defaultLocation === "object" &&
+    typeof defaultLocation.lat === "number" &&
+    typeof defaultLocation.lng === "number";
+
+  const isVerified =
+    hasValidCurrentPoint &&
+    hasValidDefaultPoint &&
+    !isSamePoint(currentLocation, defaultLocation);
 
   const handleDragEnd = (e) => {
     const { latitude, longitude } = e.nativeEvent.coordinate;
 
-    // 💉 1. CAPTURE THE GPS: Dump the array into Formik
-    setFieldValue(name, [latitude, longitude]);
-
-    // ✅ 2. AUTHENTICATE: Flip the verification flag
-    // This is what turns the border from Red to Green
-    setFieldValue("metadata.isGpsVerified", true);
+    setFieldValue(name, {
+      lat: latitude,
+      lng: longitude,
+    });
 
     console.log(`📡 [POSITION SECURED]: ${latitude}, ${longitude}`);
   };
 
-  // const isVerified = values.metadata?.isGpsVerified === true;
-  const isVerified =
-    values.metadata?.isGpsVerified === true ||
-    (Array.isArray(currentLocation) && currentLocation.length === 2);
-  const currentLocation = getIn(values, name); // e.g., [lat, lng]
-
   return (
     <View style={styles.container}>
-      {/* 🔘 TRIGGER BUTTON */}
       <Text style={styles.topLabel}>{label}</Text>
 
       <TouchableOpacity
         onPress={() => setShowMap(true)}
-        // 🛡️ THE VISUAL DNA: Apply errorBorder only if NOT verified
-        style={[styles.selector, !isVerified && styles.errorBorder]}
+        style={[styles.selector, hasError && styles.errorBorder]}
+        // style={[styles.selector, !isVerified && styles.errorBorder]}
       >
         <View style={styles.row}>
           <View
@@ -82,12 +146,14 @@ const FormMapPositioner = ({
               color={isVerified ? "#059669" : "#dc2626"}
             />
           </View>
+
           <View style={styles.textBlock}>
             <Text style={styles.selectorValue}>
-              {isVerified && Array.isArray(currentLocation)
-                ? `${currentLocation[0].toFixed(6)}° , ${currentLocation[1].toFixed(6)}°`
+              {isVerified
+                ? `${resolvedLocation.lat.toFixed(6)}° , ${resolvedLocation.lng.toFixed(6)}°`
                 : "VERIFY PREMISE POSITION"}
             </Text>
+
             <Text style={styles.actionText}>
               {isVerified
                 ? "Coordinate Lock Secured"
@@ -97,26 +163,6 @@ const FormMapPositioner = ({
         </View>
       </TouchableOpacity>
 
-      {/* <TouchableOpacity
-        onPress={() => setShowMap(true)}
-        style={styles.selector}
-      >
-        <View style={styles.row}>
-          <View style={styles.iconCircle}>
-            <MaterialCommunityIcons
-              name="map-marker-radius"
-              size={24}
-              color="#059669"
-            />
-          </View>
-          <View style={styles.textBlock}>
-            <Text style={styles.selectorValue}>ADJUST ASSET POSITION</Text>
-            <Text style={styles.actionText}>Defaults to Erf Centroid</Text>
-          </View>
-        </View>
-        <MaterialCommunityIcons name="target" size={24} color="#64748B" />
-      </TouchableOpacity> */}
-
       <Portal>
         <Modal
           visible={showMap}
@@ -125,53 +171,74 @@ const FormMapPositioner = ({
         >
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>DRAG PIN TO PHYSICAL ASSET</Text>
-            <Button
-              mode="contained"
-              onPress={() => setShowMap(false)}
-              buttonColor="#059669"
-            >
-              DONE
-            </Button>
+
+            <View style={styles.modalBtnRow}>
+              <Button
+                mode="outlined"
+                onPress={() => setShowMap(false)}
+                textColor="#475569"
+                style={styles.cancelBtn}
+              >
+                CANCEL
+              </Button>
+
+              <Button
+                mode="contained"
+                onPress={() => setShowMap(false)}
+                buttonColor="#059669"
+                disabled={!isVerified}
+              >
+                DONE
+              </Button>
+            </View>
           </View>
 
-          <MapView
-            provider={PROVIDER_GOOGLE}
-            style={styles.map}
-            showsUserLocation={true}
-            initialRegion={{
-              latitude: startLat,
-              longitude: startLng,
-              latitudeDelta: 0.001,
-              longitudeDelta: 0.001,
-            }}
-          >
-            {/* 🏛️ GREEN PERIMETER LINES */}
-            {erfCoordinates && (
-              <Polygon
-                coordinates={erfCoordinates}
-                strokeColor="#059669"
-                fillColor="rgba(5, 150, 105, 0.15)"
-                strokeWidth={3}
-              />
-            )}
-
-            {/* 📍 THE PIN: Starts at Centroid, captured on Drag */}
-
-            <Marker
-              draggable
-              coordinate={{ latitude: startLat, longitude: startLng }}
-              onDragEnd={handleDragEnd}
-              anchor={{ x: 0.5, y: 1 }}
+          <View style={styles.mapWrapper}>
+            <MapView
+              provider={PROVIDER_GOOGLE}
+              style={styles.map}
+              showsUserLocation={true}
+              initialRegion={{
+                latitude: resolvedLocation.lat,
+                longitude: resolvedLocation.lng,
+                latitudeDelta: 0.00035,
+                longitudeDelta: 0.00035,
+              }}
             >
-              <View style={styles.markerWrapper}>
-                <MaterialCommunityIcons
-                  name="map-marker"
-                  size={50} // 🎯 Massive for field ergonomics
-                  color="#dc2626"
+              {erfCoordinates && (
+                <Polygon
+                  coordinates={erfCoordinates}
+                  strokeColor="#059669"
+                  fillColor="rgba(5, 150, 105, 0.15)"
+                  strokeWidth={3}
                 />
-              </View>
-            </Marker>
-          </MapView>
+              )}
+
+              <Marker
+                draggable
+                coordinate={{
+                  latitude: resolvedLocation.lat,
+                  longitude: resolvedLocation.lng,
+                }}
+                onDragEnd={handleDragEnd}
+                anchor={{ x: 0.5, y: 1 }}
+              >
+                <View style={styles.markerWrapper}>
+                  <MaterialCommunityIcons
+                    name="map-marker"
+                    size={50}
+                    color="#dc2626"
+                  />
+                </View>
+              </Marker>
+            </MapView>
+
+            <View pointerEvents="none" style={styles.mapTip}>
+              <Text style={styles.mapTipText}>
+                LONG-PRESS AND DRAG PIN TO EXACT LOCATION
+              </Text>
+            </View>
+          </View>
         </Modal>
       </Portal>
     </View>
@@ -218,31 +285,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // Paper Modal Styles
-  modalContent: {
-    backgroundColor: "white",
-    margin: 0,
-    height: height,
-    width: width,
-    justifyContent: "flex-start",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderColor: "#eee",
-  },
-  modalTitle: {
-    fontSize: 12,
-    fontWeight: "900",
-    color: "#64748b",
-    letterSpacing: 1,
-  },
   map: { flex: 1 },
   tipSurface: {
     position: "absolute",
@@ -259,17 +301,75 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 0.5,
   },
-
   markerWrapper: {
-    // 🛡️ Shadow makes it feel "lifted" and easier to target
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
-    // We ensure the wrapper doesn't add extra padding that throws off the tip
     alignItems: "center",
     justifyContent: "center",
-    paddingBottom: 5, // Visual adjustment to see the tip clearly
+    paddingBottom: 5,
+  },
+
+  modalContent: {
+    backgroundColor: "white",
+    marginHorizontal: 16,
+    marginVertical: 34,
+    height: height - 48,
+    borderRadius: 18,
+    overflow: "hidden",
+    justifyContent: "flex-start",
+  },
+
+  modalHeader: {
+    flexDirection: "column",
+    alignItems: "center", // centers horizontally
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+  },
+
+  modalTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#64748b",
+    letterSpacing: 1,
+    marginBottom: 10,
+    textAlign: "center",
+  },
+
+  modalBtnRow: {
+    flexDirection: "row",
+    justifyContent: "center", // center buttons
+    gap: 12,
+  },
+
+  cancelBtn: {
+    borderColor: "#cbd5e1",
+  },
+
+  mapTip: {
+    position: "absolute",
+    bottom: 30,
+    alignSelf: "center",
+    backgroundColor: "rgba(30, 41, 59, 0.9)",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+
+  mapTipText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+
+  mapWrapper: {
+    flex: 1,
   },
 });
