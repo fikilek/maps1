@@ -68,6 +68,14 @@ function PremisesLayoutContent() {
           }}
         />
         <Stack.Screen
+          name="formPremise"
+          options={{
+            title: "Premise Form",
+            presentation: "modal",
+            headerShown: true,
+          }}
+        />
+        <Stack.Screen
           name="premiseMedia"
           options={{
             title: "Forensic Gallery",

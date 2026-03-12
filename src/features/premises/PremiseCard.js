@@ -1,7 +1,14 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { memo } from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 
@@ -44,7 +51,7 @@ const PremiseCard = memo(
     onMapPress,
     onDiscover,
     onInstall,
-    onDetailPress,
+    onEditPress,
     onDuplicate,
     onNaPress,
   }) => {
@@ -88,7 +95,7 @@ const PremiseCard = memo(
     const beacon = getPropertyBeacon(item?.propertyType?.type);
 
     // 🏛️ THE DUPLICATE TRIGGER
-    const handleLongPressDuplicate = () => {
+    const handleDuplicate = () => {
       const selectedErf = geoState?.selectedErf || null;
 
       if (!selectedErf?.id) {
@@ -146,12 +153,25 @@ const PremiseCard = memo(
       router.push("/(tabs)/erfs");
     };
 
+    const isSelected = geoState?.selectedPremise?.id === item?.id;
+
+    const handleTogglePremiseSelection = () => {
+      if (isSelected) {
+        updateGeo({
+          selectedPremise: null,
+          lastSelectionType: null,
+        });
+        return;
+      }
+
+      updateGeo({
+        selectedPremise: item,
+        lastSelectionType: "PREMISE",
+      });
+    };
+
     return (
-      <TouchableOpacity
-        style={styles.card}
-        // onPress={() => onDetailPress?.(item)}
-        activeOpacity={0.9}
-      >
+      <TouchableOpacity style={styles.card} activeOpacity={0.9}>
         {/* 🎗️ STATUS RIBBON */}
         <View style={[styles.statusRibbon, { backgroundColor: status.color }]}>
           <MaterialCommunityIcons name={status.icon} size={12} color="white" />
@@ -159,6 +179,7 @@ const PremiseCard = memo(
         </View>
 
         <View style={styles.cardHeader}>
+          {/* A tap on this GIANT icon selects erf and presmise and navigates to erfs */}
           <TouchableOpacity
             onPress={handleBeaconPress}
             activeOpacity={0.7}
@@ -184,9 +205,18 @@ const PremiseCard = memo(
 
           <View style={styles.identityColumn}>
             <View style={styles.identityRow}>
-              <Text style={styles.addressText} numberOfLines={1}>
-                {addressStr || "No Address"}
-              </Text>
+              <Pressable
+                onPress={handleTogglePremiseSelection}
+                style={({ pressed }) => [
+                  styles.addressPressable,
+                  pressed && styles.addressPressablePressed,
+                  { backgroundColor: isSelected ? "lightgrey" : null },
+                ]}
+              >
+                <Text style={styles.addressText}>
+                  {addressStr || "No Address"}
+                </Text>
+              </Pressable>
               <View style={styles.typeTag}>
                 <Text style={styles.typeTagText}>
                   {item?.propertyType?.type}
@@ -214,7 +244,7 @@ const PremiseCard = memo(
 
               {/* 🛡️ THE EDIT BEACON: Moved INSIDE geoRow to stay on one line */}
               <TouchableOpacity
-                onPress={() => onDetailPress?.(item)}
+                onPress={() => onEditPress?.(item)}
                 style={styles.editIconBtn}
               >
                 <MaterialCommunityIcons
@@ -241,7 +271,7 @@ const PremiseCard = memo(
               {/* 👯 THE DUPLICATE BEACON: ONLY AND ONLY FOR FLATS */}
               {isFlat && (
                 <TouchableOpacity
-                  onPress={handleLongPressDuplicate}
+                  onPress={handleDuplicate}
                   delayLongPress={1000} // 🎯 Must hold for 1 second
                   style={styles.duplicateIconBtn}
                 >
@@ -351,7 +381,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     paddingTop: 24,
-    marginBottom: 12,
+    // marginBottom: 12,
     elevation: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -512,5 +542,14 @@ const styles = StyleSheet.create({
   },
   typeTagName: {
     fontSize: 10,
+  },
+  addressPressable: {
+    borderRadius: 6,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
+  },
+
+  addressPressablePressed: {
+    opacity: 0.6,
   },
 });

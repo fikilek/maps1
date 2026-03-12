@@ -3,7 +3,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik } from "formik";
 import { useMemo } from "react";
 import {
-  Dimensions,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,8 +25,6 @@ import {
   useUpdatePremiseMutation,
 } from "../../redux/premisesApi";
 import { ForensicFooter } from "../meters/ForensicFooter";
-
-const { width, height } = Dimensions.get("window");
 
 const streetTypeOptions = [
   "Select...",
@@ -99,6 +97,23 @@ function isSamePoint(a, b, tolerance = 0.000001) {
   return Math.abs(aLat - bLat) < tolerance && Math.abs(aLng - bLng) < tolerance;
 }
 
+function requiresPropertyName(type) {
+  return (
+    type !== "Select..." &&
+    type !== "Residential" &&
+    type !== "Vacant Land" &&
+    !!String(type || "").trim()
+  );
+}
+
+function requiresUnitNo(type) {
+  return (
+    type === "Flats" ||
+    type === "Sectional Title" ||
+    type === "Townhouse Complex"
+  );
+}
+
 export default function FormPremise() {
   // console.log(`FormPremise ----mounted`);
 
@@ -107,48 +122,34 @@ export default function FormPremise() {
   const router = useRouter();
 
   const { id, premiseId, duplicateId } = useLocalSearchParams();
-  console.log(`FormPremise ----id`, id);
 
-  const auth = useAuth();
-
-  const agentUid = auth?.user?.uid || "unknown_uid";
-  const agentName = auth?.profile?.profile?.displayName || "Field Agent";
-
-  // 🕵️ 2. DETERMINE MISSION MODE
   const isEdit = !!premiseId;
-  // console.log(`FormPremise ----isEdit`, isEdit);
-  const isDuplicate = !!duplicateId;
-  // console.log(`FormPremise ----isDuplicate`, isDuplicate);
 
-  // 🏛️ 3. RESOLVE SOURCE DATA FROM WAREHOUSE
+  const isDuplicate = !!duplicateId;
+
   const sourcePremise = useMemo(() => {
-    const targetId = premiseId || duplicateId; // Look for either the target or the template
+    const targetId = premiseId || duplicateId;
     if (!targetId) return null;
     return all?.prems?.find((p) => p.id === targetId);
   }, [premiseId, duplicateId, all?.prems]);
-  console.log(`FormPremise ----sourcePremise`, sourcePremise);
 
-  const { authState } = useAuth();
+  const { profile, user } = useAuth();
+
+  const agentUid = user?.uid || "unknown_uid";
+  console.log(`agentUid`, agentUid);
+
+  const agentName = profile?.displayName || "Field Agent";
+  console.log(`agentName`, agentName);
 
   const { geoState, updateGeo } = useGeo();
-  // console.log(`FormPremise ----geoState`, geoState);
 
-  /* SELECTED ERF METADATA  */
+  const selectedErf = geoState?.selectedErf || null;
+
   const targetGeo =
     all?.geoLibrary?.[id] || all?.geoLibrary?.[selectedErf?.erfId] || null;
-  const selectedErf = geoState?.selectedErf || null;
-  // console.log(`FormPremise ----selectedErf`, selectedErf);
-  // console.log(`FormPremise ----selectedErf?.centroid`, selectedErf?.centroid);
-  // console.log(`FormPremise ----selectedErf?.erfNo`, selectedErf?.erfNo);
-  // console.log(`FormPremise ----targetGeo`, targetGeo);
 
-  /* 🏛️ SOVEREIGN SOURCE: Extracting directly from the Erf Object */
-  const erfNo = selectedErf?.erfNo || "N/A"; // e.g. "214"
-  const safeErfNo = erfNo.replace(/\//g, "-");
+  const erfNo = selectedErf?.erfNo || "N/A";
 
-  // 🎯 THE LOCK: Icon lands exactly on the Erf's Centroid
-
-  /* 🛰️ GEOMETRY RESOLVER: Tiered Fallback */
   const erfCentroid = useMemo(() => {
     if (targetGeo?.centroid?.lat != null && targetGeo?.centroid?.lng != null) {
       return {
@@ -158,25 +159,12 @@ export default function FormPremise() {
     }
 
     return { lat: -34.035, lng: 23.048 };
-  }, [selectedErf, targetGeo, all?.meta?.centroid]);
+  }, [targetGeo]);
 
-  // 🌍 REGIONAL HIERARCHY: Direct from the Erf's admin block
   const admin = selectedErf?.admin;
-  // const countryId = admin?.country?.pcode; // e.g. "ZA1"
-  // const provinceId = admin?.province?.pcode; // e.g. "ZA1"
-  // const dmId = admin?.district?.pcode; // e.g. "ZA104"
-  // const lmId = admin?.localMunicipality?.pcode; // e.g. "ZA1048"
-  // const wardId = admin?.ward?.pcode; // e.g. "ZA1048"
-  // const wardNo = admin?.ward?.name?.split(" ")[1];
-  const wardNo =
-    admin?.ward?.name?.match(/\d+/)?.[0] ||
-    admin?.ward?.pcode?.slice(-3) ||
-    "UNK";
 
   const premiseSchema = useMemo(() => {
     return Yup.object().shape({
-      schemaVersion: Yup.string().required("Schema version is required"),
-
       address: Yup.object().shape({
         strNo: Yup.string().trim().required("Mandatory"),
         strName: Yup.string().trim().required("Mandatory"),
@@ -191,16 +179,13 @@ export default function FormPremise() {
           .required("Required"),
 
         name: Yup.string().when("type", {
-          is: (val) =>
-            val === "Flats" ||
-            val === "Sectional Title" ||
-            val === "Commercial",
+          is: (val) => requiresPropertyName(val),
           then: (schema) => schema.trim().required("Unit Name is mandatory"),
           otherwise: (schema) => schema.optional(),
         }),
 
         unitNo: Yup.string().when("type", {
-          is: (val) => val === "Flats" || val === "Sectional Title",
+          is: (val) => requiresUnitNo(val),
           then: (schema) => schema.trim().required("Unit No is mandatory"),
           otherwise: (schema) => schema.optional(),
         }),
@@ -236,6 +221,8 @@ export default function FormPremise() {
             "moved-from-erf-centroid",
             "You must move the GPS pin away from the default ERF position",
             function (value) {
+              if (isEdit) return true;
+
               const hasValidPoint =
                 typeof value?.lat === "number" &&
                 typeof value?.lng === "number";
@@ -286,25 +273,9 @@ export default function FormPremise() {
           },
         ),
     });
-  }, [erfCentroid]);
+  }, [erfCentroid, isEdit]);
 
   const initialValues = useMemo(() => {
-    const timestamp = new Date().toISOString();
-
-    const agentStamp = {
-      at: timestamp,
-      byUser: authState?.user?.displayName || "Field Agent",
-      byUid: authState?.user?.uid || "unknown_uid",
-    };
-
-    const baseParents = {
-      countryPcode: admin?.country?.pcode || null,
-      provincePcode: admin?.province?.pcode || null,
-      dmPcode: admin?.district?.pcode || null,
-      lmPcode: admin?.localMunicipality?.pcode || null,
-      wardPcode: admin?.ward?.pcode || null,
-    };
-
     const baseGeometry = {
       centroid: {
         lat: erfCentroid?.lat,
@@ -317,18 +288,7 @@ export default function FormPremise() {
     // EDIT
     if (isEdit && sourcePremise) {
       return {
-        ...sourcePremise,
-
-        schemaVersion: sourcePremise?.schemaVersion || "1.0.0",
-
-        erfId: sourcePremise?.erfId || id,
-        erfNo: sourcePremise?.erfNo || erfNo,
-
         context: sourcePremise?.context || baseContext,
-
-        parents: {
-          ...baseParents,
-        },
 
         address: {
           strNo: sourcePremise?.address?.strNo || "",
@@ -356,46 +316,13 @@ export default function FormPremise() {
           : baseGeometry,
 
         media: Array.isArray(sourcePremise?.media) ? sourcePremise.media : [],
-
-        services: {
-          electricityMeters: Array.isArray(
-            sourcePremise?.services?.electricityMeters,
-          )
-            ? sourcePremise.services.electricityMeters
-            : [],
-          waterMeters: Array.isArray(sourcePremise?.services?.waterMeters)
-            ? sourcePremise.services.waterMeters
-            : [],
-        },
-
-        metadata: {
-          ...sourcePremise?.metadata,
-          created: sourcePremise?.metadata?.created || agentStamp,
-          updated: agentStamp,
-          noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
-            ? sourcePremise.metadata.noAccessTrnIds
-            : [],
-        },
       };
     }
 
     // DUPLICATE
     if (isDuplicate && sourcePremise) {
       return {
-        ...sourcePremise,
-
-        schemaVersion: "1.0.0",
-
-        id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`,
-
-        erfId: id,
-        erfNo: erfNo,
-
         context: sourcePremise?.context || baseContext,
-
-        parents: {
-          ...baseParents,
-        },
 
         address: {
           strNo: sourcePremise?.address?.strNo || "",
@@ -416,35 +343,12 @@ export default function FormPremise() {
         geometry: baseGeometry,
 
         media: [],
-
-        services: {
-          electricityMeters: [],
-          waterMeters: [],
-        },
-
-        metadata: {
-          ...sourcePremise?.metadata,
-          created: agentStamp,
-          updated: agentStamp,
-          noAccessTrnIds: [],
-        },
       };
     }
 
     // NEW
     return {
-      schemaVersion: "1.0.0",
-
-      id: `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`,
-
-      erfId: id,
-      erfNo: erfNo,
-
       context: baseContext,
-
-      parents: {
-        ...baseParents,
-      },
 
       address: {
         strNo: "",
@@ -465,47 +369,135 @@ export default function FormPremise() {
       geometry: baseGeometry,
 
       media: [],
+    };
+  }, [
+    isEdit,
+    isDuplicate,
+    sourcePremise,
+    erfCentroid,
+    selectedErf?.isTownship,
+  ]);
 
+  const [addPremise] = useAddPremiseMutation();
+
+  const [updatePremise] = useUpdatePremiseMutation(); // 🎯 Ensure this is in your API slice
+
+  function buildSystemFields() {
+    const timestamp = new Date().toISOString();
+
+    const agentStamp = {
+      at: timestamp,
+      byUser: agentName || "Field Agent",
+      byUid: agentUid || "unknown_uid",
+    };
+
+    const stampedParents = {
+      countryPcode: admin?.country?.pcode || null,
+      provincePcode: admin?.province?.pcode || null,
+      dmPcode: admin?.district?.pcode || null,
+      lmPcode: admin?.localMunicipality?.pcode || null,
+      wardPcode: admin?.ward?.pcode || null,
+    };
+
+    const wardNo =
+      admin?.ward?.name?.match(/\d+/)?.[0] ||
+      admin?.ward?.pcode?.slice(-3) ||
+      "UNK";
+
+    const safeErfNo = String(erfNo || "N-A").replace(/\//g, "-");
+
+    const generatedId = `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`;
+
+    if (isEdit) {
+      return {
+        id: sourcePremise?.id,
+        schemaVersion: sourcePremise?.schemaVersion || "1.0.0",
+        erfId: sourcePremise?.erfId || id,
+        erfNo: sourcePremise?.erfNo || erfNo,
+
+        parents: {
+          countryPcode:
+            sourcePremise?.parents?.countryPcode || stampedParents.countryPcode,
+          provincePcode:
+            sourcePremise?.parents?.provincePcode ||
+            stampedParents.provincePcode,
+          dmPcode: sourcePremise?.parents?.dmPcode || stampedParents.dmPcode,
+          lmPcode: sourcePremise?.parents?.lmPcode || stampedParents.lmPcode,
+          wardPcode:
+            sourcePremise?.parents?.wardPcode || stampedParents.wardPcode,
+        },
+
+        services: {
+          electricityMeters: Array.isArray(
+            sourcePremise?.services?.electricityMeters,
+          )
+            ? sourcePremise.services.electricityMeters
+            : [],
+          waterMeters: Array.isArray(sourcePremise?.services?.waterMeters)
+            ? sourcePremise.services.waterMeters
+            : [],
+        },
+
+        metadata: {
+          created: sourcePremise?.metadata?.created || agentStamp,
+          updated: agentStamp,
+          noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
+            ? sourcePremise.metadata.noAccessTrnIds
+            : [],
+        },
+      };
+    }
+
+    return {
+      id: generatedId,
+      schemaVersion: "1.0.0",
+      erfId: id,
+      erfNo: erfNo,
+      parents: stampedParents,
       services: {
         electricityMeters: [],
         waterMeters: [],
       },
-
       metadata: {
         created: agentStamp,
         updated: agentStamp,
         noAccessTrnIds: [],
       },
     };
-  }, [
-    isEdit,
-    isDuplicate,
-    sourcePremise,
-    id,
-    erfNo,
-    safeErfNo,
-    wardNo,
-    admin,
-    erfCentroid,
-    selectedErf?.isTownship,
-    authState?.user,
-  ]);
-
-  const [addPremise] = useAddPremiseMutation();
-  const [updatePremise] = useUpdatePremiseMutation(); // 🎯 Ensure this is in your API slice
-
+  }
   const handleSubmit = async (values, { setSubmitting }) => {
     try {
+      const systemFields = buildSystemFields();
+
       const finalValues = {
-        ...values,
-        metadata: {
-          ...values.metadata,
-          updated: {
-            at: new Date().toISOString(),
-            byUser: authState?.user?.displayName || "Field Agent",
-            byUid: authState?.user?.uid || "unknown_uid",
+        ...systemFields,
+
+        context: values.context,
+
+        address: {
+          strNo: String(values?.address?.strNo || "").trim(),
+          strName: String(values?.address?.strName || "").trim(),
+          strType: values?.address?.strType || "Select...",
+        },
+
+        propertyType: {
+          type: values?.propertyType?.type || "Select...",
+          name: String(values?.propertyType?.name || "").trim(),
+          unitNo: String(values?.propertyType?.unitNo || "").trim(),
+        },
+
+        occupancy: {
+          status: values?.occupancy?.status || "Occupied",
+        },
+
+        geometry: {
+          centroid: {
+            lat: values?.geometry?.centroid?.lat,
+            lng: values?.geometry?.centroid?.lng,
           },
         },
+
+        media: Array.isArray(values?.media) ? values.media : [],
       };
 
       if (isEdit) {
@@ -514,10 +506,10 @@ export default function FormPremise() {
         await addPremise(finalValues).unwrap();
       }
 
-      updateGeo({
-        selectedPremise: finalValues,
-        lastSelectionType: "PREMISE",
-      });
+      // updateGeo({
+      //   selectedPremise: finalValues,
+      //   lastSelectionType: "PREMISE",
+      // });
 
       router.replace("/(tabs)/premises");
     } catch (err) {
@@ -527,36 +519,6 @@ export default function FormPremise() {
       setSubmitting(false);
     }
   };
-
-  // const handleSubmit = async (values, { setSubmitting }) => {
-  //   try {
-  //     const finalValues = {
-  //       ...values,
-  //       metadata: {
-  //         ...values.metadata,
-  //         updated: {
-  //           at: new Date().toISOString(),
-  //           byUser: authState?.user?.displayName || "Field Agent",
-  //           byUid: authState?.user?.uid || "unknown_uid",
-  //         },
-  //       },
-  //     };
-
-  //     if (isEdit) {
-  //       await updatePremise(finalValues).unwrap();
-  //     } else {
-  //       await addPremise(finalValues).unwrap();
-  //     }
-
-  //     router.replace(`/(tabs)/premises`);
-  //   } catch (err) {
-  //     console.warn(`🛰️Could not save premise form: ${err.message}`);
-  //     ToastAndroid.show("Could not save premise form.", ToastAndroid.LONG);
-  //   } finally {
-  //     setSubmitting(false);
-  //   }
-  // };
-
   return (
     <Formik
       initialValues={initialValues}
@@ -565,8 +527,8 @@ export default function FormPremise() {
       onSubmit={handleSubmit}
     >
       {({ setFieldValue, values, isSubmitting, errors }) => {
-        console.log(`FormPremise --errors`, errors);
-        console.log(`FormPremise --values`, values);
+        // console.log(`FormPremise --errors`, errors);
+        // console.log(`FormPremise --values`, values);
         return (
           <View style={styles.container}>
             <Stack.Screen
@@ -578,12 +540,12 @@ export default function FormPremise() {
                   </View>
                 ),
                 headerLeft: () => (
-                  <TouchableOpacity
+                  <Pressable
                     onPress={() => router.back()}
                     style={styles.backBtn}
                   >
-                    <Ionicons name="chevron-back" size={46} color="#1e293b" />
-                  </TouchableOpacity>
+                    <Ionicons name="chevron-back" size={28} color="#1e293b" />
+                  </Pressable>
                 ),
               }}
             />
@@ -668,25 +630,26 @@ export default function FormPremise() {
 
                   <Divider style={styles.divider} />
                   {/* PROPERTYTYPE unitName */}
-                  {values?.propertyType?.type !== "Residential" &&
-                    values?.propertyType?.type !== "Vacant Land" && (
-                      <>
-                        <FormInput
-                          label="Unit Name"
-                          name="propertyType.name"
-                          placeholder="Unit Name"
-                          keyboardType="default"
-                        />
-                        <Divider style={styles.divider} />
-                        {/* PROPERTYTYPE unitNo */}
-                        <FormInput
-                          label="Unit Number"
-                          name="propertyType.unitNo"
-                          placeholder="Unit Number"
-                          keyboardType="default"
-                        />
-                      </>
-                    )}
+                  {requiresPropertyName(values?.propertyType?.type) && (
+                    <>
+                      <FormInput
+                        label="Unit Name"
+                        name="propertyType.name"
+                        placeholder="Unit Name"
+                        keyboardType="default"
+                      />
+                      <Divider style={styles.divider} />
+                    </>
+                  )}
+
+                  {requiresUnitNo(values?.propertyType?.type) && (
+                    <FormInput
+                      label="Unit Number"
+                      name="propertyType.unitNo"
+                      placeholder="Unit Number"
+                      keyboardType="default"
+                    />
+                  )}
                 </Surface>
 
                 <IrepsMedia
@@ -766,13 +729,16 @@ export default function FormPremise() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f1f5f9" },
+
   formScroll: { padding: 16 },
+
   card: {
     backgroundColor: "#fff",
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
   },
+
   headerErfBadge: {
     backgroundColor: "#1e293b",
     paddingHorizontal: 10,
@@ -780,210 +746,45 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginRight: 10,
   },
-  headerErfText: { color: "#34d399", fontSize: 11, fontWeight: "bold" },
-  label: { fontSize: 10, fontWeight: "800", color: "#94a3b8", marginBottom: 4 },
-  selector: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 8,
+
+  headerErfText: {
+    color: "#34d399",
+    fontSize: 11,
+    fontWeight: "bold",
   },
-  selectorValue: { fontSize: 15, fontWeight: "600", color: "#1e293b" },
-  input: {
-    backgroundColor: "#f8fafc",
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    marginBottom: 10,
-  },
-  addressRow: { flexDirection: "row", marginBottom: 10 },
-  row: { flexDirection: "row" },
+
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 8,
   },
+
   sectionTitle: {
     fontSize: 11,
     fontWeight: "900",
     color: "#64748b",
     marginLeft: 6,
   },
+
   toggleRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  toggleLabel: { fontSize: 14, fontWeight: "700", color: "#0f172a" },
-  toggleSubLabel: { fontSize: 11, color: "#94a3b8" },
-  photoBox: {
-    height: 120,
-    borderRadius: 12,
-    borderStyle: "dashed",
-    borderWidth: 2,
-    borderColor: "#cbd5e1",
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#f8fafc",
-  },
-  photoPlaceholder: {
-    color: "#94a3b8",
-    fontSize: 12,
-    marginTop: 8,
-    fontWeight: "600",
-  },
-  photoPreview: { alignItems: "center" },
-  photoText: { color: "#059669", fontWeight: "bold", marginTop: 4 },
-  actionRow: { flexDirection: "row", gap: 12, marginTop: 10 },
-  submitBtn: {
-    flex: 2,
-    backgroundColor: "#0f172a",
-    paddingVertical: 18,
-    borderRadius: 12,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  submitBtnText: {
-    color: "#fff",
-    fontWeight: "bold",
-    letterSpacing: 1,
-    marginLeft: 8,
-  },
-  resetBtn: {
-    flex: 1,
-    backgroundColor: "#e2e8f0",
-    paddingVertical: 16,
-    borderRadius: 12,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  resetBtnText: {
-    color: "#475569",
-    fontWeight: "800",
+
+  toggleLabel: {
     fontSize: 14,
-    marginLeft: 8,
-  },
-  modalContent: {
-    backgroundColor: "white",
-    padding: 20,
-    margin: 20,
-    borderRadius: 12,
-  },
-  modalTitle: { fontSize: 16, fontWeight: "bold", marginBottom: 15 },
-  divider: { marginVertical: 10 },
-  miniMapWrapper: {
-    height: 100,
-    borderRadius: 10,
-    overflow: "hidden",
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  miniMap: { flex: 1 },
-  mapOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15, 23, 42, 0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  mapOverlayText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 12,
-    marginTop: 4,
-  },
-  fullMapModal: {
-    backgroundColor: "white",
-    margin: 0,
-    width: width,
-    height: height,
-    justifyContent: "flex-start",
-  },
-  fullMapHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 20,
-    paddingTop: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-  },
-  fullMap: { flex: 1 },
-  mapTip: {
-    position: "absolute",
-    bottom: 40,
-    alignSelf: "center",
-    backgroundColor: "#0f172a",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25,
-  },
-  mapTipText: { color: "#fff", fontWeight: "bold" },
-  closeBtnBorder: {
-    borderWidth: 1.5,
-    borderColor: "#000000",
-    backgroundColor: "rgba(255,255,255,0.9)",
-    borderRadius: 8,
-    padding: 4,
-    marginLeft: 10,
-    justifyContent: "center",
-    alignItems: "center",
+    fontWeight: "700",
+    color: "#0f172a",
   },
 
-  successModal: {
-    backgroundColor: "white",
-    padding: 30,
-    margin: 40,
-    borderRadius: 20,
-    alignItems: "center",
+  divider: {
+    marginVertical: 10,
   },
-  successContent: {
-    alignItems: "center",
-    width: "100%",
-  },
-  successIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#22C55E", // Success Green
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 20,
-    // Shadow for depth
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  successTitle: {
-    fontSize: 20,
-    fontWeight: "900",
-    color: "#0F172A",
-    letterSpacing: 1,
-  },
-  successSub: {
-    fontSize: 14,
-    color: "#64748B",
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  continueBtn: {
-    backgroundColor: "#0F172A",
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 10,
-    width: "100%",
-    alignItems: "center",
-  },
-  continueBtnText: {
-    color: "#FFF",
-    fontWeight: "bold",
-    fontSize: 14,
+
+  backBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
 });

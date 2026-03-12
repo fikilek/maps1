@@ -21,6 +21,14 @@ function buildWardPremisesQuery(lmPcode, wardPcode) {
   );
 }
 
+function sortPremisesByUpdatedAt(list) {
+  return list.sort((a, b) => {
+    const aAt = new Date(a?.metadata?.updated?.at || 0).getTime();
+    const bAt = new Date(b?.metadata?.updated?.at || 0).getTime();
+    return bAt - aAt;
+  });
+}
+
 export const premisesApi = createApi({
   reducerPath: "premisesApi",
   baseQuery: fakeBaseQuery(),
@@ -175,22 +183,22 @@ export const premisesApi = createApi({
       },
 
       async onQueryStarted(newPremise, { dispatch, queryFulfilled }) {
-        const lmPcode = newPremise.metadata?.lmPcode || null;
+        const lmPcode = newPremise?.parents?.lmPcode || null;
+        const wardPcode = newPremise?.parents?.wardPcode || null;
 
-        const wardPcode = newPremise.parents?.wardPcode || null;
-
-        const erfId = newPremise.erfId;
-
-        const premiseId = newPremise.id;
+        const erfId = newPremise?.erfId;
+        const premiseId = newPremise?.id;
 
         const premisesArg = { lmPcode, wardPcode };
-
         const erfsArg = { lmPcode, wardPcode };
 
+        let patchPremises = null;
+        let patchErfs = null;
+
         try {
-          // optimistic update: NEW ward-scoped premises cache
+          // optimistic update: ward-scoped premises cache
           if (lmPcode && wardPcode) {
-            dispatch(
+            patchPremises = dispatch(
               premisesApi.util.updateQueryData(
                 "getPremisesByLmPcodeWardPcode",
                 premisesArg,
@@ -203,24 +211,9 @@ export const premisesApi = createApi({
             );
           }
 
-          // optional backward compatibility: old LM cache
-          if (lmPcode) {
-            dispatch(
-              premisesApi.util.updateQueryData(
-                "getPremisesByLmPcode",
-                lmPcode,
-                (draft) => {
-                  if (!Array.isArray(draft)) return;
-                  const exists = draft.some((p) => p.id === premiseId);
-                  if (!exists) draft.unshift(newPremise);
-                },
-              ),
-            );
-          }
-
           // optimistic ERF pack update
           if (lmPcode && wardPcode && erfId) {
-            dispatch(
+            patchErfs = dispatch(
               erfsApi.util.updateQueryData(
                 "getErfsByLmPcodeWardPcode",
                 erfsArg,
@@ -245,6 +238,11 @@ export const premisesApi = createApi({
                   if (!targetErf.premises.includes(premiseId)) {
                     targetErf.premises.push(premiseId);
                   }
+
+                  targetErf.metadata = {
+                    ...targetErf.metadata,
+                    updatedAt: new Date().toISOString(),
+                  };
                 },
               ),
             );
@@ -253,6 +251,8 @@ export const premisesApi = createApi({
           await queryFulfilled;
         } catch (err) {
           console.error("❌ [ADD_PREMISE_OPTIMISTIC_FAIL]:", err);
+          patchPremises?.undo?.();
+          patchErfs?.undo?.();
         }
       },
     }),
@@ -273,18 +273,20 @@ export const premisesApi = createApi({
 
         const erfId = updatedPremise?.erfId;
 
-        const lmPcode = updatedPremise?.metadata?.lmPcode || null;
-
-        const wardPcode = updatedPremise?.metadata?.wardPcode || null;
+        const lmPcode = updatedPremise?.parents?.lmPcode || null;
+        const wardPcode = updatedPremise?.parents?.wardPcode || null;
 
         const premisesArg = { lmPcode, wardPcode };
 
         const erfsArg = { lmPcode, wardPcode };
 
+        let patchPremises = null;
+        let patchErfs = null;
+
         try {
           // optimistic update: NEW ward-scoped cache
           if (lmPcode && wardPcode) {
-            dispatch(
+            patchPremises = dispatch(
               premisesApi.util.updateQueryData(
                 "getPremisesByLmPcodeWardPcode",
                 premisesArg,
@@ -293,22 +295,7 @@ export const premisesApi = createApi({
                   if (index !== -1) {
                     draft[index] = { ...draft[index], ...updatedPremise };
                   }
-                },
-              ),
-            );
-          }
-
-          // optional backward compatibility: old LM cache
-          if (lmPcode) {
-            dispatch(
-              premisesApi.util.updateQueryData(
-                "getPremisesByLmPcode",
-                lmPcode,
-                (draft) => {
-                  const index = draft.findIndex((p) => p.id === premiseId);
-                  if (index !== -1) {
-                    draft[index] = { ...draft[index], ...updatedPremise };
-                  }
+                  sortPremisesByUpdatedAt(draft);
                 },
               ),
             );
@@ -316,7 +303,7 @@ export const premisesApi = createApi({
 
           // optimistic ERF pack metadata touch
           if (lmPcode && wardPcode && erfId) {
-            dispatch(
+            patchErfs = dispatch(
               erfsApi.util.updateQueryData(
                 "getErfsByLmPcodeWardPcode",
                 erfsArg,
@@ -346,6 +333,8 @@ export const premisesApi = createApi({
           await queryFulfilled;
         } catch (err) {
           console.error("❌ [UPDATE_PREMISE_OPTIMISTIC_FAIL]:", err);
+          patchPremises?.undo?.();
+          patchErfs?.undo?.();
         }
       },
     }),

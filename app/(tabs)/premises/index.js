@@ -21,10 +21,9 @@ export default function PremisesScreen() {
   const { all, loading, scopeState } = useWarehouse();
   // console.log(`all.prems?.length`, all.prems?.length);
 
-  const { geoState } = useGeo();
+  const { geoState, updateGeo } = useGeo();
   // console.log(`geoState`, geoState);
-  const { selectedLm, selectedWard, selectedErf, selectedPremise, updateGeo } =
-    geoState;
+  const { selectedLm, selectedWard, selectedErf, selectedPremise } = geoState;
 
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [missionPremise, setMissionPremise] = useState(null);
@@ -55,7 +54,7 @@ export default function PremisesScreen() {
     if (!selectedErf) return all?.prems || [];
     return (all?.prems || []).filter((p) => p?.erfId === selectedErf?.id);
   }, [all?.prems, selectedWard, selectedErf]);
-  console.log(`basePremises?.length`, basePremises?.length);
+  // console.log(`basePremises?.length`, basePremises?.length);
 
   const displayPremises = useMemo(() => {
     let list = [...basePremises];
@@ -166,10 +165,10 @@ export default function PremisesScreen() {
     [erfById, router, updateGeo],
   );
 
-  const handleDetailPress = useCallback(
+  const handleEditPremise = useCallback(
     (p) => {
       router.push({
-        pathname: "/erfs/form",
+        pathname: "/premises/formPremise",
         params: { id: p?.erfId, premiseId: p?.id },
       });
     },
@@ -228,7 +227,7 @@ export default function PremisesScreen() {
             wardNo={wardNo}
             onMapPress={handleMapPress}
             onDiscover={handleDiscover}
-            onDetailPress={handleDetailPress}
+            onEditPress={handleEditPremise}
             onNaPress={handleNaPress}
             onDuplicate={handleDuplicate}
           />
@@ -238,7 +237,7 @@ export default function PremisesScreen() {
     [
       erfById,
       selectedPremise?.id,
-      handleDetailPress,
+      handleEditPremise,
       handleMapPress,
       handleDiscover,
       handleNaPress,
@@ -527,8 +526,8 @@ const styles = StyleSheet.create({
   },
 
   selectedCardWrap: {
-    borderWidth: 2,
-    borderColor: "#2563EB",
+    borderWidth: 4,
+    borderColor: "#90b3ff",
     borderRadius: 16,
   },
 
@@ -776,7 +775,7 @@ const styles = StyleSheet.create({
 //     [all?.erfs, router, updateGeo],
 //   );
 
-//   const handleDetailPress = useCallback(
+//   const handleEditPremise = useCallback(
 //     (p) => {
 //       router.push({
 //         pathname: "/erfs/form",
@@ -833,7 +832,7 @@ const styles = StyleSheet.create({
 //           wardNo={wardNo}
 //           onMapPress={handleMapPress}
 //           onDiscover={handleDiscover}
-//           onDetailPress={handleDetailPress}
+//           onEditPress={handleEditPremise}
 //           onNaPress={handleNaPress}
 //           onDuplicate={handleDuplicate}
 //         />
@@ -841,7 +840,7 @@ const styles = StyleSheet.create({
 //     },
 //     [
 //       all?.erfs,
-//       handleDetailPress,
+//       handleEditPremise,
 //       handleMapPress,
 //       handleDiscover,
 //       handleNaPress,
