@@ -12,17 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import MapView, {
-  Marker,
-  Polygon,
-  Polyline,
-  PROVIDER_GOOGLE,
-} from "react-native-maps";
+import MapView, { Polygon, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import GeoStatusHUD from "../../../components/GeoStatusHUD";
 import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
+import NeighbourhoodErfMarker from "../../../components/maps/NeighbourhoodErfMarker";
+import NeighbourhoodMeterMarker from "../../../components/maps/NeighbourhoodMeterMarker";
 import NeighbourhoodPremiseMarker from "../../../components/maps/NeighbourhoodPremiseMarker";
 import PremiseMarkerActionModal from "../../../components/maps/PremiseMarkerActionModal";
 import SelectedErf from "../../../components/maps/SelectedErf";
@@ -51,6 +48,8 @@ function MapScopeState({ title, subtitle }) {
 }
 
 export default function MapsScreen() {
+  console.log(`MapsScreen --mounting`);
+
   const { mapRef, flyTo } = useMap();
   const { geoState, updateGeo } = useGeo();
   const { all, sync } = useWarehouse();
@@ -232,6 +231,23 @@ export default function MapsScreen() {
   /*
   END - Marker Drag Moodal
   */
+
+  const handleSelectedErfPress = useCallback(() => {
+    const selectedErf = geoState?.selectedErf;
+    if (!selectedErf?.id) return;
+
+    // updateGeo({
+    //   selectedErf,
+    //   lastSelectionType: "ERF",
+    // });
+
+    router.push({
+      pathname: "/(tabs)/premises/formPremise",
+      params: {
+        id: selectedErf.id,
+      },
+    });
+  }, [geoState?.selectedErf, router]);
 
   const scopeSync = sync?.scope ?? { status: "idle" };
 
@@ -443,52 +459,10 @@ export default function MapsScreen() {
           strokeWidth={isSelected ? 3 : 1.5}
           zIndex={isSelected ? 100 : 50}
           tappable={wardInteractive}
-          onPress={() => {
-            if (!wardInteractive) return;
-
-            updateGeo({
-              selectedWard: ward,
-              lastSelectionType: "WARD",
-            });
-          }}
         />
       );
     });
   };
-
-  // const renderWards = () => {
-  //   return wardsList.map((ward, index) => {
-  //     if (!ward?.geometry) return null;
-  //     const wardCoords = getSafeCoords(ward?.geometry);
-  //     if (wardCoords?.length < 3) return null;
-
-  //     const isSelected = geoState?.selectedWard?.id === ward?.id;
-
-  //     return (
-  //       <Polygon
-  //         key={`ward-poly-${ward?.id || index}`}
-  //         coordinates={wardCoords}
-  //         strokeColor={isSelected ? "#2563eb" : "#475569"}
-  //         fillColor={
-  //           isSelected
-  //             ? "rgba(160, 190, 255, 0.2)"
-  //             : "rgba(148, 163, 184, 0.05)"
-  //         }
-  //         strokeWidth={isSelected ? 3 : 1.5}
-  //         zIndex={isSelected ? 100 : 50}
-  //         tappable={!gcsModalOpen}
-  //         onPress={() => {
-  //           if (gcsModalOpen) return;
-
-  //           updateGeo({
-  //             selectedWard: ward,
-  //             lastSelectionType: "WARD",
-  //           });
-  //         }}
-  //       />
-  //     );
-  //   });
-  // };
 
   const renderSelectedErf = () => {
     const selectedId = geoState?.selectedErf?.id;
@@ -509,10 +483,12 @@ export default function MapsScreen() {
           fillColor="rgba(255, 215, 0, 0.15)"
           strokeWidth={4}
           zIndex={1000}
+          onPress={handleSelectedErfPress}
         />
         <SelectedErf
           coordinate={{ latitude: centroid?.lat, longitude: centroid?.lng }}
           erfNo={geoState?.selectedErf?.erfNo}
+          onPress={handleSelectedErfPress}
         />
       </>
     );
@@ -574,11 +550,12 @@ export default function MapsScreen() {
     const lngMin = region.longitude - region.longitudeDelta / 2;
     const lngMax = region.longitude + region.longitudeDelta / 2;
 
-    const isLevel1 = zoom >= 17;
+    const isLevel1 = zoom >= 18;
 
     return all?.erfs
       ?.filter((erf) => {
         if (erf?.id === geoState?.selectedErf?.id) return false;
+
         const rawCentroid = all?.geoLibrary?.[erf?.id]?.centroid;
         const cLat =
           rawCentroid?.lat ||
@@ -597,6 +574,8 @@ export default function MapsScreen() {
         const cLat = rawCentroid?.lat || rawCentroid?.[0];
         const cLng = rawCentroid?.lng || rawCentroid?.[1];
 
+        if (cLat == null || cLng == null) return null;
+
         return (
           <React.Fragment key={`nb-erf-${erf?.id}`}>
             {isLevel1 ? (
@@ -609,30 +588,20 @@ export default function MapsScreen() {
               />
             ) : null}
 
-            <Marker
+            <NeighbourhoodErfMarker
               coordinate={{ latitude: cLat, longitude: cLng }}
-              anchor={{ x: 0.5, y: 0.5 }}
+              erfNo={erf?.erfNo}
               onPress={(e) => {
                 e?.stopPropagation?.();
                 updateGeo({ selectedErf: erf, lastSelectionType: "ERF" });
                 router.push({
                   pathname: "/premises/formPremise",
                   params: {
-                    id: erf?.id, // The parent Erf ID (Anchor)
+                    id: erf?.id,
                   },
                 });
               }}
-            >
-              {isLevel1 ? (
-                <View style={styles.neighborhoodLabel}>
-                  <Text style={styles.neighborhoodLabelText}>
-                    {erf?.erfNo || "N/A"}
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.neighborhoodDot} />
-              )}
-            </Marker>
+            />
           </React.Fragment>
         );
       });
@@ -705,6 +674,7 @@ export default function MapsScreen() {
       ?.filter((m) => {
         const lat = m?.ast?.location?.gps?.lat;
         const lng = m?.ast?.location?.gps?.lng;
+
         return (
           lat &&
           lng &&
@@ -719,31 +689,73 @@ export default function MapsScreen() {
           latitude: m.ast.location.gps.lat,
           longitude: m.ast.location.gps.lng,
         };
+
         const isWater = m.meterType === "water";
         const isAnomaly =
           !!m.ast?.anomalies?.anomaly && m.ast.anomalies.anomaly !== "N/A";
 
         return (
-          <Marker
+          <NeighbourhoodMeterMarker
             key={`nb-meter-${m.id}`}
             coordinate={coordinate}
-            anchor={{ x: 0.1, y: 0.1 }}
-            zIndex={1200}
-          >
-            <View
-              style={[
-                styles.meterMarkerCircle,
-                {
-                  backgroundColor: isWater ? "#3B82F6" : "#EAB308",
-                  borderColor: isAnomaly ? "#EF4444" : "#FFFFFF",
-                  borderWidth: isAnomaly ? 2 : 1,
-                },
-              ]}
-            />
-          </Marker>
+            isWater={isWater}
+            isAnomaly={isAnomaly}
+          />
         );
       });
   };
+
+  // const renderMetersNeighborhood = () => {
+  //   if (!scopeReady || !showLayers?.asts || !region || zoom < 18) return null;
+
+  //   const latMin = region.latitude - region.latitudeDelta / 2;
+  //   const latMax = region.latitude + region.latitudeDelta / 2;
+  //   const lngMin = region.longitude - region.longitudeDelta / 2;
+  //   const lngMax = region.longitude + region.longitudeDelta / 2;
+
+  //   return all?.meters
+  //     ?.filter((m) => {
+  //       const lat = m?.ast?.location?.gps?.lat;
+  //       const lng = m?.ast?.location?.gps?.lng;
+  //       return (
+  //         lat &&
+  //         lng &&
+  //         lat >= latMin &&
+  //         lat <= latMax &&
+  //         lng >= lngMin &&
+  //         lng <= lngMax
+  //       );
+  //     })
+  //     .map((m) => {
+  //       const coordinate = {
+  //         latitude: m.ast.location.gps.lat,
+  //         longitude: m.ast.location.gps.lng,
+  //       };
+  //       const isWater = m.meterType === "water";
+  //       const isAnomaly =
+  //         !!m.ast?.anomalies?.anomaly && m.ast.anomalies.anomaly !== "N/A";
+
+  //       return (
+  //         <Marker
+  //           key={`nb-meter-${m.id}`}
+  //           coordinate={coordinate}
+  //           anchor={{ x: 0.1, y: 0.1 }}
+  //           zIndex={1200}
+  //         >
+  //           <View
+  //             style={[
+  //               styles.meterMarkerCircle,
+  //               {
+  //                 backgroundColor: isWater ? "#3B82F6" : "#EAB308",
+  //                 borderColor: isAnomaly ? "#EF4444" : "#FFFFFF",
+  //                 borderWidth: isAnomaly ? 2 : 1,
+  //               },
+  //             ]}
+  //           />
+  //         </Marker>
+  //       );
+  //     });
+  // };
 
   const renderServiceConnections = () => {
     if (!scopeReady || !showLayers?.sc || !region || zoom < 18) return null;

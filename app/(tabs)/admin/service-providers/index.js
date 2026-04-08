@@ -5,6 +5,7 @@ import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,41 +17,72 @@ import { SpsHeader } from "../../../../src/features/sps/spsHeader";
 
 export default function ServiceProvidersListScreen() {
   const router = useRouter();
-  const { isSPU, isADM, isMNG } = useAuth();
-  const [viewMode, setViewMode] = useState("list"); // 'list' or 'tree'
+  const { profile, isSPU, isADM, isMNG, isSPV } = useAuth();
+  const [viewMode, setViewMode] = useState("list");
 
-  const { data: sps = [], isLoading } = useGetServiceProvidersQuery();
+  const {
+    data: serviceProviders = [],
+    isLoading,
+    isFetching,
+  } = useGetServiceProvidersQuery();
 
-  // 🛡️ REFIED LOGIC: Calculating children and user counts
-  const processedSPs = useMemo(() => {
-    return [...sps]
-      .map((sp) => {
-        // Find children (Who lists THIS SP as their client?)
-        const children = sps.filter((other) =>
-          other.clients?.some((c) => c.id === sp.id),
+  const visibleServiceProviders = useMemo(() => {
+    if (isSPU || isADM) {
+      return serviceProviders;
+    }
+
+    const viewerSpId = profile?.employment?.serviceProvider?.id;
+
+    if (!viewerSpId) {
+      return [];
+    }
+
+    if (isMNG || isSPV) {
+      const allowedSpIds = resolveVisibleServiceProviderIds(
+        viewerSpId,
+        serviceProviders,
+      );
+
+      return serviceProviders.filter((sp) => allowedSpIds.includes(sp.id));
+    }
+
+    return [];
+  }, [serviceProviders, profile, isSPU, isADM, isMNG, isSPV]);
+
+  const processedServiceProviders = useMemo(() => {
+    return [...visibleServiceProviders]
+      .map((serviceProvider) => {
+        const children = visibleServiceProviders.filter(
+          (otherServiceProvider) =>
+            otherServiceProvider?.clients?.some(
+              (client) => client?.id === serviceProvider?.id,
+            ),
         );
 
         return {
-          ...sp,
+          ...serviceProvider,
           childCount: children.length,
-          // For now, placeholder for user counts until we link the user registry
-          userCount: Math.floor(Math.random() * 10),
         };
       })
       .sort(
         (a, b) =>
-          new Date(b.metadata?.createAt || 0) -
-          new Date(a.metadata?.createAt || 0),
+          new Date(b?.metadata?.updatedAt || 0) -
+          new Date(a?.metadata?.updatedAt || 0),
       );
-  }, [sps]);
+  }, [visibleServiceProviders]);
 
-  const renderSPCard = ({ item }) => (
+  const renderServiceProviderCard = ({ item }) => (
     <Surface style={styles.card} elevation={1}>
       <View style={styles.cardHeader}>
         <View>
-          <Text style={styles.spName}>{item.profile.tradingName}</Text>
-          <Text style={styles.spReg}>{item.profile.tradingNumber}</Text>
+          <Text style={styles.spName}>
+            {item?.profile?.tradingName || "NAv"}
+          </Text>
+          <Text style={styles.spReg}>
+            {item?.profile?.registrationNumber || "NAv"}
+          </Text>
         </View>
+
         <IconButton
           icon="pencil-outline"
           size={20}
@@ -60,59 +92,56 @@ export default function ServiceProvidersListScreen() {
 
       <View style={styles.statsRow}>
         <View style={styles.statItem}>
-          <MaterialCommunityIcons
-            name="account-group"
-            size={16}
-            color="#64748b"
-          />
-          <Text style={styles.statText}>{item.userCount} Users</Text>
-        </View>
-        <View style={styles.statItem}>
           <MaterialCommunityIcons name="sitemap" size={16} color="#2563eb" />
           <Text style={styles.statText}>{item.childCount} Subs</Text>
         </View>
-        <Badge style={styles.statusBadge}>{item.status}</Badge>
+
+        <Badge style={styles.statusBadge}>{item?.status || "NAv"}</Badge>
       </View>
 
       <Divider style={styles.divider} />
 
       <Text style={styles.clientLabel}>ALLIED CLIENTS:</Text>
       <View style={styles.clientBox}>
-        {item.clients?.map((client) => (
-          <View key={client.id} style={styles.clientChip}>
-            <Text style={styles.clientChipText}>{client.name}</Text>
+        {(item?.clients || []).map((client, index) => (
+          <View
+            key={`${item.id}-${client?.id || client?.name || index}`}
+            style={styles.clientChip}
+          >
+            <Text style={styles.clientChipText}>{client?.name || "NAv"}</Text>
           </View>
         ))}
       </View>
     </Surface>
   );
 
-  // 1. First, we need a helper to organize the data into a hierarchy
   const buildTree = (data) => {
     const map = {};
+
     data.forEach((item) => {
       map[item.id] = { ...item, children: [] };
     });
 
     const tree = [];
+
     data.forEach((item) => {
-      // Check if this SP has a client that is ALSO in our SP registry
-      const parentSp = item.clients?.find((client) => map[client.id]);
+      const parentSp = item?.clients?.find((client) => map[client?.id]);
 
       if (parentSp) {
         map[parentSp.id].children.push(map[item.id]);
       } else {
-        // If no parent SP is found, this is a Root/MNC entity (like Rste)
         tree.push(map[item.id]);
       }
     });
+
     return tree;
   };
 
-  // 2. In your component, use this logic
-  const treeData = useMemo(() => buildTree(processedSPs), [processedSPs]);
+  const treeData = useMemo(
+    () => buildTree(processedServiceProviders),
+    [processedServiceProviders],
+  );
 
-  // 3. The Tree Renderer (Indented Cards)
   const renderTreeItem = (node, depth = 0) => (
     <View key={node.id}>
       <Surface
@@ -141,13 +170,15 @@ export default function ServiceProvidersListScreen() {
               <Text
                 style={[styles.spName, { fontSize: depth === 0 ? 18 : 15 }]}
               >
-                {node.profile.tradingName}
+                {node?.profile?.tradingName || "NAv"}
               </Text>
             </View>
+
             <Text style={styles.spReg}>
               {depth === 0 ? "MNC / LEAD" : `SUB-CONTRACTOR LEVEL ${depth}`}
             </Text>
           </View>
+
           <IconButton
             icon="pencil-outline"
             size={18}
@@ -155,28 +186,36 @@ export default function ServiceProvidersListScreen() {
           />
         </View>
 
-        {/* Show Client name only if it's a Sub */}
         {depth > 0 && (
           <Text style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>
             Reporting to:{" "}
-            <Text style={{ fontWeight: "bold" }}>{node.clients[0]?.name}</Text>
+            <Text style={{ fontWeight: "bold" }}>
+              {node?.clients?.find((client) =>
+                processedServiceProviders.some((sp) => sp.id === client?.id),
+              )?.name || "NAv"}
+            </Text>
           </Text>
         )}
       </Surface>
 
-      {/* Recursively render children */}
       {node.children &&
         node.children.map((child) => renderTreeItem(child, depth + 1))}
     </View>
   );
 
+  if (isLoading || isFetching) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator animating={true} color="#2563eb" size="large" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* 🎯 HEADER COMMAND */}
-
       <SpsHeader
         title="Service Providers"
-        subtitle={`${processedSPs.length} Entities Enlisted`}
+        subtitle={`${processedServiceProviders.length} Entities Enlisted`}
         showBack={true}
         actions={
           <>
@@ -194,8 +233,8 @@ export default function ServiceProvidersListScreen() {
 
       {viewMode === "list" ? (
         <FlashList
-          data={processedSPs}
-          renderItem={renderSPCard}
+          data={processedServiceProviders}
+          renderItem={renderServiceProviderCard}
           estimatedItemSize={150}
           contentContainerStyle={{ padding: 16 }}
         />
@@ -205,11 +244,10 @@ export default function ServiceProvidersListScreen() {
         </ScrollView>
       )}
 
-      {/* 🎯 NICE ADD BUTTON */}
       {(isSPU || isADM || isMNG) && (
         <TouchableOpacity
           style={styles.fab}
-          onPress={() => router.push("/admin/service-providers/createSp")}
+          onPress={() => router.push("/admin/service-providers/formCreateSp")}
         >
           <MaterialCommunityIcons name="plus" size={18} color="#fff" />
           <Text style={styles.fabText}></Text>
@@ -219,20 +257,46 @@ export default function ServiceProvidersListScreen() {
   );
 }
 
+function resolveVisibleServiceProviderIds(rootSpId, allServiceProviders = []) {
+  const allowed = new Set([rootSpId]);
+  const queue = [rootSpId];
+
+  while (queue.length > 0) {
+    const currentSpId = queue.shift();
+
+    allServiceProviders.forEach((serviceProvider) => {
+      const clients = serviceProvider?.clients || [];
+
+      const isSubcOfCurrent = clients.some(
+        (client) =>
+          client?.clientType === "SP" &&
+          client?.relationshipType === "SUBC" &&
+          client?.id === currentSpId,
+      );
+
+      if (isSubcOfCurrent && !allowed.has(serviceProvider.id)) {
+        allowed.add(serviceProvider.id);
+        queue.push(serviceProvider.id);
+      }
+    });
+  }
+
+  return Array.from(allowed);
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f8fafc" },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+    justifyContent: "center",
     alignItems: "center",
-    // padding: 20,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
   },
-  headerTitle: { fontSize: 22, fontWeight: "900", color: "#0f172a" },
-  headerSub: { fontSize: 12, color: "#64748b", fontWeight: "600" },
-  headerActions: { flexDirection: "row" },
+
+  container: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+  },
+
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -241,41 +305,81 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#f1f5f9",
   },
+
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-  spName: { fontSize: 18, fontWeight: "800", color: "#1e293b" },
-  spReg: { fontSize: 11, color: "#94a3b8", fontWeight: "600" },
+
+  spName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1e293b",
+  },
+
+  spReg: {
+    fontSize: 11,
+    color: "#94a3b8",
+    fontWeight: "600",
+  },
+
   statsRow: {
     flexDirection: "row",
     gap: 16,
     marginTop: 12,
     alignItems: "center",
   },
-  statItem: { flexDirection: "row", alignItems: "center", gap: 4 },
-  statText: { fontSize: 12, fontWeight: "700", color: "#475569" },
+
+  statItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  statText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
+  },
+
   statusBadge: {
     backgroundColor: "#dcfce7",
     color: "#166534",
     fontWeight: "800",
   },
-  divider: { marginVertical: 12, backgroundColor: "#f1f5f9" },
+
+  divider: {
+    marginVertical: 12,
+    backgroundColor: "#f1f5f9",
+  },
+
   clientLabel: {
     fontSize: 9,
     fontWeight: "900",
     color: "#94a3b8",
     marginBottom: 8,
   },
-  clientBox: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+
+  clientBox: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+
   clientChip: {
     backgroundColor: "#f1f5f9",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
-  clientChipText: { fontSize: 10, fontWeight: "700", color: "#475569" },
+
+  clientChipText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#475569",
+  },
+
   fab: {
     position: "absolute",
     bottom: 30,
@@ -289,5 +393,10 @@ const styles = StyleSheet.create({
     elevation: 5,
     gap: 8,
   },
-  fabText: { color: "#fff", fontWeight: "900", fontSize: 14 },
+
+  fabText: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 14,
+  },
 });

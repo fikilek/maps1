@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { format, isValid } from "date-fns"; // 🎯 Added isValid
+import { format, isValid } from "date-fns";
 import {
   ActivityIndicator,
   Platform,
@@ -11,17 +11,25 @@ import {
 } from "react-native";
 
 import { useRouter } from "expo-router";
-import { useAuth } from "../../../src/hooks/useAuth";
-import { useGetTrnsByLmPcodeQuery } from "../../../src/redux/trnsApi";
+import { useWarehouse } from "../../../src/context/WarehouseContext";
 
 const TrnItem = ({ item }) => {
   const router = useRouter();
+
   const isWater = item.meterType === "water";
 
-  // 🛡️ DEFENSIVE: Standardize boolean check for hasAccess
   const accessVal = item.accessData?.access?.hasAccess;
+
   const hasAccess =
     accessVal === true || accessVal === "yes" || accessVal === "true";
+
+  const isNoAccess = !hasAccess;
+
+  const iconName = isNoAccess
+    ? "shield-alert-outline"
+    : isWater
+      ? "water"
+      : "lightning-bolt";
 
   const boundaryColor = !hasAccess
     ? "#EF4444"
@@ -30,21 +38,29 @@ const TrnItem = ({ item }) => {
       : "#EAB308";
 
   const trnRef = item.id?.split("_").pop() || "N/A";
+
   const agentDisplayName =
     item.accessData?.metadata?.created?.byUser || "Field Agent";
-  const meterNo = item.ast?.astData?.astNo || "NO METER";
 
-  // 🕒 TIMESTAMP RESOLUTION (THE CRASH FIX)
-  const dateAt = item.accessData?.metadata?.created?.at;
-  // Firestore timestamp handles: check for __time__ or raw string
+  const meterNo = hasAccess
+    ? item.ast?.astData?.astNo || "NO METER"
+    : "NO METER NUMBER";
+
+  const dateAt = item.accessData?.metadata?.updated?.at;
+
   const rawDate = dateAt?.__time__ || dateAt;
+
   const parsedDate = rawDate ? new Date(rawDate) : null;
 
-  // 🛡️ Only format if the date is actually valid
   const timeLabel =
     parsedDate && isValid(parsedDate) ? format(parsedDate, "HH:mm") : "--:--";
+
   const dateLabel =
     parsedDate && isValid(parsedDate) ? format(parsedDate, "MMM dd") : "";
+
+  const wardPcode = item.accessData?.parents?.wardPcode || "";
+
+  const wardNo = wardPcode ? wardPcode.slice(-3).replace(/^0+/, "") : "?";
 
   return (
     <View
@@ -70,7 +86,7 @@ const TrnItem = ({ item }) => {
               ]}
             >
               <MaterialCommunityIcons
-                name={isWater ? "water" : "lightning-bolt"}
+                name={iconName}
                 size={22}
                 color={boundaryColor}
               />
@@ -105,9 +121,38 @@ const TrnItem = ({ item }) => {
           </View>
         </View>
 
-        <Text style={[styles.addressText, { marginTop: 8 }]} numberOfLines={1}>
-          {item.accessData?.premise?.address || "Street Address N/A"}
-        </Text>
+        <View
+          style={{
+            flexDirection: "row",
+            gap: 5,
+            justifyContent: "space-between",
+          }}
+        >
+          {/* colLeft - Adr and prop type */}
+          <View>
+            <Text
+              style={[styles.addressText, { marginTop: 8 }]}
+              numberOfLines={1}
+            >
+              {item.accessData?.premise?.address || "Street Address N/A"}
+            </Text>
+            <Text
+              style={[styles.propertyTypeText, { marginTop: 4 }]}
+              numberOfLines={1}
+            >
+              {item.accessData?.premise?.propertyType || "Property Type N/A"}
+            </Text>
+          </View>
+          {/* colRight - WardNo and erfNo   */}
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={{ fontSize: 12, color: "#a3b5ce", marginTop: 8 }}>
+              Ward No: {wardNo || "No Ward number"}
+            </Text>
+            <Text style={{ fontSize: 12, color: "#a3b5ce", marginTop: 4 }}>
+              Erf No: {item.accessData?.erfNo || "No ErfNo"}
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.footer}>
           <View style={styles.agentInfo}>
@@ -142,13 +187,25 @@ const TrnItem = ({ item }) => {
 };
 
 export default function TrnsScreen() {
-  const { activeWorkbase } = useAuth();
-  const lmPcode = activeWorkbase?.id;
-  const {
-    data: trns,
-    isLoading,
-    isError,
-  } = useGetTrnsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
+  const { all, sync } = useWarehouse();
+
+  const trns = all?.trns || [];
+  const trnsSync = sync?.trns || {};
+  const scopeSync = sync?.scope || {};
+
+  const isLoading = trnsSync?.status === "syncing";
+  const noWard = scopeSync?.status === "awaiting-ward";
+
+  if (noWard) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <Text style={styles.loadingText}>
+          Select a ward to view field transactions.
+        </Text>
+      </View>
+    );
+  }
+
   if (isLoading) {
     return (
       <View style={[styles.container, styles.center]}>
@@ -163,13 +220,20 @@ export default function TrnsScreen() {
       <FlashList
         data={trns}
         renderItem={({ item }) => <TrnItem item={item} />}
+        keyExtractor={(item) => item?.id}
         estimatedItemSize={120}
         contentContainerStyle={{ padding: 16 }}
+        ListEmptyComponent={
+          <View style={[styles.center, { paddingTop: 40 }]}>
+            <Text style={styles.loadingText}>
+              No transactions in this ward.
+            </Text>
+          </View>
+        }
       />
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8FAFC" },
   center: {
@@ -217,6 +281,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
     color: "#334155",
+  },
+  propertyTypeText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#8d99ab",
     marginBottom: 10,
   },
   footer: {

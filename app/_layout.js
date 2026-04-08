@@ -15,17 +15,17 @@ import { useAuth } from "../src/hooks/useAuth";
 import AuthBootstrap from "../src/navigation/AuthBootstrap";
 import { persistor, store } from "../src/redux/store";
 
-// ... existing imports ...
-
 const AuthGate = memo(function AuthGate() {
   const {
     user: reduxUser,
+    profile,
     status,
     isLoading: reduxLoading,
     isADM,
     isMNG,
     isSPU,
   } = useAuth();
+
   const segments = useSegments();
   const router = useRouter();
 
@@ -42,11 +42,14 @@ const AuthGate = memo(function AuthGate() {
     if (!isLayoutReady || isLoading) return;
 
     const rootSegment = segments[0];
-    const isAtWelcome = segments.length === 0; // 🎯 This is our "/" (Welcome Screen)
+    const isAtWelcome = segments.length === 0;
     const inAuthGroup = rootSegment === "(auth)";
     const inOnboardingGroup = rootSegment === "onboarding";
 
-    // 1. GUEST GATE: No session? Force to signin
+    const mustChangePassword = profile?.onboarding?.mustChangePassword === true;
+    const activeWorkbase = profile?.access?.activeWorkbase || null;
+
+    // 1. GUEST GATE
     if (!user) {
       if (!inAuthGroup && !isAtWelcome) {
         router.replace("/signin");
@@ -54,15 +57,40 @@ const AuthGate = memo(function AuthGate() {
       return;
     }
 
-    // 2. STATE MACHINE: Onboarding & Authorization Logic
-    // 🛡️ THE STRATEGY: We only redirect if they are NOT at the Welcome Screen.
+    // 2. Allow welcome to sit quietly
     if (isAtWelcome) return;
 
+    // 3. FIRST-LOGIN STEP 1: CHANGE PASSWORD
+    if (status === "PENDING" && mustChangePassword) {
+      if (rootSegment !== "onboarding" || segments[1] !== "change-password") {
+        router.replace("/onboarding/change-password");
+      }
+      return;
+    }
+
+    // 4. WORKBASE REQUIRED
+    // Applies to:
+    // - first-login onboarding after password change
+    // - completed users whose active workbase was cleared by SP sync
+    // - approved FWR awaiting workbase selection
+    if (
+      !mustChangePassword &&
+      !activeWorkbase &&
+      (status === "PENDING" ||
+        status === "COMPLETED" ||
+        status === "WORKBASE_REQUIRED")
+    ) {
+      if (rootSegment !== "onboarding" || segments[1] !== "select-workbase") {
+        router.replace("/onboarding/select-workbase");
+      }
+      return;
+    }
+
+    // 5. OLD STATE MACHINE
     switch (status) {
       case "AWAITING-MNG-CONFIRMATION":
       case "AWAITING-ADM-CONFIRMATION":
         if (isMNG || isADM) {
-          // Managers/Admins go here if they leave the Welcome screen
           if (
             rootSegment !== "onboarding" ||
             segments[1] !== "confirm-appointment"
@@ -70,86 +98,26 @@ const AuthGate = memo(function AuthGate() {
             router.replace("/onboarding/confirm-appointment");
           }
         } else {
-          // Operatives go here if they leave the Welcome screen
           if (
             rootSegment !== "onboarding" ||
-            segments[1] !== "pending-sp-confirmation"
+            segments[1] !== "awaiting-mng-confirmation"
           ) {
             router.replace("/onboarding/awaiting-mng-confirmation");
           }
         }
-        break;
+        return;
 
       case "COMPLETE":
       case "COMPLETED":
-        // Fully authorized users are cleared for the app
         if (inAuthGroup || inOnboardingGroup || isAtWelcome) {
           router.replace("/(tabs)/erfs");
         }
-        break;
+        return;
 
       default:
-        break;
+        return;
     }
-  }, [user, status, isLoading, segments, isLayoutReady]);
-
-  // useEffect(() => {
-  //   if (!isLayoutReady || isLoading) return;
-
-  //   const rootSegment = segments[0];
-  //   const isAtWelcome = segments.length === 0;
-  //   const inAuthGroup = rootSegment === "(auth)";
-  //   const inOnboardingGroup = rootSegment === "onboarding";
-
-  //   // 1. GUEST GATE: If no session, force to signin
-  //   if (!user) {
-  //     if (!inAuthGroup && !isAtWelcome) {
-  //       router.replace("/signin");
-  //     }
-  //     return;
-  //   }
-
-  //   // 2. STATE MACHINE: Onboarding & Authorization Logic
-  //   switch (status) {
-  //     // 🚩 STRATEGIC GATE: Invited Roles (MNG/ADM) confirming their appointment
-  //     case "AWAITING-MNG-CONFIRMATION":
-  //     case "AWAITING-ADM-CONFIRMATION":
-  //       // Logic: If it's the Manager/Admin themselves, show the "Confirm Receipt" screen
-  //       if (isMNG || isADM) {
-  //         if (
-  //           rootSegment !== "onboarding" ||
-  //           segments[1] !== "confirm-appointment"
-  //         ) {
-  //           router.replace("/onboarding/confirm-appointment");
-  //         }
-  //       }
-  //       // Logic: If it's an SPV/FWR/GST, show the "Waiting for Authorization" screen
-  //       else {
-  //         if (
-  //           rootSegment !== "onboarding" ||
-  //           segments[1] !== "pending-authorization"
-  //         ) {
-  //           router.replace("/onboarding/pending-sp-confirmation");
-  //         }
-  //       }
-  //       break;
-
-  //     // 🚩 STRATEGIC GATE: SPU/MNG has authorized, but account is still DISABLED
-  //     // (Safety check for the A06 to prevent data fetching before enable)
-  //     case "COMPLETE":
-  //     case "COMPLETED":
-  //       if (inAuthGroup || inOnboardingGroup || isAtWelcome) {
-  //         router.replace("/(tabs)/erfs");
-  //       }
-  //       break;
-
-  //     default:
-  //       // Syncing with Firestore... overlay remains up
-  //       break;
-  //   }
-  // }, [user, status, isLoading, segments, isLayoutReady]);
-
-  // 🛡️ UI OVERLAY: Blocks interaction while the "Gate" is deciding
+  }, [user, profile, status, isLoading, segments, isLayoutReady]);
 
   const showOverlay = !isLayoutReady || isLoading || (user && !status);
 

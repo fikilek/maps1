@@ -4,7 +4,7 @@ export default function UserLayout() {
   return (
     <Stack
       screenOptions={{
-        headerShown: true, // Parent AppHeader handles the top bar
+        headerShown: false, // Parent AppHeader handles the top bar
         animation: "slide_from_right",
       }}
     >

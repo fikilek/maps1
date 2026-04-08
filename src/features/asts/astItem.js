@@ -5,6 +5,7 @@ import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 
 const AstItem = ({ item }) => {
+  // console.log(`AstItem --item`, item);
   const { updateGeo } = useGeo();
   const { all } = useWarehouse();
   const router = useRouter();
@@ -14,7 +15,32 @@ const AstItem = ({ item }) => {
   const meterNo = item.ast?.astData?.astNo || "NO METER NO";
   const manufacturer = item.ast?.astData?.astManufacturer || "Unknown";
   const anomaly = item.ast?.anomalies?.anomaly || "Meter Ok";
-  const premiseAddress = item.accessData?.premise?.address || "Unknown Address";
+
+  const visibility = item?.master?.visibility || "NAv";
+  const isVisible = visibility === "VISIBLE";
+  const isInvisible = visibility === "INVISIBLE";
+
+  const astName = item.ast?.astData?.astName || "NAv";
+  const erfNo = item.accessData?.erfNo || "NAv";
+  const premiseId = item.accessData?.premise?.id || null;
+
+  const parentPremiseDoc = all?.prems?.find((p) => p.id === premiseId);
+
+  const premiseFullAddress = parentPremiseDoc
+    ? `${parentPremiseDoc?.address?.strNo || ""} ${parentPremiseDoc?.address?.strName || ""} ${parentPremiseDoc?.address?.strType || ""}`.trim() ||
+      "NAv"
+    : item.accessData?.premise?.address || "NAv";
+
+  const wardPcode =
+    item?.accessData?.parents?.wardPcode ||
+    parentPremiseDoc?.parents?.wardPcode ||
+    "";
+
+  const wardNo = (() => {
+    const tail = String(wardPcode || "").slice(-3);
+    const n = parseInt(tail, 10);
+    return Number.isNaN(n) ? "NAv" : String(n);
+  })();
 
   const handleGoToDetails = () => {
     const meterNo = item.ast?.astData?.astNo;
@@ -24,24 +50,30 @@ const AstItem = ({ item }) => {
       pathname: "/(tabs)/asts/details",
       params: {
         docId: docId,
-        astNo: meterNo || "UNKNOWN",
+        astNo: meterNo || "NAv",
       },
     });
   };
 
   const handleGoToReport = () => {
-    const meterNo = item.ast?.astData?.astNo;
-    const id = item.id;
+    const meterNo = item?.ast?.astData?.astNo || "NAv";
+    const id = item?.id;
 
-    if (!meterNo) {
+    if (!id) {
+      console.warn("⚠️ Asset missing AST id, cannot open report");
+      return;
+    }
+
+    if (!item?.ast?.astData?.astNo) {
       console.warn("⚠️ Asset missing Meter Number, using ID only");
     }
 
-    // 🚀 THE DUAL STRIKE ROUTE
-    // Path: /(tabs)/asts/W776644?docId=dN4v3olUYSSsqCS6DNRw
     router.push({
-      pathname: `/(tabs)/asts/${id || "UNKNOWN"}`,
-      params: { astNo: meterNo },
+      pathname: "/(tabs)/asts/[id]",
+      params: {
+        id,
+        astNo: meterNo,
+      },
     });
   };
 
@@ -52,7 +84,7 @@ const AstItem = ({ item }) => {
     router.push({
       pathname: "/(tabs)/asts/media",
       params: {
-        astNo: meterNo || "UNKNOWN",
+        astNo: meterNo || "NAv",
         id: id,
       },
     });
@@ -102,38 +134,59 @@ const AstItem = ({ item }) => {
         </View>
 
         {/* 🏛️ RIGHT: DATA */}
+
         <View style={styles.details}>
           <View style={styles.row}>
-            <Text style={styles.meterNo}>{meterNo}</Text>
-            <View
-              style={[
-                styles.typeBadge,
-                { borderColor: isWater ? "#3B82F6" : "#EAB308" },
-              ]}
-            >
-              <Text
+            <View style={styles.titleBlock}>
+              <Text style={styles.meterNo}>{meterNo}</Text>
+
+              <View style={styles.makeModelRow}>
+                <Text style={styles.makeModelText}>{manufacturer}</Text>
+                <Text style={styles.makeModelDot}>•</Text>
+                <Text style={styles.makeModelText}>{astName}</Text>
+              </View>
+            </View>
+
+            <View style={styles.topRightBadgeCol}>
+              <View
                 style={[
-                  styles.typeBadgeText,
-                  { color: isWater ? "#3B82F6" : "#EAB308" },
+                  styles.typeBadge,
+                  { borderColor: isWater ? "#3B82F6" : "#EAB308" },
                 ]}
               >
-                {item.meterType?.toUpperCase()}
+                <Text
+                  style={[
+                    styles.typeBadgeText,
+                    { color: isWater ? "#3B82F6" : "#EAB308" },
+                  ]}
+                >
+                  {item.meterType?.toUpperCase()}
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.visibilityText,
+                  isVisible && styles.visibilityTextVisible,
+                  isInvisible && styles.visibilityTextInvisible,
+                  !isVisible && !isInvisible && styles.visibilityTextNeutral,
+                ]}
+              >
+                {visibility}
               </Text>
             </View>
           </View>
 
-          <View style={styles.addressRow}>
+          <View style={styles.geoRow}>
             <MaterialCommunityIcons
-              name="home-map-marker"
+              name="map-marker-path"
               size={14}
               color="#64748B"
             />
-            <Text style={styles.addressText}>{premiseAddress}</Text>
+            <Text style={styles.geoText}>
+              W{wardNo} • ERF {erfNo} • {premiseFullAddress}
+            </Text>
           </View>
-
-          <Text style={styles.subDetail}>
-            {manufacturer} • {item.ast?.astData?.astName || "Standard"}
-          </Text>
         </View>
       </View>
 
@@ -205,121 +258,6 @@ const AstItem = ({ item }) => {
   );
 };
 
-// const AstItem = ({ item }) => {
-//   const { updateGeo } = useGeo();
-//   const { all } = useWarehouse();
-//   const router = useRouter();
-
-//   const isWater = item.meterType === "water";
-//   const meterNo = item.ast?.astData?.astNo || "NO METER NO";
-//   const manufacturer = item.ast?.astData?.astManufacturer || "Unknown";
-//   const anomaly = item.ast?.anomalies?.anomaly || "Meter Ok";
-//   const premiseAddress = item.accessData?.premise?.address || "Unknown Address";
-
-//   const handleGoToMap = () => {
-//     const meter = item;
-//     const premiseId = meter?.accessData?.premise?.id;
-//     const erfId = meter?.accessData?.erfId;
-
-//     const parentPremise = all?.prems?.find((p) => p.id === premiseId);
-//     const parentErf = all?.erfs?.find((e) => e.id === erfId);
-
-//     updateGeo({
-//       selectedErf: parentErf || { id: erfId },
-//       lastSelectionType: "ERF",
-//     });
-//     updateGeo({
-//       selectedPremise: parentPremise || null,
-//       lastSelectionType: "PREMISE",
-//     });
-//     updateGeo({
-//       selectedMeter: meter,
-//       lastSelectionType: "METER",
-//     });
-
-//     router.push("/(tabs)/maps");
-//   };
-
-//   return (
-//     <View style={styles.card}>
-//       <View style={styles.iconContainer}>
-//         <View
-//           style={[
-//             styles.iconCircle,
-//             { backgroundColor: isWater ? "#EFF6FF" : "#FEFCE8" },
-//           ]}
-//         >
-//           <MaterialCommunityIcons
-//             name={isWater ? "water-outline" : "lightning-bolt-outline"}
-//             size={24}
-//             color={isWater ? "#3B82F6" : "#EAB308"}
-//           />
-//         </View>
-//       </View>
-
-//       <View style={styles.details}>
-//         <View style={styles.row}>
-//           <Text style={styles.meterNo}>{meterNo}</Text>
-//           <View
-//             style={[
-//               styles.typeBadge,
-//               { borderColor: isWater ? "#3B82F6" : "#EAB308" },
-//             ]}
-//           >
-//             <Text
-//               style={[
-//                 styles.typeBadgeText,
-//                 { color: isWater ? "#3B82F6" : "#EAB308" },
-//               ]}
-//             >
-//               {item.meterType?.toUpperCase()}
-//             </Text>
-//           </View>
-//         </View>
-
-//         <View style={styles.addressRow}>
-//           <MaterialCommunityIcons
-//             name="home-map-marker"
-//             size={14}
-//             color="#64748B"
-//           />
-//           <Text style={styles.addressText}>{premiseAddress}</Text>
-//         </View>
-
-//         <Text style={styles.subDetail}>
-//           {manufacturer} • {item.ast?.astData?.astName || "Standard"}
-//         </Text>
-
-//         <View style={styles.statusRow}>
-//           <View style={styles.statusInfo}>
-//             <MaterialCommunityIcons
-//               name={anomaly === "Meter Ok" ? "check-circle" : "alert-circle"}
-//               size={14}
-//               color={anomaly === "Meter Ok" ? "#10B981" : "#EF4444"}
-//             />
-//             <Text
-//               style={[
-//                 styles.statusLabel,
-//                 { color: anomaly === "Meter Ok" ? "#10B981" : "#EF4444" },
-//               ]}
-//             >
-//               {anomaly}
-//             </Text>
-//           </View>
-
-//           <TouchableOpacity onPress={handleGoToMap} style={styles.mapButton}>
-//             <MaterialCommunityIcons
-//               name="map-marker-radius"
-//               size={22}
-//               color="#64748B"
-//             />
-//           </TouchableOpacity>
-//         </View>
-//       </View>
-//     </View>
-//   );
-// };
-
 export default AstItem;
 
 const styles = StyleSheet.create({
@@ -354,6 +292,7 @@ const styles = StyleSheet.create({
   },
   details: { flex: 1 },
   row: {
+    flex: 1,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -403,6 +342,7 @@ const styles = StyleSheet.create({
   },
 
   card: {
+    flex: 1,
     backgroundColor: "#FFF",
     borderRadius: 16,
     marginBottom: 12,
@@ -410,6 +350,7 @@ const styles = StyleSheet.create({
     // Remove flexDirection: 'row' here so content stacks vertically
   },
   mainContent: {
+    flex: 1,
     flexDirection: "row", // Keep icon and text side-by-side
     padding: 16,
     alignItems: "center",
@@ -425,5 +366,65 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC", // Light slate floor
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
+  },
+
+  topRightBadgeCol: {
+    alignItems: "flex-end",
+  },
+
+  visibilityText: {
+    marginTop: 4,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  visibilityTextVisible: {
+    color: "#047857",
+  },
+
+  visibilityTextInvisible: {
+    color: "#B91C1C",
+  },
+
+  visibilityTextNeutral: {
+    color: "#64748B",
+  },
+
+  titleBlock: {
+    flex: 1,
+    paddingRight: 10,
+  },
+
+  makeModelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+  },
+
+  makeModelText: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "700",
+  },
+
+  makeModelDot: {
+    marginHorizontal: 6,
+    fontSize: 12,
+    color: "#94A3B8",
+    fontWeight: "900",
+  },
+
+  geoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+
+  geoText: {
+    marginLeft: 4,
+    color: "#1E293B",
+    fontWeight: "600",
+    fontSize: 12,
+    flex: 1,
   },
 });

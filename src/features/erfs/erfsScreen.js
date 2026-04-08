@@ -180,13 +180,18 @@ function NoErfsState({ lmName, wardName, onRetry }) {
 }
 
 export default function ErfsScreen() {
+  console.log(`ErfsScreen --mounting`);
   const isFocused = useIsFocused();
   const lastScrolledIdRef = useRef(null);
   const flatListRef = useRef(null);
   const router = useRouter();
 
   const { geoState, updateGeo } = useGeo();
-  const { all, filtered, sync } = useWarehouse();
+  const { available, all, filtered, sync } = useWarehouse();
+  // console.log(
+  //   `ErfsScreen --available?.wards?.length`,
+  //   available?.wards?.length,
+  // );
 
   const [searchQuery, setSearchQuery] = useState("");
   const [reportVisible, setReportVisible] = useState(false);
@@ -346,7 +351,7 @@ export default function ErfsScreen() {
         setSelectedWard={(w) =>
           updateGeo({ selectedWard: w, lastSelectionType: "WARD" })
         }
-        availableWards={all?.wards}
+        availableWards={available?.wards}
         filteredCount={filteredErfs.length}
         totalCount={all?.erfs?.length || 0}
         selectedErf={geoState.selectedErf}

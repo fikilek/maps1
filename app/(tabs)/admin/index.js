@@ -44,7 +44,7 @@ export default function AdminDashboard() {
       </Section>
 
       {/* 🛠️ New Configuration Section */}
-      {(isSPU || isADM || isMNG) && (
+      {(isSPU || isADM) && (
         <Section title="System Configuration">
           <Card
             title="Dropdown Settings"
@@ -66,6 +66,24 @@ export default function AdminDashboard() {
             title="Operations Management Center"
             subtitle="Workorder allocation, FW teams etc "
             onPress={() => router.push("/(tabs)/admin/operations")}
+          />
+        </Section>
+      )}
+
+      {/* 📈 Local Storage Section */}
+      {(isSPU || isADM || isMNG || isSPV || isFWR) && (
+        <Section title="Local Storage">
+          <Card
+            title="Ward ERFs Storage"
+            subtitle="Ward ERFs sync & management"
+            onPress={() => router.push("/(tabs)/admin/storage/ward-erfs-sync")}
+          />
+          <Card
+            title="Forms Storage"
+            subtitle="Offline forms submission queue"
+            onPress={() =>
+              router.push("/(tabs)/admin/storage/forms-submission-queue")
+            }
           />
         </Section>
       )}

@@ -169,7 +169,7 @@ export default function AppHeader({ title }) {
       // 4. persist active workbase pointer
       await updateProfile({
         uid: user.uid,
-        update: { "access.activeWorkbase": wbPointer },
+        updates: { "access.activeWorkbase": wbPointer },
       }).unwrap();
     } catch (err) {
       console.error("Workbase/Ward scope switch failed:", err);

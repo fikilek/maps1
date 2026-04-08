@@ -6,6 +6,7 @@ const FormInput = ({
   name,
   placeholder,
   autoCapitalize = "words",
+  numbersOnly = false,
   ...props
 }) => {
   const { values, errors, setFieldValue, handleBlur, isSubmitting } =
@@ -18,14 +19,14 @@ const FormInput = ({
   const hasError = !!error;
 
   const handleTextChange = (text) => {
-    // const capitalizedSentence = capitalizeWords(text);
-    // setFieldValue(name, capitalizedSentence);
-    setFieldValue(name, text);
+    const nextValue = numbersOnly ? text.replace(/[^0-9]/g, "") : text;
+    setFieldValue(name, nextValue);
   };
 
   const handleFinalize = (e) => {
-    // 🏛️ Clean up the casing ONLY when they leave the field
-    const formatted = capitalizeWords(value || "");
+    const formatted = numbersOnly
+      ? String(value || "")
+      : capitalizeWords(value || "");
     setFieldValue(name, formatted, true);
     handleBlur(name)(e);
   };

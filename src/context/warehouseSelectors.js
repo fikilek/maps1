@@ -99,8 +99,9 @@ export const selectFilteredMeters = ({ meters = [] }, geo) => {
   }
 
   if (geo.selectedWard) {
+    const wardKey = geo.selectedWard?.pcode || geo.selectedWard?.id;
     return metersArr.filter(
-      (m) => m.accessData?.wardId === geo.selectedWard.id,
+      (m) => m.accessData?.parents?.wardPcode === wardKey,
     );
   }
 

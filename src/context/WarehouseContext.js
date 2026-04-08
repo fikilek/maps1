@@ -3,11 +3,11 @@
 import { createContext, useContext, useMemo } from "react";
 import { useGeo } from "./GeoContext";
 
-import { useGetAstsByLmPcodeQuery } from "../redux/astsApi";
+import { useGetAstsByLmPcodeWardPcodeQuery } from "../redux/astsApi";
 import { useGetErfsByLmPcodeWardPcodeQuery } from "../redux/erfsApi";
 import { useGetWardsByLocalMunicipalityQuery } from "../redux/geoApi";
 import { useGetPremisesByLmPcodeWardPcodeQuery } from "../redux/premisesApi";
-import { useGetTrnsByLmPcodeQuery } from "../redux/trnsApi";
+import { useGetTrnsByLmPcodeWardPcodeQuery } from "../redux/trnsApi";
 
 import {
   buildGeoLibrary,
@@ -46,6 +46,7 @@ export const WarehouseProvider = ({ children }) => {
       return String(w?.id || "").startsWith(lmPcode);
     });
   }, [wardsList, lmPcode]);
+  // console.log(`wards`, wards);
 
   const selectedWardIsValid = useMemo(() => {
     if (!lmPcode || !selectedWard?.id) return false;
@@ -61,6 +62,7 @@ export const WarehouseProvider = ({ children }) => {
 
   const activeWard = selectedWardIsValid ? selectedWard : null;
   const wardPcode = activeWard?.pcode || activeWard?.id || null;
+  const scopeReady = !!lmPcode && !!wardPcode;
 
   const { data: wardErfs, isLoading: erfsLoading } =
     useGetErfsByLmPcodeWardPcodeQuery(
@@ -76,11 +78,25 @@ export const WarehouseProvider = ({ children }) => {
   // console.log(`wardPrems`, wardPrems);
 
   // keep these old for now until we move them too
+  // const { data: meters = [], isLoading: astsLoading } =
+  //   useGetAstsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
   const { data: cloudMeters = [], isLoading: metersLoading } =
-    useGetAstsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
+    useGetAstsByLmPcodeWardPcodeQuery(
+      { lmPcode, wardPcode },
+      { skip: !lmPcode || !wardPcode },
+    );
+  // console.log(`cloudMeters`, cloudMeters);
+  // console.log(`lmPcode`, lmPcode);
+  // console.log(`wardPcode`, wardPcode);
 
   const { data: cloudTrns = [], isLoading: trnsLoading } =
-    useGetTrnsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
+    useGetTrnsByLmPcodeWardPcodeQuery(
+      { lmPcode, wardPcode },
+      { skip: !lmPcode || !wardPcode },
+    );
+  // console.log(`cloudTrns`, cloudTrns);
+  // console.log(`lmPcode`, lmPcode);
+  // console.log(`wardPcode`, wardPcode);
 
   const expectedPackKey =
     lmPcode && wardPcode ? `${lmPcode}__${wardPcode}` : null;
@@ -95,11 +111,18 @@ export const WarehouseProvider = ({ children }) => {
     !!expectedPackKey && currentPackKey === expectedPackKey;
 
   const warehouse = useMemo(() => {
-    const allWards = wards;
-    const allErfs = packKeyMatches ? wardErfs?.metaEntries || [] : [];
-    const allPrems = wardPcode ? wardPrems || [] : [];
-    const allMeters = cloudMeters || [];
-    const allTrns = cloudTrns || [];
+    const allWards = scopeReady ? wards : [];
+    const allErfs =
+      scopeReady && packKeyMatches ? wardErfs?.metaEntries || [] : [];
+    const allPrems = scopeReady ? wardPrems || [] : [];
+    const allMeters = scopeReady ? cloudMeters || [] : [];
+    const allTrns = scopeReady ? cloudTrns || [] : [];
+
+    // const allWards = wards;
+    // const allErfs = packKeyMatches ? wardErfs?.metaEntries || [] : [];
+    // const allPrems = wardPcode ? wardPrems || [] : [];
+    // const allMeters = cloudMeters || [];
+    // const allTrns = cloudTrns || [];
 
     const wardErfsSync = packKeyMatches
       ? (wardErfs?.sync ?? {
@@ -143,6 +166,38 @@ export const WarehouseProvider = ({ children }) => {
       wardPcode: selectedWard?.pcode || selectedWard?.id || null,
     };
 
+    const trnsSync = {
+      status: !lmPcode
+        ? "idle"
+        : !wardPcode
+          ? "awaiting-ward"
+          : trnsLoading
+            ? "syncing"
+            : "ready",
+      lmPcode,
+      wardPcode,
+      size: allTrns.length,
+      lastError: null,
+      firstSnapshotAt: allTrns.length > 0 ? Date.now() : 0,
+      lastSyncAt: allTrns.length > 0 ? Date.now() : 0,
+    };
+
+    const metersSync = {
+      status: !lmPcode
+        ? "idle"
+        : !wardPcode
+          ? "awaiting-ward"
+          : metersLoading
+            ? "syncing"
+            : "ready",
+      lmPcode,
+      wardPcode,
+      size: allMeters.length,
+      lastError: null,
+      firstSnapshotAt: allMeters.length > 0 ? Date.now() : 0,
+      lastSyncAt: allMeters.length > 0 ? Date.now() : 0,
+    };
+
     const erfById = new Map(allErfs.map((e) => [e.id, e]));
 
     const geoLibrary = buildGeoLibrary({
@@ -160,9 +215,13 @@ export const WarehouseProvider = ({ children }) => {
       { meters: allMeters },
       geoState,
     );
+    // console.log(`filteredMeters`, filteredMeters);
     const filteredTrns = selectFilteredTrns({ trns: allTrns }, geoState);
 
     return {
+      available: {
+        wards: lmPcode ? wards : [],
+      },
       all: {
         wards: allWards,
         erfs: allErfs,
@@ -182,6 +241,8 @@ export const WarehouseProvider = ({ children }) => {
         scope: scopeSync,
         wards: wardsSync,
         erfs: wardErfsSync,
+        meters: metersSync,
+        trns: trnsSync,
       },
     };
   }, [
@@ -198,14 +259,17 @@ export const WarehouseProvider = ({ children }) => {
     wardsLoading,
     selectedWard,
     selectedWardIsValid,
+    trnsLoading,
+    metersLoading,
+    scopeReady,
   ]);
 
   const loading =
     (!!lmPcode && wardsLoading) ||
-    (!!lmPcode && !!wardPcode && erfsLoading) ||
-    (!!lmPcode && !!wardPcode && premsLoading) ||
-    (!!lmPcode && metersLoading) ||
-    (!!lmPcode && trnsLoading);
+    (scopeReady && erfsLoading) ||
+    (scopeReady && premsLoading) ||
+    (scopeReady && metersLoading) ||
+    (scopeReady && trnsLoading);
 
   return (
     <WarehouseContext.Provider value={{ ...warehouse, loading }}>
@@ -221,234 +285,3 @@ export const useWarehouse = () => {
   }
   return ctx;
 };
-
-// // src/context/WarehouseContext.js
-
-// import { createContext, useContext, useMemo } from "react";
-// import { useGeo } from "./GeoContext";
-
-// import { useGetAstsByLmPcodeQuery } from "../redux/astsApi";
-// import { useGetErfsByLmPcodeWardPcodeQuery } from "../redux/erfsApi";
-// import { useGetWardsByLocalMunicipalityQuery } from "../redux/geoApi";
-// import { useGetPremisesByLmPcodeQuery } from "../redux/premisesApi";
-// import { useGetTrnsByLmPcodeQuery } from "../redux/trnsApi";
-
-// import {
-//   buildGeoLibrary,
-//   selectFilteredErfs,
-//   selectFilteredMeters,
-//   selectFilteredPrems,
-//   selectFilteredTrns,
-//   selectFilteredWards,
-// } from "./warehouseSelectors";
-
-// export const WarehouseContext = createContext(null);
-
-// export const WarehouseProvider = ({ children }) => {
-//   const { geoState } = useGeo();
-//   const { selectedLm, selectedWard } = geoState;
-
-//   const lmPcode = selectedLm?.id || selectedLm?.pcode || null;
-
-//   // 1) Load wards for selected LM
-//   const { data: wardsList = [], isLoading: wardsLoading } =
-//     useGetWardsByLocalMunicipalityQuery(lmPcode, {
-//       skip: !lmPcode,
-//     });
-
-//   // 2) Keep only wards that truly belong to this LM
-//   const wards = useMemo(() => {
-//     if (!lmPcode) return [];
-
-//     return (wardsList || []).filter((w) => {
-//       const parentLm =
-//         w?.parents?.localMunicipalityId ||
-//         w?.parents?.localMunicipality?.pcode ||
-//         w?.admin?.localMunicipality?.pcode ||
-//         null;
-
-//       if (parentLm) return parentLm === lmPcode;
-
-//       return String(w?.id || "").startsWith(lmPcode);
-//     });
-//   }, [wardsList, lmPcode]);
-
-//   // 3) Validate whether selectedWard belongs to current LM
-//   const selectedWardIsValid = useMemo(() => {
-//     if (!lmPcode || !selectedWard?.id) return false;
-
-//     return wards.some(
-//       (w) =>
-//         (w?.id && w.id === selectedWard.id) ||
-//         (w?.pcode && w.pcode === selectedWard.id) ||
-//         (w?.id && w.id === selectedWard.pcode) ||
-//         (w?.pcode && w.pcode === selectedWard.pcode),
-//     );
-//   }, [lmPcode, selectedWard?.id, selectedWard?.pcode, wards]);
-
-//   // 4) Active ward now comes ONLY from GeoContext
-//   // No fallback, no healing.
-//   const activeWard = selectedWardIsValid ? selectedWard : null;
-//   const wardPcode = activeWard?.pcode || activeWard?.id || null;
-
-//   // 5) Load active ward ERFs only when a valid ward exists
-//   const { data: wardErfs, isLoading: erfsLoading } =
-//     useGetErfsByLmPcodeWardPcodeQuery(
-//       { lmPcode, wardPcode },
-//       { skip: !lmPcode || !wardPcode },
-//     );
-
-//   const expectedPackKey =
-//     lmPcode && wardPcode ? `${lmPcode}__${wardPcode}` : null;
-
-//   const currentPackKey =
-//     wardErfs?.sync?.wardCacheKey ||
-//     wardErfs?.sync?.packKey ||
-//     wardErfs?.sync?.key ||
-//     null;
-
-//   const packKeyMatches =
-//     !!expectedPackKey && currentPackKey === expectedPackKey;
-
-//   // 6) Other LM-scoped pipelines
-//   const { data: cloudPrems = [], isLoading: premsLoading } =
-//     useGetPremisesByLmPcodeQuery(lmPcode, { skip: !lmPcode });
-
-//   const { data: cloudMeters = [], isLoading: metersLoading } =
-//     useGetAstsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
-
-//   const { data: cloudTrns = [], isLoading: trnsLoading } =
-//     useGetTrnsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
-
-//   const warehouse = useMemo(() => {
-//     const allWards = wards;
-
-//     // ERFs are ONLY the active ward ERFs now
-//     const allErfs = packKeyMatches ? wardErfs?.metaEntries || [] : [];
-//     const allPrems = cloudPrems || [];
-//     const allMeters = cloudMeters || [];
-//     const allTrns = cloudTrns || [];
-
-//     const wardErfsSync = packKeyMatches
-//       ? (wardErfs?.sync ?? {
-//           status: "idle",
-//           lmPcode,
-//           wardPcode,
-//           wardCacheKey: expectedPackKey,
-//           lastSyncAt: 0,
-//           firstSnapshotAt: 0,
-//           lastError: null,
-//           size: 0,
-//         })
-//       : {
-//           status: !lmPcode
-//             ? "idle"
-//             : !wardPcode
-//               ? "waiting-for-scope"
-//               : "syncing",
-//           lmPcode,
-//           wardPcode,
-//           wardCacheKey: expectedPackKey,
-//           size: 0,
-//           lastSyncAt: 0,
-//           firstSnapshotAt: 0,
-//           lastError: null,
-//         };
-
-//     const wardsSync = {
-//       status: !lmPcode ? "idle" : wardsLoading ? "syncing" : "ready",
-//       lmPcode,
-//       firstSnapshotAt: allWards.length > 0 ? Date.now() : 0,
-//       lastSyncAt: allWards.length > 0 ? Date.now() : 0,
-//       lastError: null,
-//     };
-
-//     const scopeSync = {
-//       status: !lmPcode
-//         ? "idle"
-//         : !selectedWard
-//           ? "lm-only"
-//           : selectedWardIsValid
-//             ? "ready"
-//             : "invalid-ward",
-//       lmPcode,
-//       wardPcode: selectedWard?.pcode || selectedWard?.id || null,
-//     };
-
-//     const erfById = new Map(allErfs.map((e) => [e.id, e]));
-
-//     const geoLibrary = buildGeoLibrary({
-//       wards: allWards,
-//       erfGeoEntries: packKeyMatches ? wardErfs?.geoEntries || {} : {},
-//     });
-
-//     const filteredWards = selectFilteredWards({ wards: allWards }, geoState);
-//     const filteredErfs = selectFilteredErfs({ erfs: allErfs }, geoState);
-//     const filteredPrems = selectFilteredPrems(
-//       { prems: allPrems, erfById },
-//       geoState,
-//     );
-//     const filteredMeters = selectFilteredMeters(
-//       { meters: allMeters },
-//       geoState,
-//     );
-//     const filteredTrns = selectFilteredTrns({ trns: allTrns }, geoState);
-
-//     return {
-//       all: {
-//         wards: allWards,
-//         erfs: allErfs,
-//         prems: allPrems,
-//         meters: allMeters,
-//         trns: allTrns,
-//         geoLibrary,
-//       },
-//       filtered: {
-//         wards: filteredWards,
-//         erfs: filteredErfs,
-//         prems: filteredPrems,
-//         meters: filteredMeters,
-//         trns: filteredTrns,
-//       },
-//       sync: {
-//         scope: scopeSync,
-//         wards: wardsSync,
-//         erfs: wardErfsSync,
-//       },
-//     };
-//   }, [
-//     wards,
-//     wardErfs,
-//     packKeyMatches,
-//     cloudPrems,
-//     cloudMeters,
-//     cloudTrns,
-//     geoState,
-//     lmPcode,
-//     wardPcode,
-//     expectedPackKey,
-//     wardsLoading,
-//     selectedWard,
-//     selectedWardIsValid,
-//   ]);
-
-//   const loading =
-//     (!!lmPcode && wardsLoading) ||
-//     (!!lmPcode && !!wardPcode && erfsLoading) ||
-//     (!!lmPcode && premsLoading) ||
-//     (!!lmPcode && metersLoading) ||
-//     (!!lmPcode && trnsLoading);
-
-//   return (
-//     <WarehouseContext.Provider value={{ ...warehouse, loading }}>
-//       {children}
-//     </WarehouseContext.Provider>
-//   );
-// };
-
-// export const useWarehouse = () => {
-//   const ctx = useContext(WarehouseContext);
-//   if (!ctx)
-//     throw new Error("useWarehouse must be used within WarehouseProvider");
-//   return ctx;
-// };

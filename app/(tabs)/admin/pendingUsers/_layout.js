@@ -10,7 +10,7 @@ export default function PendingUsersLayout() {
           headerStyle: { backgroundColor: "#f8fafc" },
           headerTitleStyle: { fontWeight: "900", color: "#1e293b" },
           headerShadowVisible: true,
-          headerShown: true,
+          headerShown: false,
         }}
       />
     </Stack>

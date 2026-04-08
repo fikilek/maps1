@@ -2,6 +2,7 @@ import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   setDoc,
   updateDoc,
@@ -75,44 +76,66 @@ export const spApi = createApi({
 
     createServiceProvider: builder.mutation({
       async queryFn({
-        registeredName,
         tradingName,
-        registeredNumber,
-        clients,
-        userUid,
-        userDisplayName,
+        clients = [],
+        creatorUid,
+        creatorName,
+        creatorRoleCode,
       }) {
         try {
+          if (!tradingName?.trim()) {
+            return {
+              error: {
+                message: "Trading Name is required.",
+              },
+            };
+          }
+
           const spRef = doc(collection(db, "serviceProviders"));
           const spId = spRef.id;
           const timestamp = new Date().toISOString();
 
+          const normalizedClients = (clients || []).map((client) => ({
+            id: client?.id || "NAv",
+            name: client?.name || "NAv",
+            clientType: client?.clientType || "NAv",
+            relationshipType: client?.relationshipType || "NAv",
+          }));
+
           await setDoc(spRef, {
             id: spId,
+
             profile: {
-              registeredName: registeredName.trim(),
+              registeredName: "NAv",
               tradingName: tradingName.trim(),
-              tradingNumber: registeredNumber?.trim() || "", // Field 14 ✅
+              registrationNumber: "NAv",
             },
-            // 🛡️ SCHEMA ALIGNMENT: Fulfilling v0.2 without misrepresentation
-            // These fields stay neutral until a real owner is onboarded/linked.
+
             owner: {
-              id: "PENDING",
-              name: "UNASSIGNED",
+              id: "NAv",
+              name: "NAv",
             },
-            status: "ACTIVE", // Field 10 ✅
-            clients: clients || [], // Field 11 ✅
-            offices: [], // Field 7 ✅ (per CSV spelling 'ofices')
+
+            status: "ACTIVE",
+            clients: normalizedClients,
+            offices: [],
+
             metadata: {
-              createAt: timestamp, // Field 1 ✅
-              createdByUser: userDisplayName, // Field 2 ✅ (The Registrar)
-              createdByUid: userUid, // Field 3 ✅ (The Registrar)
-              updateAt: timestamp, // Field 4 ✅
-              updatedByUser: userDisplayName, // Field 5 ✅
-              updatedByUid: userUid, // Field 6 ✅
+              createdAt: timestamp,
+              createdByUid: creatorUid || "NAv",
+              createdByUser: creatorName || "NAv",
+              updatedAt: timestamp,
+              updatedByUid: creatorUid || "NAv",
+              updatedByUser: creatorName || "NAv",
             },
           });
-          return { data: spId };
+
+          return {
+            data: {
+              id: spId,
+              creatorRoleCode: creatorRoleCode || "NAv",
+            },
+          };
         } catch (error) {
           return { error };
         }
@@ -121,40 +144,114 @@ export const spApi = createApi({
     }),
 
     updateServiceProvider: builder.mutation({
-      async queryFn({ id, updates, userUid, userDisplayName }) {
+      async queryFn({
+        id,
+        patch = {},
+        updaterUid,
+        updaterName,
+        updaterRoleCode,
+      }) {
         try {
+          if (!id) {
+            return {
+              error: {
+                message: "Service Provider id is required.",
+              },
+            };
+          }
+
           const spRef = doc(db, "serviceProviders", id);
+          const spSnap = await getDoc(spRef);
+
+          if (!spSnap.exists()) {
+            return {
+              error: {
+                message: "Service Provider not found.",
+              },
+            };
+          }
+
+          const currentServiceProvider = spSnap.data() || {};
           const timestamp = new Date().toISOString();
 
-          // 🛡️ SCHEMA ENFORCEMENT: Merging updates with mandatory v0.2 metadata
-          await updateDoc(spRef, {
-            ...updates,
-            "metadata.updateAt": timestamp, // Field 4 ✅
-            "metadata.updatedByUid": userUid, // Field 6 ✅
-            "metadata.updatedByUser": userDisplayName, // Field 5 ✅
-          });
+          const canEditClients =
+            updaterRoleCode === "SPU" || updaterRoleCode === "ADM";
 
-          return { data: "SUCCESS" };
+          const canEditStatus =
+            updaterRoleCode === "SPU" || updaterRoleCode === "ADM";
+
+          const canEditProfile =
+            updaterRoleCode === "SPU" ||
+            updaterRoleCode === "ADM" ||
+            updaterRoleCode === "MNG" ||
+            updaterRoleCode === "SPV";
+
+          const canEditOwner =
+            updaterRoleCode === "SPU" ||
+            updaterRoleCode === "ADM" ||
+            updaterRoleCode === "MNG" ||
+            updaterRoleCode === "SPV";
+
+          const canEditOffices =
+            updaterRoleCode === "SPU" ||
+            updaterRoleCode === "ADM" ||
+            updaterRoleCode === "MNG" ||
+            updaterRoleCode === "SPV";
+
+          const updates = {
+            metadata: {
+              createdAt:
+                currentServiceProvider?.metadata?.createdAt || timestamp,
+              createdByUid:
+                currentServiceProvider?.metadata?.createdByUid || "NAv",
+              createdByUser:
+                currentServiceProvider?.metadata?.createdByUser || "NAv",
+              updatedAt: timestamp,
+              updatedByUid: updaterUid || "NAv",
+              updatedByUser: updaterName || "NAv",
+            },
+          };
+
+          if (canEditProfile && patch?.profile) {
+            updates.profile = patch.profile;
+          }
+
+          if (canEditOwner && patch?.owner) {
+            updates.owner = patch.owner;
+          }
+
+          if (canEditClients && Array.isArray(patch?.clients)) {
+            updates.clients = patch.clients;
+          }
+
+          if (canEditOffices && Array.isArray(patch?.offices)) {
+            updates.offices = patch.offices;
+          }
+
+          if (canEditStatus && patch?.status) {
+            updates.status = patch.status;
+          }
+
+          await updateDoc(spRef, updates);
+
+          return {
+            data: {
+              id,
+              updated: true,
+            },
+          };
         } catch (error) {
-          return { error };
+          console.log("updateServiceProvider ERROR", error);
+
+          return {
+            error: {
+              message:
+                error?.message || "Service Provider update failed in spApi.",
+            },
+          };
         }
       },
     }),
-
-    // updateServiceProvider: builder.mutation({
-    //   async queryFn({ spId, patch }) {
-    //     try {
-    //       const fn = httpsCallable(functions, "updateServiceProvider");
-    //       const res = await fn({ spId, patch });
-    //       return { data: res.data };
-    //     } catch (error) {
-    //       return { error };
-    //     }
-    //   },
-    //   invalidatesTags: (r, e, { spId }) => [
-    //     { type: "ServiceProvider", id: spId },
-    //   ],
-    // }),
   }),
 });
 

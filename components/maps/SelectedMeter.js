@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { Marker } from "react-native-maps";
 
@@ -10,13 +11,25 @@ const SelectedMeter = ({
   erfNo,
   astId,
 }) => {
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+
+  useEffect(() => {
+    setTracksViewChanges(true);
+
+    const timer = setTimeout(() => {
+      setTracksViewChanges(false);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [meterNo, astId, coordinates?.latitude, coordinates?.longitude]);
+
   return (
     <Marker
       key={`ast-label-${astId}`}
       coordinate={coordinates}
       anchor={{ x: 0.5, y: 0.5 }}
       zIndex={2000}
-      // tracksViewChanges={false}
+      tracksViewChanges={tracksViewChanges}
     >
       <View style={{ padding: 5 }}>
         <View

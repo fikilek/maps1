@@ -1,77 +1,48 @@
 import { useAuth } from "@/src/hooks/useAuth";
-import { useUpdateProfileMutation } from "@/src/redux/authApi";
+import { useAuthorizeFwrMutation } from "@/src/redux/authApi";
 import { useGetUsersQuery } from "@/src/redux/usersApi";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
-import {
-  Avatar,
-  Button,
-  Card,
-  Divider,
-  SegmentedButtons,
-  Text,
-} from "react-native-paper";
+import { Avatar, Button, Card, Divider, Text } from "react-native-paper";
 import { SpsHeader } from "../../../../src/features/sps/spsHeader";
 
 export default function UserAuthorisationScreen() {
   const { uid } = useLocalSearchParams();
   const router = useRouter();
-  const {
-    user: manager,
-    workbases: managerWorkbases,
-    profile: managerProfile,
-  } = useAuth();
+  const { profile: managerProfile } = useAuth();
 
   const { data: allUsers = [] } = useGetUsersQuery();
-  const [updateProfile, { isLoading }] = useUpdateProfileMutation();
+  const [authorizeFwr, { isLoading }] = useAuthorizeFwrMutation();
 
   const [recruit, setRecruit] = useState(null);
-  const [assignedRole, setAssignedRole] = useState("");
 
   useEffect(() => {
     const found = allUsers.find((u) => u.uid === uid);
     if (found) {
       setRecruit(found);
-      setAssignedRole(found.employment?.role || "FWR");
     }
   }, [allUsers, uid]);
 
+  let authorizerName = "NAv";
   const handleAction = async (approve = true) => {
-    const authorizerName =
-      managerProfile?.profile?.displayName || manager?.email || "Manager";
+    authorizerName = managerProfile?.profile?.displayName || "Manager";
 
     try {
       if (approve) {
-        await updateProfile({
-          uid,
-          update: {
-            accountStatus: "ACTIVE",
-            "onboarding.status": "COMPLETED",
-            "employment.role": assignedRole, // 🎯 Final Role Assignment
-            "access.workbases": managerWorkbases, // 🏹 Inheritance
-            "access.activeWorkbase": managerWorkbases[0] || null,
-            "metadata.updatedAt": new Date().toISOString(),
-            "metadata.updatedByUser": authorizerName,
-          },
-        }).unwrap();
-        Alert.alert("Success", "Operative mobilized to the field.");
+        await authorizeFwr({ uid }).unwrap();
+
+        Alert.alert(
+          "Success",
+          "Field worker authorized. Workbase selection required.",
+        );
       } else {
-        // ⚔️ REJECTION LOGIC
-        await updateProfile({
-          uid,
-          update: {
-            accountStatus: "REJECTED",
-            "onboarding.status": "REJECTED",
-            "metadata.updatedAt": new Date().toISOString(),
-            "metadata.updatedByUser": authorizerName,
-          },
-        }).unwrap();
-        Alert.alert("Rejected", "Recruit has been barred from entry.");
+        Alert.alert("Rejected", "Reject flow is not wired yet.");
       }
+
       router.back();
     } catch (err) {
-      Alert.alert("Error", "Command execution failed.");
+      Alert.alert("Error", err?.message || "Command execution failed.");
     }
   };
 
@@ -84,7 +55,7 @@ export default function UserAuthorisationScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <Card style={styles.card}>
           <View style={styles.avatarContainer}>
-            <Avatar.Text label={recruit.profile?.name[0]} size={80} />
+            <Avatar.Text label={recruit.profile?.name?.[0] || "?"} size={80} />
             <Text style={styles.userName}>
               {recruit.profile?.name} {recruit.profile?.surname}
             </Text>
@@ -96,36 +67,33 @@ export default function UserAuthorisationScreen() {
           <Text style={styles.sectionTitle}>IDENTITY DATA</Text>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Cell:</Text>
-            <Text>{recruit.contact?.cell || "N/A"}</Text>
+            <Text>{recruit.contact?.cell || "NAv"}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>ID Number:</Text>
             <Text>{recruit.profile?.idNumber || "Not Provided"}</Text>
           </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Role:</Text>
+            <Text>{recruit.employment?.role || "NAv"}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Service Provider:</Text>
+            <Text>{recruit.employment?.serviceProvider?.name || "NAv"}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Status:</Text>
+            <Text>{recruit.onboarding?.status || "NAv"}</Text>
+          </View>
 
           <Divider style={styles.divider} />
 
-          <Text style={styles.sectionTitle}>COMMAND CLASSIFICATION</Text>
+          <Text style={styles.sectionTitle}>AUTHORIZATION</Text>
           <Text style={styles.subLabel}>
-            Set operational rank for this operative:
+            Approving this recruit will activate the field worker and require
+            workbase selection before onboarding is complete.
           </Text>
-          <SegmentedButtons
-            value={assignedRole}
-            onValueChange={setAssignedRole}
-            buttons={[
-              {
-                value: "FWR",
-                label: "Field Worker (FWR)",
-                icon: "account-hard-hat",
-              },
-              {
-                value: "SPV",
-                label: "Supervisor (SPV)",
-                icon: "shield-account",
-              },
-            ]}
-            style={styles.segmented}
-          />
+          <Text style={styles.subLabel}>Authorized by: {authorizerName}</Text>
         </Card>
 
         <View style={styles.actionRow}>
@@ -138,6 +106,7 @@ export default function UserAuthorisationScreen() {
           >
             REJECT
           </Button>
+
           <Button
             mode="contained"
             onPress={() => handleAction(true)}
@@ -146,7 +115,7 @@ export default function UserAuthorisationScreen() {
             loading={isLoading}
             disabled={isLoading}
           >
-            AUTHORIZE & MOBILIZE
+            AUTHORIZE
           </Button>
         </View>
       </ScrollView>
@@ -181,7 +150,6 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontWeight: "700", color: "#475569" },
   subLabel: { fontSize: 13, color: "#64748b", marginBottom: 10 },
-  segmented: { marginTop: 5 },
   actionRow: { flexDirection: "row", gap: 12, marginTop: 24 },
   btn: { flex: 1, borderRadius: 12 },
 });

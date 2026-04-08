@@ -1,12 +1,11 @@
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
-import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import {
   Avatar,
   Button,
   Chip,
-  List,
   Modal,
   Portal,
   Switch,
@@ -18,22 +17,109 @@ import { useGetUsersQuery } from "../../../../src/redux/usersApi";
 
 export default function UsersListScreen() {
   const router = useRouter();
-  const { isSPU, isADM } = useAuth();
-  const [roleFilter, setRoleFilter] = useState("ALL");
+  const { isSPU, isADM, isMNG } = useAuth();
+
   const [filterVisible, setFilterVisible] = useState(false);
 
-  // 🛰️ LIVE REGISTRY FETCH & MUTATIONS
+  // APPLIED FILTERS
+  const [appliedFilters, setAppliedFilters] = useState({
+    role: "ALL",
+    onboardingStatus: "ALL",
+    accountStatus: "ALL",
+    serviceProvider: "ALL",
+  });
+
+  // DRAFT FILTERS (inside modal)
+  const [draftFilters, setDraftFilters] = useState({
+    role: "ALL",
+    onboardingStatus: "ALL",
+    accountStatus: "ALL",
+    serviceProvider: "ALL",
+  });
+
   const { data: users = [], isLoading, error } = useGetUsersQuery();
   const [updateProfile] = useUpdateProfileMutation();
 
-  // 🛡️ SPU-SCHEMA LOCKED FILTERING
-  const filteredUsers = users?.filter((u) => {
-    if (roleFilter !== "ALL" && u?.employment?.role !== roleFilter)
-      return false;
-    return !!u?.profile;
-  });
+  const roleOptions = ["ALL", "SPU", "ADM", "MNG", "SPV", "FWR"];
 
-  // 🛡️ TARGET #7: ACCOUNT STATUS TOGGLE
+  const onboardingOptions = useMemo(() => {
+    const values = [
+      ...new Set(
+        (users || []).map((u) => u?.onboarding?.status).filter(Boolean),
+      ),
+    ].sort((a, b) => String(a).localeCompare(String(b)));
+
+    return ["ALL", ...values];
+  }, [users]);
+
+  const accountStatusOptions = useMemo(() => {
+    const values = [
+      ...new Set((users || []).map((u) => u?.accountStatus).filter(Boolean)),
+    ].sort((a, b) => String(a).localeCompare(String(b)));
+
+    return ["ALL", ...values];
+  }, [users]);
+
+  const serviceProviderOptions = useMemo(() => {
+    const values = [
+      ...new Set(
+        (users || [])
+          .map((u) => u?.employment?.serviceProvider?.name)
+          .filter(Boolean),
+      ),
+    ].sort((a, b) => String(a).localeCompare(String(b)));
+
+    return ["ALL", ...values];
+  }, [users]);
+
+  const filteredUsers = useMemo(() => {
+    return [...(users || [])]
+      .filter((u) => {
+        if (!u?.profile) return false;
+
+        if (
+          appliedFilters.role !== "ALL" &&
+          u?.employment?.role !== appliedFilters.role
+        ) {
+          return false;
+        }
+
+        if (
+          appliedFilters.onboardingStatus !== "ALL" &&
+          u?.onboarding?.status !== appliedFilters.onboardingStatus
+        ) {
+          return false;
+        }
+
+        if (
+          appliedFilters.accountStatus !== "ALL" &&
+          u?.accountStatus !== appliedFilters.accountStatus
+        ) {
+          return false;
+        }
+
+        if (
+          appliedFilters.serviceProvider !== "ALL" &&
+          u?.employment?.serviceProvider?.name !==
+            appliedFilters.serviceProvider
+        ) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a?.metadata?.updatedAt || 0).getTime();
+        const bTime = new Date(b?.metadata?.updatedAt || 0).getTime();
+        return bTime - aTime;
+      });
+  }, [users, appliedFilters]);
+
+  const activeFilterCount = useMemo(() => {
+    return Object.values(appliedFilters).filter((value) => value !== "ALL")
+      .length;
+  }, [appliedFilters]);
+
   const handleToggleStatus = async (user, currentStatus) => {
     const newStatus = currentStatus === "DISABLED" ? "ACTIVE" : "DISABLED";
     try {
@@ -41,26 +127,84 @@ export default function UsersListScreen() {
         uid: user.uid,
         updates: { accountStatus: newStatus },
       }).unwrap();
-      // 🚀 Email Alert logic should be triggered by Firestore Cloud Function on this update
     } catch (err) {
       console.error("Failed to override user status:", err);
     }
   };
 
-  if (isLoading)
+  const openFilterModal = () => {
+    setDraftFilters(appliedFilters);
+    setFilterVisible(true);
+  };
+
+  const applyFilters = () => {
+    setAppliedFilters(draftFilters);
+    setFilterVisible(false);
+  };
+
+  const clearFilters = () => {
+    const cleared = {
+      role: "ALL",
+      onboardingStatus: "ALL",
+      accountStatus: "ALL",
+      serviceProvider: "ALL",
+    };
+    setDraftFilters(cleared);
+    setAppliedFilters(cleared);
+    setFilterVisible(false);
+  };
+
+  const setDraftValue = (key, value) => {
+    setDraftFilters((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const renderOptionChips = (options = [], selectedValue, onSelect) => {
+    return (
+      <View style={styles.chipsWrap}>
+        {options.map((option) => {
+          const isSelected = option === selectedValue;
+
+          return (
+            <Chip
+              key={option}
+              mode={isSelected ? "flat" : "outlined"}
+              selected={isSelected}
+              onPress={() => onSelect(option)}
+              style={[
+                styles.filterChip,
+                isSelected && styles.filterChipSelected,
+              ]}
+              textStyle={[
+                styles.filterChipText,
+                isSelected && styles.filterChipTextSelected,
+              ]}
+            >
+              {String(option).replace(/_/g, " ")}
+            </Chip>
+          );
+        })}
+      </View>
+    );
+  };
+
+  if (isLoading) {
     return <Text style={styles.center}>Synchronizing Registry...</Text>;
-  if (error) return <Text style={styles.center}>Registry Access Denied</Text>;
+  }
+
+  if (error) {
+    return <Text style={styles.center}>Registry Access Denied</Text>;
+  }
 
   return (
     <View style={styles.container}>
-      {/* 🛠️ HEADER CONTROLS */}
+      {/* HEADER CONTROLS */}
       <View style={styles.header}>
-        <Pressable
-          style={styles.filterTrigger}
-          onPress={() => setFilterVisible(true)}
-        >
-          <Text style={{ color: "#64748b", fontWeight: "700" }}>
-            Tier: {roleFilter}
+        <Pressable style={styles.filterTrigger} onPress={openFilterModal}>
+          <Text style={styles.filterTriggerText}>
+            Broad Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
           </Text>
         </Pressable>
 
@@ -75,6 +219,7 @@ export default function UsersListScreen() {
               + Admin
             </Button>
           )}
+
           {(isSPU || isADM) && (
             <Button
               mode="contained-tonal"
@@ -85,10 +230,37 @@ export default function UsersListScreen() {
               + Manager
             </Button>
           )}
+
+          {isMNG && (
+            <Button
+              mode="contained-tonal"
+              compact
+              onPress={() => router.push("/admin/users/create-supervisor")}
+              style={styles.actionBtn}
+            >
+              + Supervisor
+            </Button>
+          )}
         </View>
       </View>
 
-      {/* 📋 THE SOVEREIGN LIST */}
+      {/* ACTIVE FILTER SUMMARY */}
+      <View style={styles.summaryRow}>
+        <Chip style={styles.summaryChip}>
+          Role: {appliedFilters.role.replace(/_/g, " ")}
+        </Chip>
+        <Chip style={styles.summaryChip}>
+          Onboarding: {appliedFilters.onboardingStatus.replace(/_/g, " ")}
+        </Chip>
+        <Chip style={styles.summaryChip}>
+          Account: {appliedFilters.accountStatus.replace(/_/g, " ")}
+        </Chip>
+        <Chip style={styles.summaryChip}>
+          SP: {appliedFilters.serviceProvider}
+        </Chip>
+      </View>
+
+      {/* THE LIST */}
       <FlashList
         data={filteredUsers}
         keyExtractor={(item) => item?.uid || Math.random().toString()}
@@ -100,6 +272,8 @@ export default function UsersListScreen() {
           const workbase = item?.access?.activeWorkbase?.name || "Global";
           const onboardingStatus = item?.onboarding?.status || "PENDING";
           const accountStatus = item?.accountStatus || "ACTIVE";
+          const serviceProvider =
+            item?.employment?.serviceProvider?.name || "NAv";
 
           return (
             <Pressable
@@ -150,17 +324,26 @@ export default function UsersListScreen() {
                 </View>
               </View>
 
-              {/* FOOTER: ACCOUNT CONTROL (TARGET #7) */}
+              {/* FOOTER */}
               <View style={styles.cardFooter}>
-                <View style={styles.operationalInfo}>
+                <View style={styles.footerBlock}>
                   <Text style={styles.contextLabel}>ACCOUNT STATUS</Text>
                   <Text
                     style={[
                       styles.accountStatusText,
                       accountStatus === "DISABLED" && { color: "#ef4444" },
+                      accountStatus === "PENDING" && { color: "#2563eb" },
+                      accountStatus === "REJECTED" && { color: "#dc2626" },
                     ]}
                   >
                     {accountStatus}
+                  </Text>
+                </View>
+
+                <View style={styles.footerBlock}>
+                  <Text style={styles.contextLabel}>SERVICE PROVIDER</Text>
+                  <Text style={styles.contextValue} numberOfLines={1}>
+                    {serviceProvider}
                   </Text>
                 </View>
 
@@ -184,7 +367,7 @@ export default function UsersListScreen() {
         }
       />
 
-      {/* 🏛️ ROLE SELECTION PORTAL */}
+      {/* BROAD FILTER MODAL */}
       <Portal>
         <Modal
           visible={filterVisible}
@@ -192,24 +375,45 @@ export default function UsersListScreen() {
           contentContainerStyle={styles.modal}
         >
           <Text variant="titleMedium" style={styles.modalTitle}>
-            Select Operational Tier
+            Broad Filter
           </Text>
-          {["ALL", "SPU", "ADM", "MNG", "SPV", "FWR"].map((role) => (
-            <List.Item
-              key={role}
-              title={role}
-              onPress={() => {
-                setRoleFilter(role);
-                setFilterVisible(false);
-              }}
-              right={(props) =>
-                role === roleFilter ? (
-                  <List.Icon {...props} icon="check" color="#2563eb" />
-                ) : null
-              }
-            />
-          ))}
-          <Button onPress={() => setFilterVisible(false)}>Close</Button>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={styles.modalSectionTitle}>Role</Text>
+            {renderOptionChips(roleOptions, draftFilters.role, (value) =>
+              setDraftValue("role", value),
+            )}
+
+            <Text style={styles.modalSectionTitle}>Onboarding Status</Text>
+            {renderOptionChips(
+              onboardingOptions,
+              draftFilters.onboardingStatus,
+              (value) => setDraftValue("onboardingStatus", value),
+            )}
+
+            <Text style={styles.modalSectionTitle}>Account Status</Text>
+            {renderOptionChips(
+              accountStatusOptions,
+              draftFilters.accountStatus,
+              (value) => setDraftValue("accountStatus", value),
+            )}
+
+            <Text style={styles.modalSectionTitle}>Service Provider</Text>
+            {renderOptionChips(
+              serviceProviderOptions,
+              draftFilters.serviceProvider,
+              (value) => setDraftValue("serviceProvider", value),
+            )}
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+            <Button mode="outlined" onPress={clearFilters}>
+              Clear Filters
+            </Button>
+            <Button mode="contained" onPress={applyFilters}>
+              Apply Filters
+            </Button>
+          </View>
         </Modal>
       </Portal>
     </View>
@@ -222,7 +426,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   actions: { flexDirection: "row", gap: 8 },
   actionBtn: { borderRadius: 8 },
@@ -233,6 +437,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#e2e8f0",
+  },
+  filterTriggerText: {
+    color: "#64748b",
+    fontWeight: "700",
+  },
+  summaryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 12,
+  },
+  summaryChip: {
+    backgroundColor: "#eef2ff",
   },
   userCard: {
     backgroundColor: "#fff",
@@ -280,13 +497,16 @@ const styles = StyleSheet.create({
   },
   cardFooter: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     borderTopWidth: 1,
     borderColor: "#f1f5f9",
     paddingTop: 10,
+    gap: 12,
   },
-  operationalInfo: { flex: 1 },
+  footerBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
   accountStatusText: {
     fontSize: 11,
     fontWeight: "900",
@@ -307,7 +527,47 @@ const styles = StyleSheet.create({
     padding: 20,
     margin: 20,
     borderRadius: 16,
+    maxHeight: "80%",
   },
-  modalTitle: { marginBottom: 16, fontWeight: "900", color: "#1e293b" },
+  modalTitle: {
+    marginBottom: 16,
+    fontWeight: "900",
+    color: "#1e293b",
+  },
+  modalSectionTitle: {
+    marginTop: 8,
+    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  chipsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  filterChip: {
+    backgroundColor: "#fff",
+  },
+  filterChipSelected: {
+    backgroundColor: "#dbeafe",
+    borderColor: "#93c5fd",
+  },
+  filterChipText: {
+    color: "#475569",
+    fontWeight: "700",
+  },
+  filterChipTextSelected: {
+    color: "#1d4ed8",
+    fontWeight: "900",
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 18,
+  },
   switchContainer: { paddingLeft: 10 },
 });

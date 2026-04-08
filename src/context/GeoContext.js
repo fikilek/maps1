@@ -12,6 +12,31 @@ import { useGetLocalMunicipalityByIdQuery } from "../redux/geoApi";
 
 export const GeoContext = createContext(null);
 
+// DEFAULT GEO BOOT MODEL
+// Stage 0: LM unknown, Ward unknown
+//   - selectedLm = null
+//   - selectedWard = null
+//   - selectedErf = null
+//   - selectedPremise = null
+//   - selectedMeter = null
+//
+// Stage 1: LM known from user workbase, Ward unknown
+//   - selectedLm = user workbase
+//   - selectedWard = null
+//   - selectedErf = null
+//   - selectedPremise = null
+//   - selectedMeter = null
+//
+// Stage 2: LM known, Ward manually selected
+//   - selectedLm = active LM
+//   - selectedWard = active Ward
+//   - selectedErf = null
+//   - selectedPremise = null
+//   - selectedMeter = null
+//
+// IMPORTANT:
+// Warehouse operational data must remain closed until both LM and Ward exist.
+
 const INITIAL_GEO = {
   selectedLm: null,
   selectedWard: null,
@@ -29,22 +54,6 @@ export const GeoProvider = ({ children }) => {
 
   const [geoState, setGeoState] = useState(INITIAL_GEO);
 
-  // useEffect(() => {
-  //   console.log(` `);
-  //   console.log("GeoProvider -- selectedLm?.name", geoState.selectedLm?.name);
-  //   console.log("GeoProvider -- selectedWard", geoState.selectedWard);
-  //   console.log("GeoProvider -- flightSignal", geoState.flightSignal);
-  // }, [
-  //   geoState.selectedLm?.id,
-  //   geoState.selectedLm?.name,
-  //   geoState.selectedWard?.id,
-  //   geoState.flightSignal,
-  // ]);
-
-  // 1) BOOT: set placeholder LM immediately when workbaseId appears/changes
-  // IMPORTANT:
-  // only do this when there is no current LM yet.
-  // This avoids stomping on manual LM+Ward scope switches.
   useEffect(() => {
     if (!profile) {
       setGeoState(INITIAL_GEO);

@@ -13,7 +13,13 @@ import {
 import { IrepsCamera } from "./IrepsCamera";
 
 // 🎯 1. Accept the 'name' prop
-export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
+export const IrepsMedia = ({
+  name = "media",
+  tag,
+  agentName,
+  agentUid,
+  fallbackGps,
+}) => {
   const { values, errors, setFieldValue } = useFormikContext();
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
 
@@ -25,17 +31,22 @@ export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
   const mediaError = getIn(errors, name);
   const mediaErrorText = typeof mediaError === "string" ? mediaError : "";
 
+  const normalizedError = String(mediaErrorText || "").toLowerCase();
+
   const isTargetedError =
-    (tag === "astNoPhoto" && mediaErrorText.includes("Meter")) ||
-    (tag === "anomalyPhoto" && mediaErrorText.includes("Anomaly")) ||
-    (tag === "noAccessPhoto" && mediaErrorText.includes("No Access")) ||
-    (tag === "keypadPhoto" && mediaErrorText.includes("Keypad")) ||
-    (tag === "astCbPhoto" && mediaErrorText.includes("Circuit Breaker")) ||
-    (tag === "ogsPhoto" && mediaErrorText.includes("Off Grid Supply")) ||
+    (tag === "astNoPhoto" && normalizedError.includes("meter")) ||
+    (tag === "anomalyPhoto" && normalizedError.includes("anomaly")) ||
+    (tag === "noAccessPhoto" && normalizedError.includes("no access")) ||
+    (tag === "keypadPhoto" && normalizedError.includes("keypad")) ||
+    (tag === "astCbPhoto" && normalizedError.includes("circuit breaker")) ||
+    (tag === "ogsPhoto" && normalizedError.includes("off-grid supply")) ||
     (tag === "normalisationPhoto" &&
-      mediaErrorText.includes("Normalisation")) ||
-    (tag === "propertyTypePhoto" && mediaErrorText.includes("Property Type")) ||
-    (tag === "propertyAdrPhoto" && mediaErrorText.includes("Property Address"));
+      normalizedError.includes("normalisation")) ||
+    (tag === "propertyTypePhoto" &&
+      normalizedError.includes("property type")) ||
+    (tag === "propertyAdrPhoto" &&
+      normalizedError.includes("property address")) ||
+    (tag === "meterReadingPhoto" && normalizedError.includes("meter reading"));
 
   const hasError = !!mediaErrorText && isTargetedError && !capturedPhoto;
 
@@ -53,9 +64,9 @@ export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
           tag={tag}
           agentName={agentName}
           agentUid={agentUid}
+          fallbackGps={fallbackGps}
         />
       </View>
-      {/* ... rest of your UI code remains the same ... */}
 
       {/* RIGHT: The Forensic Ribbon */}
       <View style={styles.ribbonSlot}>
@@ -67,7 +78,7 @@ export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
           >
             <Image
               key={capturedPhoto?.uri}
-              source={{ uri: capturedPhoto?.uri }}
+              source={{ uri: capturedPhoto?.url || capturedPhoto?.uri || null }}
               style={styles.thumbnail}
             />
 
@@ -115,7 +126,7 @@ export const IrepsMedia = ({ name = "media", tag, agentName, agentUid }) => {
       >
         <View style={styles.fullScreenContainer}>
           <Image
-            source={{ uri: capturedPhoto?.uri }}
+            source={{ uri: capturedPhoto?.url || capturedPhoto?.uri || null }}
             style={styles.fullScreenImage}
             resizeMode="contain"
           />

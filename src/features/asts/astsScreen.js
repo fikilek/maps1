@@ -1,23 +1,29 @@
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-// 🎯 THE SOVEREIGN IMPORTS
-import { useAuth } from "../../../src/hooks/useAuth"; // ⬅️ Added for stability
 import { useWarehouse } from "../../context/WarehouseContext";
 import AstItem from "./astItem";
 
 export default function AstsScreen() {
-  // 🛡️ THE FIX: Use activeWorkbase so the list is NEVER blank
-  const { activeWorkbase } = useAuth();
-  const lmPcode = activeWorkbase?.id;
-  const { filtered, loading: isLoading, isError } = useWarehouse(); // 👈 Ensure warehouse context is initialized
-  const asts = filtered.meters || [];
-  // const {
-  //   data: asts,
-  //   isLoading,
-  //   isError,
-  // } = useGetAstsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
+  console.log("AstsScreen --mounting");
+
+  const { filtered, sync, loading } = useWarehouse();
+
+  const asts = filtered?.meters || [];
+  const scopeSync = sync?.scope || {};
+
+  const isLoading = loading;
+  const noWard = scopeSync?.status === "awaiting-ward";
+
+  if (noWard) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <Text style={styles.loadingText}>
+          Select a ward to view field meters.
+        </Text>
+      </View>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -28,38 +34,19 @@ export default function AstsScreen() {
     );
   }
 
-  if (isError) {
-    return (
-      <View style={[styles.container, styles.center]}>
-        <MaterialCommunityIcons
-          name="alert-circle-outline"
-          size={48}
-          color="#EF4444"
-        />
-        <Text style={styles.errorText}>Registry Link Failure</Text>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <FlashList
         data={asts}
         renderItem={({ item }) => <AstItem item={item} />}
+        keyExtractor={(item) => item?.id}
         estimatedItemSize={120}
-        contentContainerStyle={{ padding: 16 }}
-        ListEmptyComponent={() => (
-          <View style={styles.center}>
-            <MaterialCommunityIcons
-              name="database-off-outline"
-              size={48}
-              color="#CBD5E1"
-            />
-            <Text style={styles.subtitle}>
-              No assets found in {activeWorkbase?.name || "this area"}.
-            </Text>
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16 }}
+        ListEmptyComponent={
+          <View style={[styles.center, { paddingTop: 40 }]}>
+            <Text style={styles.loadingText}>No meters in this ward.</Text>
           </View>
-        )}
+        }
       />
     </View>
   );

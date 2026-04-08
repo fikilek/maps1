@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Button } from "react-native-paper";
 
-export const ForensicFooter = ({ isTrnLoading, isSuccess }) => {
+export const ForensicFooter = ({ isTrnLoading }) => {
   // const navigation = useNavigation();
   // const { handleSubmit, isValid, dirty, resetForm } = useFormikContext();
   const { handleSubmit, isValid, dirty, resetForm, isSubmitting } =

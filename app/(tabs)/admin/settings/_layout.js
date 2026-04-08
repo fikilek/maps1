@@ -21,6 +21,7 @@ export default function SettingsLayout() {
           headerTitle: "Dropdown Management",
           // Optional: Add a close button if you want to jump back to Admin
           headerBackTitle: "Admin",
+          headerShown: false,
         }}
       />
     </Stack>

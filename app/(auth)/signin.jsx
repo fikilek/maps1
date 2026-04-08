@@ -1,6 +1,5 @@
 import { Octicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
 import { Formik } from "formik";
 import { useState } from "react";
 import {
@@ -29,24 +28,29 @@ const Signin = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const isLoading = isMutationLoading || isRedirecting;
-  const router = useRouter();
 
   const handleSubmit = async (values, { resetForm }) => {
+    // console.log("Signin --values", values);
+
     try {
       setIsRedirecting(true);
+
       const result = await signin({
         email: values.email.toLowerCase().trim(),
-        password: values.password,
+        password: values.password.trim(),
       }).unwrap();
 
       if (result) {
         await auth.currentUser.getIdToken(true);
-        console.log(` `);
-        console.log(`Signin ---successful, navigating to /(tabs)/erfs`);
-        router.replace("/(tabs)/erfs");
+        console.log("Signin ---successful, waiting for AuthGate");
         resetForm();
+        return;
       }
+
+      setIsRedirecting(false);
+      Alert.alert("Access Denied", "Invalid credentials.");
     } catch (err) {
+      console.log("Signin ---failed", err);
       setIsRedirecting(false);
       Alert.alert("Access Denied", err?.message || "Invalid credentials.");
     }

@@ -18,12 +18,12 @@ import ServiceProviderSelect, {
   gstSignupValidationSchema,
 } from "../../src/features/userHelper";
 import { auth } from "../../src/firebase";
-import { useSignupGstMutation } from "../../src/redux/authApi";
+import { useSignupMutation } from "../../src/redux/authApi";
 import { useGetServiceProvidersQuery } from "../../src/redux/spApi"; // 🛰️ Added
 
 const Signup = () => {
   const router = useRouter();
-  const [signupGst, { isLoading: isMutationLoading }] = useSignupGstMutation();
+  const [signupGst, { isLoading: isMutationLoading }] = useSignupMutation();
   const [showPassword, setShowPassword] = useState(false);
 
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -217,11 +217,6 @@ const Signup = () => {
                       marginBottom: 5,
                     }}
                   >
-                    <Text
-                      style={{ fontSize: 12, fontWeight: "700", color: "gray" }}
-                    >
-                      Service Provider
-                    </Text>
                     {isSpLoading && (
                       <ActivityIndicator size="small" color="#2563eb" />
                     )}

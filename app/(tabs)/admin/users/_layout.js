@@ -8,7 +8,7 @@ export default function UsersLayout() {
         options={{
           title: "Users",
           presentation: "card",
-          headerShown: true,
+          headerShown: false,
         }}
       />
 

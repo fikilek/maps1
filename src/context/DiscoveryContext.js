@@ -12,11 +12,11 @@ const DiscoveryContext = createContext(null);
 export function DiscoveryProvider({ children }) {
   const [isVisible, setIsVisible] = useState(false);
 
-  // Mission payload
   const [mission, setMission] = useState({
     premiseId: null,
+    premise: null,
     hasAccess: null,
-    meterType: null, // "water" | "electricity"
+    meterType: null,
   });
   // console.log(`mission`, mission);
 
@@ -32,6 +32,12 @@ export function DiscoveryProvider({ children }) {
 
   const closeMissionDiscovery = useCallback(() => {
     setIsVisible(false);
+    setMission({
+      premiseId: null,
+      premise: null,
+      hasAccess: null,
+      meterType: null,
+    });
   }, []);
 
   const value = useMemo(

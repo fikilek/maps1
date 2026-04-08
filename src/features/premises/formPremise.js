@@ -1,7 +1,8 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import { Formik } from "formik";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -17,6 +18,7 @@ import FormInput from "../../../components/forms/FormInput";
 import FormMapPositioner from "../../../components/forms/FormMapPositioner";
 import FormSelect from "../../../components/forms/FormSelect";
 import { IrepsMedia } from "../../../components/media/IrepsMedia";
+import { ScreenLock } from "../../../components/SceenLock";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import { useAuth } from "../../hooks/useAuth";
@@ -36,7 +38,6 @@ const streetTypeOptions = [
   "Way",
   "Boulevard",
   "Crescent",
-  "Backroom",
 ];
 const propertyTypeOptions = [
   "Select...",
@@ -51,6 +52,7 @@ const propertyTypeOptions = [
   "Church",
   "School",
   "Government",
+  "Backroom",
 ];
 
 const premiseOccupancySatusOptions = [
@@ -61,8 +63,6 @@ const premiseOccupancySatusOptions = [
   `Under Construction`,
   `Dilapidated`,
 ];
-
-// 🏛️ Schema Validation (Yup)
 
 function hasTaggedMedia(media, tag) {
   if (!Array.isArray(media)) return false;
@@ -117,6 +117,8 @@ function requiresUnitNo(type) {
 export default function FormPremise() {
   // console.log(`FormPremise ----mounted`);
 
+  const [inProgress, setInProgress] = useState(false);
+
   const { all } = useWarehouse();
 
   const router = useRouter();
@@ -134,12 +136,14 @@ export default function FormPremise() {
   }, [premiseId, duplicateId, all?.prems]);
 
   const { profile, user } = useAuth();
+  // console.log(`profile?.profile?.displayName`, profile?.profile?.displayName);
+  // console.log(`user`, user);
 
   const agentUid = user?.uid || "unknown_uid";
-  console.log(`agentUid`, agentUid);
+  // console.log(`agentUid`, agentUid);
 
-  const agentName = profile?.displayName || "Field Agent";
-  console.log(`agentName`, agentName);
+  const agentName = profile?.profile?.displayName || "Field Agent";
+  // console.log(`agentName`, agentName);
 
   const { geoState, updateGeo } = useGeo();
 
@@ -405,6 +409,8 @@ export default function FormPremise() {
       "UNK";
 
     const safeErfNo = String(erfNo || "N-A").replace(/\//g, "-");
+    // console.log(`safeErfNo`, safeErfNo);
+    // console.log(`wardNo`, wardNo);
 
     const generatedId = `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`;
 
@@ -465,142 +471,181 @@ export default function FormPremise() {
       },
     };
   }
+
   const handleSubmit = async (values, { setSubmitting }) => {
+    setInProgress(true);
     try {
+      const storage = getStorage();
       const systemFields = buildSystemFields();
+      const premiseDocId = systemFields.id;
 
-      const finalValues = {
-        ...systemFields,
+      const syncedMedia = await Promise.all(
+        (values?.media || []).map(async (item) => {
+          if (item?.uri && !item?.url) {
+            const fileName = `${premiseDocId}_${item.tag}_${Date.now()}.jpg`;
+            const storageRef = ref(
+              storage,
+              `premises/${premiseDocId}/${fileName}`,
+            );
 
-        context: values.context,
+            const response = await fetch(item.uri);
+            const blob = await response.blob();
 
-        address: {
-          strNo: String(values?.address?.strNo || "").trim(),
-          strName: String(values?.address?.strName || "").trim(),
-          strType: values?.address?.strType || "Select...",
-        },
+            await uploadBytes(storageRef, blob);
+            const downloadUrl = await getDownloadURL(storageRef);
 
-        propertyType: {
-          type: values?.propertyType?.type || "Select...",
-          name: String(values?.propertyType?.name || "").trim(),
-          unitNo: String(values?.propertyType?.unitNo || "").trim(),
-        },
+            const { uri, ...cleanItem } = item;
 
-        occupancy: {
-          status: values?.occupancy?.status || "Occupied",
-        },
+            return {
+              ...cleanItem,
+              url: downloadUrl,
+            };
+          }
 
-        geometry: {
-          centroid: {
-            lat: values?.geometry?.centroid?.lat,
-            lng: values?.geometry?.centroid?.lng,
+          return item;
+        }),
+      );
+
+      const finalValues = JSON.parse(
+        JSON.stringify(
+          {
+            ...systemFields,
+
+            context: values.context,
+
+            address: {
+              strNo: String(values?.address?.strNo || "").trim(),
+              strName: String(values?.address?.strName || "").trim(),
+              strType: values?.address?.strType || "Select...",
+            },
+
+            propertyType: {
+              type: values?.propertyType?.type || "Select...",
+              name: String(values?.propertyType?.name || "").trim(),
+              unitNo: String(values?.propertyType?.unitNo || "").trim(),
+            },
+
+            occupancy: {
+              status: values?.occupancy?.status || "Occupied",
+            },
+
+            geometry: {
+              centroid: {
+                lat: values?.geometry?.centroid?.lat,
+                lng: values?.geometry?.centroid?.lng,
+              },
+            },
+
+            media: syncedMedia,
           },
-        },
-
-        media: Array.isArray(values?.media) ? values.media : [],
-      };
+          (key, value) => (value === undefined ? null : value),
+        ),
+      );
 
       if (isEdit) {
         await updatePremise(finalValues).unwrap();
       } else {
         await addPremise(finalValues).unwrap();
       }
-
-      // updateGeo({
-      //   selectedPremise: finalValues,
-      //   lastSelectionType: "PREMISE",
-      // });
-
+      updateGeo({ selectedErf: null, lastSelectionType: "ERF" });
+      ToastAndroid.show("Premise saved.", ToastAndroid.LONG);
       router.replace("/(tabs)/premises");
     } catch (err) {
       console.warn(`🛰️Could not save premise form: ${err.message}`);
       ToastAndroid.show("Could not save premise form.", ToastAndroid.LONG);
     } finally {
       setSubmitting(false);
+      setInProgress(false);
     }
   };
+
   return (
-    <Formik
-      initialValues={initialValues}
-      validationSchema={premiseSchema}
-      validateOnMount={true}
-      onSubmit={handleSubmit}
-    >
-      {({ setFieldValue, values, isSubmitting, errors }) => {
-        // console.log(`FormPremise --errors`, errors);
-        // console.log(`FormPremise --values`, values);
-        return (
-          <View style={styles.container}>
-            <Stack.Screen
-              options={{
-                title: isEdit ? "Edit Premise" : "New Premise", // Improved UI clarity
-                headerRight: () => (
-                  <View style={styles.headerErfBadge}>
-                    <Text style={styles.headerErfText}>ERF: {erfNo}</Text>
-                  </View>
-                ),
-                headerLeft: () => (
-                  <Pressable
-                    onPress={() => router.back()}
-                    style={styles.backBtn}
-                  >
-                    <Ionicons name="chevron-back" size={28} color="#1e293b" />
-                  </Pressable>
-                ),
-              }}
-            />
+    <>
+      <ScreenLock
+        visible={inProgress}
+        title="SYNCING"
+        status="Uploading premise form data..."
+      />
 
-            <ScrollView contentContainerStyle={styles.formScroll}>
-              {/* Property Clasification */}
-              <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons
-                  name="office-building-marker"
-                  size={18}
-                  color="#059669"
-                />
-                <Text style={styles.sectionTitle}>PROPERTY CLASSIFICATION</Text>
-              </View>
-              <Surface style={styles.card} elevation={1}>
-                {/* PROPERTY CONTEXT [Township / Suburb] */}
-                <Surface style={styles.card} elevation={1}>
-                  {/* 🏙️ TOWNSHIP / SUBURB TOGGLE ROW */}
-                  <TouchableOpacity
-                    // 🛡️ Lock interaction if the form is in flight
-                    disabled={isSubmitting}
-                    style={styles.toggleRow}
-                    activeOpacity={0.7}
-                    onPress={() =>
-                      setFieldValue(
-                        "context",
-                        values.context === "Township" ? "Suburb" : "Township",
-                      )
-                    }
-
-                    // onPress={() =>
-                    //   setFieldValue("isTownship", !values.isTownship)
-                    // }
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.toggleLabel}>
-                        {values.context === "Township" ? "Township" : "Suburb"}
-                      </Text>
-                      {/* <Text style={styles.toggleLabel}>
-                        {values.isTownship ? "Township" : "Suburb"}
-                      </Text> */}
-                      <Text style={{ fontSize: 10, color: "#94a3b8" }}>
-                        Tap row to toggle geographic context
-                      </Text>
+      <Formik
+        initialValues={initialValues}
+        validationSchema={premiseSchema}
+        validateOnMount={true}
+        onSubmit={handleSubmit}
+      >
+        {({ setFieldValue, values, isSubmitting, errors }) => {
+          // console.log(`FormPremise --errors`, errors);
+          // console.log(`FormPremise --values`, values);
+          return (
+            <View style={styles.container}>
+              <Stack.Screen
+                options={{
+                  title: isEdit ? "Edit Premise" : "New Premise", // Improved UI clarity
+                  headerRight: () => (
+                    <View style={styles.headerErfBadge}>
+                      <Text style={styles.headerErfText}>ERF: {erfNo}</Text>
                     </View>
+                  ),
+                  headerLeft: () => (
+                    <Pressable
+                      onPress={() => router.back()}
+                      style={styles.backBtn}
+                    >
+                      <Ionicons name="chevron-back" size={28} color="#1e293b" />
+                    </Pressable>
+                  ),
+                }}
+              />
 
-                    <Switch
-                      value={values.context === "Township"}
-                      color="#059669"
-                      onValueChange={(v) =>
-                        setFieldValue("context", v ? "Township" : "Suburb")
+              <ScrollView contentContainerStyle={styles.formScroll}>
+                {/* Property Clasification */}
+                <View style={styles.sectionHeader}>
+                  <MaterialCommunityIcons
+                    name="office-building-marker"
+                    size={18}
+                    color="#059669"
+                  />
+                  <Text style={styles.sectionTitle}>
+                    PROPERTY CLASSIFICATION
+                  </Text>
+                </View>
+                <Surface style={styles.card} elevation={1}>
+                  {/* PROPERTY CONTEXT [Township / Suburb] */}
+                  <Surface style={styles.card} elevation={1}>
+                    {/* 🏙️ TOWNSHIP / SUBURB TOGGLE ROW */}
+                    <TouchableOpacity
+                      // 🛡️ Lock interaction if the form is in flight
+                      disabled={isSubmitting}
+                      style={styles.toggleRow}
+                      activeOpacity={0.7}
+                      onPress={() =>
+                        setFieldValue(
+                          "context",
+                          values.context === "Township" ? "Suburb" : "Township",
+                        )
                       }
-                    />
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.toggleLabel}>
+                          {values.context === "Township"
+                            ? "Township"
+                            : "Suburb"}
+                        </Text>
 
-                    {/* <Switch
+                        <Text style={{ fontSize: 10, color: "#94a3b8" }}>
+                          Tap row to toggle geographic context
+                        </Text>
+                      </View>
+
+                      <Switch
+                        value={values.context === "Township"}
+                        color="#059669"
+                        onValueChange={(v) =>
+                          setFieldValue("context", v ? "Township" : "Suburb")
+                        }
+                      />
+
+                      {/* <Switch
                       value={values.isTownship}
                       color="#059669"
                       // Keep this for direct toggle hits
@@ -608,122 +653,125 @@ export default function FormPremise() {
                       // 🛡️ Prevent the Switch from blocking the row tap on some Android versions
                       pointerEvents="none"
                     /> */}
-                  </TouchableOpacity>
-                </Surface>
-                <FormSelect
-                  label="Property Status"
-                  name="occupancy.status"
-                  options={premiseOccupancySatusOptions}
-                  icon="office-building-marker"
-                />
-
-                <Divider style={styles.divider} />
-
-                {/* PROPERTYTYPE type */}
-                <Surface style={styles.card} elevation={1}>
+                    </TouchableOpacity>
+                  </Surface>
                   <FormSelect
-                    label="Property Type"
-                    name="propertyType.type"
-                    options={propertyTypeOptions}
+                    label="Property Status"
+                    name="occupancy.status"
+                    options={premiseOccupancySatusOptions}
                     icon="office-building-marker"
                   />
 
                   <Divider style={styles.divider} />
-                  {/* PROPERTYTYPE unitName */}
-                  {requiresPropertyName(values?.propertyType?.type) && (
-                    <>
-                      <FormInput
-                        label="Unit Name"
-                        name="propertyType.name"
-                        placeholder="Unit Name"
-                        keyboardType="default"
-                      />
-                      <Divider style={styles.divider} />
-                    </>
-                  )}
 
-                  {requiresUnitNo(values?.propertyType?.type) && (
-                    <FormInput
-                      label="Unit Number"
-                      name="propertyType.unitNo"
-                      placeholder="Unit Number"
-                      keyboardType="default"
+                  {/* PROPERTYTYPE type */}
+                  <Surface style={styles.card} elevation={1}>
+                    <FormSelect
+                      label="Property Type"
+                      name="propertyType.type"
+                      options={propertyTypeOptions}
+                      icon="office-building-marker"
                     />
-                  )}
-                </Surface>
 
-                <IrepsMedia
-                  tag={"propertyTypePhoto"}
-                  agentName={agentName}
-                  agentUid={agentUid}
-                />
-              </Surface>
+                    <Divider style={styles.divider} />
+                    {/* PROPERTYTYPE unitName */}
+                    {requiresPropertyName(values?.propertyType?.type) && (
+                      <>
+                        <FormInput
+                          label="Unit Name"
+                          name="propertyType.name"
+                          placeholder="Unit Name"
+                          keyboardType="default"
+                        />
+                        <Divider style={styles.divider} />
+                      </>
+                    )}
 
-              {/* STREET ADDRESS */}
-              <View style={styles.sectionHeader}>
-                <MaterialCommunityIcons
-                  name="map-marker-radius"
-                  size={18}
-                  color="#059669"
-                />
-                <Text style={styles.sectionTitle}>STREET ADDRESS</Text>
-              </View>
-              <Surface style={styles.card} elevation={1}>
-                <Surface style={styles.card} elevation={1}>
-                  <View style={{ flexDirection: "row" }}>
-                    <View style={{ flex: 1 }}>
+                    {requiresUnitNo(values?.propertyType?.type) && (
                       <FormInput
-                        label="STR NO"
-                        name="address.strNo"
-                        placeholder="Str No"
+                        label="Unit Number"
+                        name="propertyType.unitNo"
+                        placeholder="Unit Number"
                         keyboardType="default"
                       />
-                    </View>
-                    <View style={{ flex: 2, marginLeft: 12 }}>
-                      <FormInput
-                        label="STR NAME"
-                        name="address.strName"
-                        placeholder="Str Name"
-                        autoCapitalize="words" // 🏛️ Auto-Title Case for Street Names
-                      />
-                    </View>
-                  </View>
+                    )}
+                  </Surface>
 
-                  <FormSelect
-                    label="STREET TYPE"
-                    name="address.strType"
-                    options={streetTypeOptions}
+                  <IrepsMedia
+                    tag={"propertyTypePhoto"}
+                    agentName={agentName}
+                    agentUid={agentUid}
+                    fallbackGps={values?.geometry?.centroid}
                   />
                 </Surface>
 
-                <IrepsMedia
-                  tag={"propertyAdrPhoto"}
-                  agentName={agentName}
-                  agentUid={agentUid}
-                />
-
+                {/* STREET ADDRESS */}
+                <View style={styles.sectionHeader}>
+                  <MaterialCommunityIcons
+                    name="map-marker-radius"
+                    size={18}
+                    color="#059669"
+                  />
+                  <Text style={styles.sectionTitle}>STREET ADDRESS</Text>
+                </View>
                 <Surface style={styles.card} elevation={1}>
-                  <FormMapPositioner
-                    label="Physical Premise Location"
-                    name="geometry.centroid"
-                    erfId={id}
-                    defaultLocation={erfCentroid}
-                  />
-                </Surface>
-              </Surface>
+                  <Surface style={styles.card} elevation={1}>
+                    <View style={{ flexDirection: "row" }}>
+                      <View style={{ flex: 1 }}>
+                        <FormInput
+                          label="STR NO"
+                          name="address.strNo"
+                          placeholder="Str No"
+                          keyboardType="default"
+                        />
+                      </View>
+                      <View style={{ flex: 2, marginLeft: 12 }}>
+                        <FormInput
+                          label="STR NAME"
+                          name="address.strName"
+                          placeholder="Str Name"
+                          autoCapitalize="words" // 🏛️ Auto-Title Case for Street Names
+                        />
+                      </View>
+                    </View>
 
-              {/* 🎯 THE SOVEREIGN FOOTER */}
-              {/* <Surface style={styles.card} elevation={1}>
+                    <FormSelect
+                      label="STREET TYPE"
+                      name="address.strType"
+                      options={streetTypeOptions}
+                    />
+                  </Surface>
+
+                  <IrepsMedia
+                    tag={"propertyAdrPhoto"}
+                    agentName={agentName}
+                    agentUid={agentUid}
+                    fallbackGps={values?.geometry?.centroid}
+                  />
+
+                  <Surface style={styles.card} elevation={1}>
+                    <FormMapPositioner
+                      label="Physical Premise Location"
+                      name="geometry.centroid"
+                      erfId={id}
+                      defaultLocation={erfCentroid}
+                    />
+                  </Surface>
+                </Surface>
+
+                {/* 🎯 THE SOVEREIGN FOOTER */}
+                {/* <Surface style={styles.card} elevation={1}>
                 <FormFooter />
               </Surface> */}
-              <ForensicFooter />
+                <ForensicFooter />
 
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          </View>
-        );
-      }}
-    </Formik>
+                <View style={{ height: 40 }} />
+              </ScrollView>
+            </View>
+          );
+        }}
+      </Formik>
+    </>
   );
 }
 

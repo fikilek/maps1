@@ -1,18 +1,20 @@
 import { useGeo } from "@/src/context/GeoContext";
-import { useGetTrnsByLmPcodeQuery } from "@/src/redux/trnsApi";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
-import { useMemo, useState } from "react";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import DateRangeModal from "../../../../components/DateRangeModal";
 import { ExportIntelligenceModal } from "../../../../components/ExportModal";
 import UserTrnsReportHeader from "../../../../components/UserTrnsReportHeader";
+import { db } from "../../../../src/firebase";
 
 export default function AnomalyReport() {
   const { geoState } = useGeo();
   const lmPcode = geoState?.selectedLm?.id;
+  const lmName = geoState?.selectedLm?.name || "Municipality";
 
   const [activeView, setActiveView] = useState("TABLE");
   const [showDateModal, setShowDateModal] = useState(false);
@@ -23,16 +25,113 @@ export default function AnomalyReport() {
   });
 
   const [isExportModalVisible, setIsExportModalVisible] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!lmPcode) {
+      setRows([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+
+    const reportRef = collection(db, "report_trn_anomaly");
+    const reportQuery = query(
+      reportRef,
+      where("parents.lmPcode", "==", lmPcode),
+    );
+
+    const unsubscribe = onSnapshot(
+      reportQuery,
+      (snapshot) => {
+        const data = snapshot.docs.map((doc) => {
+          const item = doc.data();
+
+          const anomalyName = item?.anomaly?.name || "NAv";
+          const anomalyDetail = item?.anomaly?.detail || "NAv";
+
+          return {
+            id: item?.id || doc.id,
+            activityDate: item?.activityDate || "NAv",
+            type: `${anomalyName.toUpperCase()} - ${anomalyDetail.toUpperCase()}`,
+            count: item?.counts?.trns || 0,
+            updatedAt: item?.metadata?.updatedAt || "NAv",
+          };
+        });
+
+        setRows(data);
+        setIsLoading(false);
+      },
+      (error) => {
+        console.log("anomaly-report snapshot error", error);
+        setRows([]);
+        setIsLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, [lmPcode]);
+
+  const normalizeDay = (value) => {
+    if (!value) return null;
+
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+
+    return date.toISOString().slice(0, 10);
+  };
+
+  const isWithinDateRange = (activityDate, start, end) => {
+    const day = normalizeDay(activityDate);
+    const startDay = normalizeDay(start);
+    const endDay = normalizeDay(end);
+
+    if (!day) return false;
+    if (!startDay && !endDay) return true;
+    if (startDay && day < startDay) return false;
+    if (endDay && day > endDay) return false;
+
+    return true;
+  };
+
+  const processedData = useMemo(() => {
+    const filtered = rows.filter((item) =>
+      isWithinDateRange(
+        item?.activityDate,
+        activeDateRange?.start,
+        activeDateRange?.end,
+      ),
+    );
+
+    return [...filtered].sort((a, b) => {
+      if ((b?.count || 0) !== (a?.count || 0)) {
+        return (b?.count || 0) - (a?.count || 0);
+      }
+
+      return (a?.type || "").localeCompare(b?.type || "");
+    });
+  }, [rows, activeDateRange]);
+
+  const totalCount = useMemo(() => {
+    return processedData.reduce((sum, item) => sum + (item.count || 0), 0);
+  }, [processedData]);
 
   const handleExport = async () => {
     try {
       const timestamp = new Date().toISOString().split("T")[0];
-      const lmName = geoState?.selectedLm?.name || "Municipality";
 
-      const rows = (processedData || []).map(
+      const exportRows = (processedData || []).map(
         (item) => `"${item.type}",${item.count}`,
       );
-      const csvContent = ["ANOMALY TYPE & DETAIL,COUNT", ...rows].join("\n");
+      const csvContent = ["ANOMALY TYPE & DETAIL,COUNT", ...exportRows].join(
+        "\n",
+      );
 
       const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       const now = new Date();
@@ -42,10 +141,13 @@ export default function AnomalyReport() {
 
       await FileSystem.writeAsStringAsync(fileUri, csvContent);
 
-      const isAvailable = await Sharing.shareAsync(fileUri, {
-        mimeType: "text/csv",
-        dialogTitle: `Export ${lmName} Anomaly Intelligence`,
-      });
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/csv",
+          dialogTitle: `Export ${lmName} Anomaly Intelligence`,
+        });
+      }
 
       setIsExportModalVisible(false);
     } catch (error) {
@@ -54,58 +156,14 @@ export default function AnomalyReport() {
     }
   };
 
-  const { data: rawTrns = [], isLoading } = useGetTrnsByLmPcodeQuery(lmPcode, {
-    skip: !lmPcode,
-  });
-
-  const processedData = useMemo(() => {
-    const elecTrns = rawTrns.filter((t) => {
-      const isElec = t.meterType === "electricity";
-      if (!isElec) return false;
-
-      if (!activeDateRange.start) return true;
-      const trnDate = new Date(
-        t.accessData?.metadata?.created?.at || 0,
-      ).getTime();
-      const start = new Date(activeDateRange.start).getTime();
-      const end = activeDateRange.end
-        ? new Date(activeDateRange.end).getTime()
-        : new Date().getTime();
-
-      return trnDate >= start && trnDate <= end;
-    });
-
-    const groups = {};
-    elecTrns.forEach((trn) => {
-      // 🎯 Schema Match: ast.anomalies.anomaly & anomalyDetail
-      const type = trn.ast?.anomalies?.anomaly;
-      const detail = trn.ast?.anomalies?.anomalyDetail;
-
-      if (
-        !type ||
-        type.toLowerCase() === "none" ||
-        type.toLowerCase() === "no anomaly"
-      )
-        return;
-
-      const groupKey = `${type.toUpperCase()} - ${detail?.toUpperCase() || "NO DETAIL"}`;
-
-      if (!groups[groupKey]) {
-        groups[groupKey] = { id: groupKey, type: groupKey, count: 0 };
-      }
-      groups[groupKey].count += 1;
-    });
-
-    return Object.values(groups).sort((a, b) => b.count - a.count);
-  }, [rawTrns, activeDateRange]);
-
-  if (isLoading)
+  if (isLoading) {
     return <ActivityIndicator style={{ flex: 1 }} color="#2563eb" />;
+  }
 
   return (
     <View style={styles.container}>
       <UserTrnsReportHeader
-        totalValue={processedData.reduce((sum, item) => sum + item.count, 0)}
+        totalValue={totalCount}
         type="ANOMALIES"
         activeView={activeView}
         selectedDateLabel={activeDateRange.label}
@@ -115,9 +173,7 @@ export default function AnomalyReport() {
         onDownload={() => setIsExportModalVisible(true)}
       />
 
-      {/* 🏛️ NO MORE HORIZONTAL SCROLL - CONTENT FITS SCREEN */}
       <View style={{ flex: 1 }}>
-        {/* TABLE HEADER */}
         <View style={styles.tableHeader}>
           <View style={styles.typeHeaderCell}>
             <Text style={styles.headerText}>ANOMALY IDENTIFIER</Text>
@@ -127,7 +183,6 @@ export default function AnomalyReport() {
           </View>
         </View>
 
-        {/* DATA ROWS */}
         <FlatList
           data={processedData}
           keyExtractor={(item) => item.id}
@@ -135,12 +190,20 @@ export default function AnomalyReport() {
             <View style={styles.row}>
               <View style={styles.typeCell}>
                 <Text style={styles.anomalyName}>{item.type}</Text>
+                <Text style={styles.dateText}>{item.activityDate}</Text>
               </View>
               <View style={styles.countCell}>
                 <Text style={styles.numCellText}>{item.count}</Text>
               </View>
             </View>
           )}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>
+                No anomaly groups found for {activeDateRange.label} in {lmName}.
+              </Text>
+            </View>
+          }
         />
       </View>
 
@@ -161,36 +224,41 @@ export default function AnomalyReport() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+
   tableHeader: {
     flexDirection: "row",
     backgroundColor: "#f1f5f9",
     borderBottomWidth: 2,
     borderColor: "#cbd5e1",
   },
-  // 🛰️ Flex 4 for the description gives it 80% of space
+
   typeHeaderCell: {
     flex: 4,
     padding: 12,
     borderRightWidth: 1,
     borderColor: "#e2e8f0",
   },
-  // 🛰️ Flex 1 for count gives it 20% of space
+
   countHeaderCell: {
     flex: 1,
     padding: 12,
     alignItems: "center",
   },
+
   headerText: {
     fontSize: 9,
     fontWeight: "900",
     color: "#475569",
     letterSpacing: 1,
   },
+
   row: {
     flexDirection: "row",
     borderBottomWidth: 1,
     borderColor: "#f1f5f9",
+    backgroundColor: "#fff",
   },
+
   typeCell: {
     flex: 4,
     padding: 15,
@@ -198,21 +266,41 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderColor: "#f1f5f9",
   },
+
   countCell: {
     flex: 1,
     padding: 15,
     justifyContent: "center",
     alignItems: "center",
   },
+
   numCellText: {
     fontSize: 14,
     fontWeight: "900",
     color: "#2563eb",
   },
+
   anomalyName: {
     fontSize: 10,
     fontWeight: "bold",
     color: "#1e293b",
-    flexWrap: "wrap", // 🛰️ Ensures text wraps to next line if too long
+    flexWrap: "wrap",
+  },
+
+  dateText: {
+    marginTop: 4,
+    fontSize: 9,
+    color: "#94a3b8",
+  },
+
+  emptyWrap: {
+    padding: 40,
+    alignItems: "center",
+  },
+
+  emptyText: {
+    color: "#64748b",
+    fontWeight: "600",
+    textAlign: "center",
   },
 });

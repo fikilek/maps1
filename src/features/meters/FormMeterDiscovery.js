@@ -1,4 +1,5 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import * as Location from "expo-location"; // Ensure this is imported at the to
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik } from "formik";
@@ -21,6 +22,7 @@ import {
 import { array, object, string } from "yup";
 
 // Firebase & Redux
+import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import { ElectricitySections } from "../../../components/forms/ElectricitySections";
 import { WaterSections } from "../../../components/forms/WaterSections";
@@ -29,9 +31,11 @@ import { ScreenLock } from "../../../components/SceenLock";
 import { useGeo } from "../../context/GeoContext";
 import { getSafeCoords } from "../../context/MapContext";
 import { useWarehouse } from "../../context/WarehouseContext";
+import { functions } from "../../firebase";
 import { useAuth } from "../../hooks/useAuth";
 import { useGetSettingsQuery } from "../../redux/settingsApi";
 import { useAddTrnMutation } from "../../redux/trnsApi";
+import { addSubmissionQueueItem } from "../../utils/submissionQueue";
 import { ForensicFooter } from "./ForensicFooter";
 
 const NA_REASONS = [
@@ -46,15 +50,26 @@ const NA_REASONS = [
   "Property Vacant",
 ];
 
+function buildMeterDiscoveryTrnId({ wardPcode, erfNo, meterType }) {
+  const ts = Date.now();
+
+  const safeWardPcode = String(wardPcode || "NAv")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 12);
+
+  const safeErfNo = String(erfNo || "NAv")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 12);
+
+  const typeCode =
+    meterType === "water" ? "WTR" : meterType === "electricity" ? "ELC" : "NA";
+
+  return `TRN_MDIS_${ts}_${typeCode}_${safeWardPcode}_${safeErfNo}`;
+}
+
 // --- MAIN FORM COMPONENT ---
 export default function FormMeterDiscovery() {
-  // console.log(`FormMeterDiscovery ----mounted`);
-  const {
-    premiseId,
-    address,
-    erfNo,
-    action: actionRaw,
-  } = useLocalSearchParams();
+  const { premiseId, action: actionRaw } = useLocalSearchParams();
 
   const action = (() => {
     try {
@@ -66,185 +81,308 @@ export default function FormMeterDiscovery() {
     }
   })();
 
-  const auth = useAuth();
   const router = useRouter();
   const { all } = useWarehouse();
   const { data: settings } = useGetSettingsQuery();
   const [addTrn, { isLoading: isTrnLoading }] = useAddTrnMutation();
   const [liveLocation, setLiveLocation] = useState(null);
-  const { geoState } = useGeo();
+  const { geoState, updateGeo } = useGeo();
   const activeErf = geoState?.selectedErf;
 
   const [inProgress, setInProgress] = useState(false);
 
-  const agentUid = auth?.user?.uid || "unknown_uid";
-  const agentName = auth?.profile?.profile?.displayName || "Field Agent";
+  const { profile, user } = useAuth();
 
+  const agentUid = user?.uid || "unknown_uid";
+  const agentName = profile?.profile?.displayName || "Field Agent";
+
+  /*
+  START GEOGRAPHY
+  */
   const premise = all.prems.find((p) => p.id === premiseId);
-  const currentLmPcode = premise?.metadata?.lmPcode || "UNKNOWN";
-  // const premiseGeo = premise?.geometry;
-  // const landingPoint = {
-  //   latitude: premise?.geometry?.centroid[0],
-  //   longitude: premise?.geometry?.centroid[1],
-  // };
-  const landingPoint = premise?.geometry?.centroid;
-  console.log(`FormPremise ----landingPoint`, landingPoint);
-
-  // 🎯 THE SOVEREIGN EXTRACTION
   const parents = premise?.parents || {};
-  // console.log(`parents`, parents);
-  const lmId = parents?.lmId || currentLmPcode;
-  const districtId = parents?.dmId || "UNKNOWN";
-  const provinceId = parents?.provinceId || "UNKNOWN";
-  const countryId = parents?.countryId || "ZA";
+  const countryPcode = parents?.countryPcode;
+  const provincePcode = parents?.provincePcode;
+  const dmPcode = parents?.dmPcode;
+  const lmPcode = parents?.lmPcode;
+  const wardPcode = parents?.wardPcode;
+  /*
+  END GEOGRAPHY
+  */
+
+  const currentMissionType =
+    action?.access === "no" ? "NA" : action?.meterType || "NA";
+
+  const premiseAddress =
+    `${premise?.address?.strNo || ""} ${premise?.address?.strName || ""} ${premise?.address?.strType || ""}`.trim();
+
+  const landingPoint = premise?.geometry?.centroid;
+
+  const propType =
+    `${premise?.propertyType?.type || ""} ${premise?.propertyType?.name || ""} ${premise?.propertyType?.unitNo || ""}`.trim();
 
   const [modalVisible, setModalVisible] = useState(false);
-  const timestamp = new Date().toISOString();
 
   const [showSuccess, setShowSuccess] = useState(false);
-  // console.log(`FormPremise ----showSuccess`, showSuccess);
+  // console.log(`FormMeterDiscovery ----showSuccess`, showSuccess);
 
-  // Prepare the props for the SovereignLocationPicker
-  // const finalErfBoundary = getSafeCoords(erfGeo?.geometry);
-  // const finalErfCentroid = erfGeo?.centroid || activeErf?.centroid;
-  const finalErfNo = activeErf?.erfNo || premise?.erfNo || erfNo || "N/A";
+  const finalErfNo = premise?.erfNo || "NAv";
+  // console.log(`FormMeterDiscovery ----finalErfNo`, finalErfNo);
 
   const getOptions = (name) =>
     settings?.find((s) => s.name === name)?.options || [];
 
   const accessInitValues = {
-    erfId: premise?.erfId || "",
-    erfNo: premise?.erfNo || "",
-    trnType: "METER_DISCOVERY",
     access: {
-      hasAccess: action?.access,
+      hasAccess: action?.access === "yes" ? "yes" : "no",
       reason: "",
     },
-    metadata: {
-      created: { at: timestamp, byUser: agentName, byUid: agentUid },
-      updated: { at: timestamp, byUser: agentName, byUid: agentUid },
-      lmPcode: lmId, // Keep for legacy support
-      districtId: districtId,
-      provinceId: provinceId,
-      countryId: countryId,
-    },
-    premise: {
-      id: premise?.id,
-      address: address || "N/A",
-    },
   };
-  // console.log(`handleSubmitDiscovery --accessInitValues`, accessInitValues);
+
+  const trnId = useMemo(
+    () =>
+      buildMeterDiscoveryTrnId({
+        wardPcode,
+        erfNo: premise?.erfNo,
+        meterType: currentMissionType,
+      }),
+    [wardPcode, premise?.erfNo, currentMissionType],
+  );
+
+  function buildTrnSystemFields() {
+    const timestamp = new Date().toISOString();
+
+    return {
+      erfId: premise?.erfId || "",
+      erfNo: premise?.erfNo || "",
+      trnType: "METER_DISCOVERY",
+
+      parents: {
+        countryPcode,
+        provincePcode,
+        dmPcode,
+        lmPcode,
+        wardPcode,
+      },
+
+      metadata: {
+        createdAt: timestamp,
+        createdByUid: agentUid,
+        createdByUser: agentName,
+        updatedAt: timestamp,
+        updatedByUid: agentUid,
+        updatedByUser: agentName,
+      },
+
+      premise: {
+        id: premise?.id,
+        address: premiseAddress || "N/Av",
+        propertyType: propType || "N/Av",
+      },
+    };
+  }
 
   const handleSubmitDiscovery = async (values) => {
     if (!premise?.id) {
       Alert.alert("Error", "Premise data not found.");
       return;
     }
+
     setInProgress(true);
+
     try {
+      // 🔌 STEP 1: CHECK CONNECTIVITY
+      const netState = await NetInfo.fetch();
+      const isOnline = netState.isConnected && netState.isInternetReachable;
+
+      const baseSystemFields = buildTrnSystemFields();
+
+      // 🧱 STEP 2: BUILD CLEAN PAYLOAD (NO UPLOAD YET)
+      let cleanPayload = null;
+
+      if (values?.accessData?.access?.hasAccess === "no") {
+        cleanPayload = {
+          id: values.id,
+          accessData: {
+            ...baseSystemFields,
+            access: values.accessData.access,
+          },
+          ast: null,
+          meterType: "NA",
+          media: values?.media || [],
+        };
+      } else if (values?.meterType === "water") {
+        cleanPayload = {
+          id: values.id,
+          accessData: {
+            ...baseSystemFields,
+            access: values.accessData.access,
+          },
+          ast: values.ast,
+          meterType: "water",
+          media: values?.media || [],
+        };
+      } else if (values?.meterType === "electricity") {
+        cleanPayload = {
+          id: values.id,
+          accessData: {
+            ...baseSystemFields,
+            access: values.accessData.access,
+          },
+          ast: values.ast,
+          meterType: "electricity",
+          media: values?.media || [],
+        };
+      }
+
+      if (!cleanPayload) {
+        throw new Error("Unable to determine transaction payload.");
+      }
+
+      cleanPayload = JSON.parse(
+        JSON.stringify(cleanPayload, (key, value) =>
+          value === undefined ? null : value,
+        ),
+      );
+
+      // 🚫 OFFLINE PATH
+      if (!isOnline) {
+        console.log(`--- OFFLINE MODE: Saving to local queue ---`);
+
+        const queueResult = await addSubmissionQueueItem({
+          formType: "METER_DISCOVERY",
+          payload: cleanPayload,
+          context: {
+            meterNo: values?.ast?.astData?.astNo || "NAv",
+            meterType: cleanPayload?.meterType || "NAv",
+            erfId: baseSystemFields?.erfId || "NAv",
+            erfNo: baseSystemFields?.erfNo || "NAv",
+            premiseId: premise?.id || "NAv",
+            lmPcode: lmPcode || "NAv",
+            wardPcode: wardPcode || "NAv",
+          },
+          createdByUid: agentUid,
+          createdByUser: agentName,
+        });
+
+        if (!queueResult?.success) {
+          // throw new Error("Failed to save offline submission.");
+          console.log(
+            `handleSubmitDiscovery --- Failed to save offline submission.id`,
+            queueResult,
+          );
+        }
+
+        Alert.alert(
+          "Saved Offline",
+          "No internet connection. This submission was saved locally and will sync automatically when online.",
+        );
+
+        setShowSuccess(true);
+
+        updateGeo({ selectedErf: null, lastSelectionType: "ERF" });
+        setTimeout(() => {
+          router.replace("/(tabs)/premises");
+          setInProgress(false);
+        }, 1500);
+
+        return;
+      }
+
+      // 🌐 ONLINE PATH
       const storage = getStorage();
 
-      // --- PHASE 1: UPLOAD ---
       const syncedMedia = await Promise.all(
         (values?.media || []).map(async (item) => {
           if (item.uri && !item.url) {
-            // 🎯 Fixed Folder Logic: Use meterType from Section 3
             const folder =
               values?.accessData?.access?.hasAccess === "yes"
                 ? `${values?.meterType}_meters`
                 : "no_access";
 
-            const fileName = `${values?.accessData?.erfId}_${item.tag}_${Date.now()}.jpg`;
+            const fileName = `${baseSystemFields.erfId}_${item.tag}_${Date.now()}.jpg`;
             const storageRef = ref(storage, `meters/${folder}/${fileName}`);
 
             const response = await fetch(item.uri);
             const blob = await response.blob();
+
             await uploadBytes(storageRef, blob);
+
             const downloadUrl = await getDownloadURL(storageRef);
 
             const { uri, ...cleanItem } = item;
             return { ...cleanItem, url: downloadUrl };
           }
+
           return item;
         }),
       );
 
-      // --- PHASE 2: THE SCRUBBER ---
-      const cleanPayload = JSON.parse(
-        JSON.stringify(
-          {
-            ...values,
-            accessData: {
-              ...values.accessData,
-              media: undefined, // 🎯 Drop the nested one so ONLY the root 'media' exists
-            },
-            media: syncedMedia, // 🏛️ This is your primary Forensic Pillar
-          },
-          (key, value) => (value === undefined ? null : value),
-        ),
+      cleanPayload.media = syncedMedia;
+
+      const onMeterDiscoveryCallable = httpsCallable(
+        functions,
+        "onMeterDiscoveryCallable",
       );
 
-      // --- PHASE 3: DISPATCH ---
-      await addTrn(cleanPayload).unwrap();
+      const callableResult = await onMeterDiscoveryCallable(cleanPayload);
+      const result = callableResult?.data || {};
+
+      if (!result?.success) {
+        setInProgress(false);
+
+        Alert.alert(
+          result?.code === "DUPLICATE_METER"
+            ? "Duplicate Meter"
+            : "Submission Failed",
+          result?.message || "Meter discovery submission failed.",
+        );
+
+        return;
+      }
+
       setShowSuccess(true);
+
       setTimeout(() => {
+        updateGeo({ selectedPremise: null, lastSelectionType: "PREMISE" });
         router.replace("/(tabs)/premises");
         setInProgress(false);
       }, 2000);
     } catch (error) {
       console.error("Submission Error:", error);
-      Alert.alert("Sync Error", error.message);
+      Alert.alert("Error", error?.message || "Submission failed");
+      setInProgress(false);
     }
   };
 
   const accessSchema = object().shape({
-    // 🛡️ BRANCH 1: Administrative Data
     accessData: object().shape({
-      erfId: string().required("Required"),
-      erfNo: string().required("Required"),
-      trnType: string().required(),
       access: object().shape({
-        hasAccess: string().required("Access status is required"),
+        hasAccess: string()
+          .oneOf(["yes", "no"], "Access status is required")
+          .required("Access status is required"),
+
         reason: string().when("hasAccess", {
-          is: (val) => val === "no", // 🎯 Explicit function check is more robust
-          then: (s) => s.required("Please provide a reason for no access"),
+          is: (val) => val === "no",
+          then: (s) =>
+            s.trim().required("Please provide a reason for no access"),
           otherwise: (s) => s.nullable().notRequired(),
         }),
       }),
-      metadata: object().shape({
-        created: object().shape({
-          at: string().required(),
-          byUser: string().required(),
-          byUid: string().required(),
-        }),
-        lmPcode: string().required(),
-        districtId: string().required("District ID required"),
-        provinceId: string().required("Province ID required"),
-        countryId: string().required("Country ID required"),
-      }),
-      premise: object().shape({
-        id: string().required(),
-        address: string().required(),
-      }),
     }),
 
-    // 🛡️ BRANCH 2: Forensic Proof (Matching your initValues.media)
+    meterType: string().oneOf(["NA"]).required(),
+
     media: array()
       .of(object())
       .test("na-forensics", "No Access photo required", function (value) {
-        const { accessData } = this.parent;
-        const hasAccess = accessData?.access?.hasAccess;
-        const reason = accessData?.access?.reason;
+        const hasAccess = this.parent?.accessData?.access?.hasAccess;
+        const reason = this.parent?.accessData?.access?.reason;
 
-        // 🚩 THE INTELLIGENT TRIGGER:
-        // We ONLY demand a photo if:
-        // - hasAccess is 'no'
-        // - AND a reason has been selected (it's not an empty string)
         if (hasAccess === "no" && reason && reason.trim() !== "") {
           return value?.some((item) => item.tag === "noAccessPhoto");
         }
 
-        // Otherwise, the mission is still in "Draft" or is a "Yes Access" mission
         return true;
       }),
   });
@@ -477,6 +615,7 @@ export default function FormMeterDiscovery() {
     if (accessStr === "no") {
       return {
         initValues: {
+          id: trnId,
           accessData: accessInitValues,
           ast: null,
           meterType: "NA",
@@ -490,9 +629,10 @@ export default function FormMeterDiscovery() {
     if (action?.meterType === "water") {
       return {
         initValues: {
+          id: trnId,
           accessData: {
             ...accessInitValues,
-            access: { hasAccess: "yes", reason: "N/A" },
+            access: { hasAccess: "yes", reason: "NAv" },
           },
           ast: {
             astData: {
@@ -520,9 +660,10 @@ export default function FormMeterDiscovery() {
     // --- STEP 3: ELECTRICITY DISCOVERY (The Default) ---
     return {
       initValues: {
+        id: trnId,
         accessData: {
           ...accessInitValues,
-          access: { hasAccess: "yes", reason: "N/A" },
+          access: { hasAccess: "yes", reason: "NAv" },
         },
         ast: {
           astData: {
@@ -556,8 +697,12 @@ export default function FormMeterDiscovery() {
     };
   };
 
-  const actionInit = useMemo(() => getInitialValues(), [premiseId, actionRaw]);
-  // console.log(`FormPremise ----actionInit`, actionInit);
+  // const actionInit = useMemo(() => getInitialValues(), [premiseId, actionRaw]);
+  const actionInit = useMemo(
+    () => getInitialValues(),
+    [premiseId, actionRaw, trnId],
+  );
+  // console.log(`FormMeterDiscovery ----actionInit`, actionInit);
 
   // 2. Setup the Watcher in a useEffect
   useEffect(() => {
@@ -621,7 +766,7 @@ export default function FormMeterDiscovery() {
         validateOnChange={true}
         // validateOnBlur={true}
       >
-        {({ values, setFieldValue, isSuccess, errors, isValid }) => {
+        {({ values, setFieldValue, errors }) => {
           // console.log(` `);
           // console.log(
           //   `handleSubmitDiscovery values`,
@@ -633,16 +778,15 @@ export default function FormMeterDiscovery() {
           //   `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
           //   values?.ast?.normalisation?.actionTaken,
           // );
-          // console.log(`values`, JSON.stringify(values, null, 2));
-
           // console.log(
-          //   `handleSubmitDiscovery --values?.meterType`,
-          //   values?.meterType,
+          //   `FormMeterDiscovery --values`,
+          //   JSON.stringify(values, null, 2),
           // );
+
+          // console.log(`FormMeterDiscovery --values`, values);
           // console.log(` `);
           // console.log(`handleSubmitDiscovery --errors`, errors);
           // console.log(`errors`, JSON.stringify(errors, null, 2));
-          // console.log(`handleSubmitDiscovery --isValid`, isValid);
 
           return (
             <ScrollView
@@ -651,7 +795,7 @@ export default function FormMeterDiscovery() {
             >
               <Stack.Screen
                 options={{
-                  title: address || "Meter Discovery",
+                  title: premiseAddress || "Meter Discovery",
                   headerTitleStyle: { fontSize: 14, fontWeight: "900" }, // Sovereign Polish
                   headerLeft: () => (
                     <TouchableOpacity
@@ -734,7 +878,7 @@ export default function FormMeterDiscovery() {
                         <Text
                           style={[styles.sectionTitle, { color: "#dc2626" }]}
                         >
-                          N/A Reason
+                          NA Reason
                         </Text>
                       </View>
 
@@ -763,6 +907,7 @@ export default function FormMeterDiscovery() {
                         tag={"noAccessPhoto"}
                         agentName={agentName}
                         agentUid={agentUid}
+                        fallbackGps={landingPoint}
                       />
                     </Surface>
                   )}
@@ -772,7 +917,7 @@ export default function FormMeterDiscovery() {
               {/* RESET / SUBMIT BTNS */}
               <ForensicFooter
                 isTrnLoading={isTrnLoading}
-                isSuccess={isSuccess}
+                isSuccess={showSuccess}
               />
 
               <Portal>
@@ -805,7 +950,9 @@ export default function FormMeterDiscovery() {
                     </View>
                     <Text style={styles.successTitle}>MISSION SUCCESS</Text>
                     <Text style={styles.successSub}>
-                      {values?.accessData?.access?.hasAccess ? "" : "NA Access"}{" "}
+                      {values?.accessData?.access?.hasAccess === "no"
+                        ? "NA Access "
+                        : ""}
                       Trn saved successfully
                     </Text>
 
@@ -1176,29 +1323,4 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "900",
   },
-  // selector: {
-  //   flexDirection: "row",
-  //   justifyContent: "space-between",
-  //   alignItems: "center",
-  //   padding: 12,
-  //   borderRadius: 12,
-  //   backgroundColor: "#f8fafc", // Sexy Light Grey
-  //   borderWidth: 1,
-  //   borderColor: "#e2e8f0",
-  //   elevation: 2,
-  // },
-  // label: {
-  //   fontSize: 11,
-  //   fontWeight: "900",
-  //   color: "#475569",
-  //   marginBottom: 8,
-  //   textTransform: "uppercase",
-  //   letterSpacing: 1,
-  // },
-  // actionText: {
-  //   fontSize: 10,
-  //   color: "#94a3b8",
-  //   fontWeight: "600",
-  //   marginTop: 2,
-  // },
 });

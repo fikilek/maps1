@@ -3,11 +3,12 @@ import { FlashList } from "@shopify/flash-list";
 import { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Button, Dialog, Portal, Surface } from "react-native-paper";
+import { useWarehouse } from "../../context/WarehouseContext";
 
 const ErfFilterHeader = ({
   selectedWard,
   setSelectedWard,
-  availableWards,
+  // availableWards,
   filteredCount,
   totalCount,
   selectedErf, // 🎯 Pass the selection in
@@ -20,9 +21,16 @@ const ErfFilterHeader = ({
   const showDialog = () => setVisible(true);
   const hideDialog = () => setVisible(false);
 
+  const { available } = useWarehouse();
+  // console.log(
+  //   `ErfsScreen --available?.wards?.length`,
+  //   available?.wards?.length,
+  // );
+
+  // console.log(`ErfFilterHeader ----selectedWard`, selectedWard);
   // console.log(`ErfFilterHeader ----filteredCount`, filteredCount);
   // console.log(`ErfFilterHeader ----totalCount`, totalCount);
-  // console.log(`ErfFilterHeader ----selectedErf`, selectedErf);
+  // console.log(`ErfFilterHeader ----available?.wards`, available?.wards);
 
   const displayWardName =
     selectedWard === "ALL" || !selectedWard
@@ -92,17 +100,19 @@ const ErfFilterHeader = ({
 
         {/* 📊 RIGHT: TACTICAL STATS */}
         <View style={styles.rightCol}>
-          <View style={styles.statsBox}>
-            <Text style={styles.statsText}>
-              {`${displayWardName} Erfs: `}
-              <Text style={styles.boldText}>{filteredCount}</Text>
+          {/* <View style={styles.statsBox}> */}
+          <Text style={styles.statsText}>
+            Erfs:
+            <Text style={{ fontWeight: "900", fontSize: 14, color: "blue" }}>
+              {filteredCount}
             </Text>
-            <View style={styles.divider} />
+          </Text>
+          {/* <View style={styles.divider} />
             <Text style={styles.statsText}>
               {`LM Total Erfs: `}
               <Text style={styles.boldText}>{totalCount}</Text>
-            </Text>
-          </View>
+            </Text> */}
+          {/* </View> */}
         </View>
       </View>
 
@@ -114,7 +124,7 @@ const ErfFilterHeader = ({
             style={[styles.scrollArea, { paddingHorizontal: 0 }]}
           >
             <FlashList
-              data={["ALL", ...(availableWards || [])]}
+              data={["ALL", ...(available?.wards || [])]}
               keyExtractor={(item, index) => `${item?.id || item || index}`}
               estimatedItemSize={60}
               renderItem={({ item }) => {
@@ -246,8 +256,8 @@ const styles = StyleSheet.create({
     // width: "100%",
   },
   statsText: {
-    fontSize: 11,
-    color: "#64748b",
+    fontSize: 12,
+    color: "#393939",
     textAlign: "right",
   },
   boldText: {
@@ -320,6 +330,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rightCol: {
-    flex: 0.4,
+    // flex: 0.4,
+    padding: 10,
+    borderWidth: 1,
+    marginRight: 2,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
   },
 });

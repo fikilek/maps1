@@ -70,34 +70,6 @@ export const ElectricitySections = ({
     setFieldValue("ast.normalisation.actionTaken", newActions);
   };
 
-  // const handleToggle = (optionValue) => {
-  //   const currentActions = values?.ast?.normalisation?.actionTaken || ["none"];
-
-  //   let newActions = [];
-
-  //   if (optionValue === "none") {
-  //     // ⚔️ If 'NONE' is tapped, it clears everything else
-  //     newActions = ["none"];
-  //   } else {
-  //     // ⚔️ If a REAL action is tapped
-  //     if (currentActions.includes(optionValue)) {
-  //       // Uncheck if already there
-  //       newActions = currentActions.filter((a) => a !== optionValue);
-  //     } else {
-  //       // Check it and BANISH 'none'
-  //       newActions = [
-  //         ...currentActions.filter((a) => a !== "none"),
-  //         optionValue,
-  //       ];
-  //     }
-  //   }
-
-  //   // ⚔️ FINAL GUARD: If nothing is selected, force 'none' back in
-  //   if (newActions.length === 0) newActions = ["none"];
-
-  //   setFieldValue("ast.normalisation.actionTaken", newActions);
-  // };
-
   return (
     <View style={disabled && { opacity: 0.7 }}>
       {/* ⚡ SECTION 1: CORE METER DATA */}
@@ -111,6 +83,7 @@ export const ElectricitySections = ({
           tag={"astNoPhoto"}
           agentName={agentName}
           agentUid={agentUid}
+          fallbackGps={values?.geometry?.centroid}
         />
 
         <FormSelect
@@ -173,6 +146,7 @@ export const ElectricitySections = ({
           tag={"keypadPhoto"}
           agentName={agentName}
           agentUid={agentUid}
+          fallbackGps={values?.geometry?.centroid}
         />
         <FormInput
           label="CB SIZE (AMPS)"
@@ -192,6 +166,7 @@ export const ElectricitySections = ({
           tag={"astCbPhoto"}
           agentName={agentName}
           agentUid={agentUid}
+          fallbackGps={values?.geometry?.centroid}
         />
       </FormSection>
 
@@ -233,6 +208,7 @@ export const ElectricitySections = ({
             tag={"ogsPhoto"}
             agentName={agentName}
             agentUid={agentUid}
+            fallbackGps={values?.geometry?.centroid}
           />
         )}
       </FormSection>
@@ -280,16 +256,12 @@ export const ElectricitySections = ({
 
         {/* 📸 Evidence Logic: Show only if actions > "none" */}
         {values?.ast?.normalisation?.actionTaken?.some((a) => a !== "none") && (
-          <View style={styles.mediaContainer}>
-            <Text style={styles.mediaLabel}>
-              Normalisation Evidence Required
-            </Text>
-            <IrepsMedia
-              tag="normalisationPhoto"
-              agentName={agentName}
-              agentUid={agentUid}
-            />
-          </View>
+          <IrepsMedia
+            tag="normalisationPhoto"
+            agentName={agentName}
+            agentUid={agentUid}
+            fallbackGps={landingPoint}
+          />
         )}
       </FormSection>
     </View>

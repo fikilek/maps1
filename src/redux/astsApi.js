@@ -10,6 +10,16 @@ import {
 import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
 
+function sortAstsByUpdatedAtDesc(list) {
+  if (!Array.isArray(list)) return;
+
+  list.sort((a, b) => {
+    const aAt = a?.accessData?.metadata?.updated?.at || "";
+    const bAt = b?.accessData?.metadata?.updated?.at || "";
+    return String(bAt).localeCompare(String(aAt));
+  });
+}
+
 export const astsApi = createApi({
   reducerPath: "astsApi",
   baseQuery: fakeBaseQuery(),
@@ -223,11 +233,58 @@ export const astsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getAstsByLmPcodeWardPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+      async onCacheEntryAdded(
+        { lmPcode, wardPcode },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          if (!lmPcode || !wardPcode) return;
+
+          const q = query(
+            collection(db, "asts"),
+            where("accessData.parents.lmPcode", "==", lmPcode),
+            where("accessData.parents.wardPcode", "==", wardPcode),
+            orderBy("accessData.metadata.updatedAt", "desc"),
+          );
+
+          unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+              updateCachedData(() => {
+                const next = snapshot.docs.map((docSnap) => ({
+                  id: docSnap.id,
+                  ...docSnap.data(),
+                }));
+                // console.log(`getAstsByLmPcodeWardPcode --next`, next);
+                sortAstsByUpdatedAtDesc(next);
+                return next;
+              });
+            },
+            (error) => {
+              console.error("❌ [AST_WARD_SNAPSHOT_ERROR]:", error);
+            },
+          );
+        } catch (err) {
+          console.error("❌ [AST_WARD_STREAM_ERROR]:", err);
+        }
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
 export const {
   useGetAstsByLmPcodeQuery,
+  useGetAstsByLmPcodeWardPcodeQuery,
   useGetAstsByCountryCodeQuery,
   useGetAstByIdQuery,
 } = astsApi;

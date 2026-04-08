@@ -1,29 +1,42 @@
-import { Feather, FontAwesome6, Octicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { StyleSheet, Text, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useMemo } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button } from "react-native-paper";
+import IrepsMediaViewer from "../../../components/media/IrepsMediaViewer";
+import { useWarehouse } from "../../../src/context/WarehouseContext";
 
 export default function PremiseMedia() {
   const router = useRouter();
+  const { premiseId } = useLocalSearchParams();
+  const { all } = useWarehouse();
+
+  const premise = useMemo(() => {
+    if (!premiseId) return null;
+    return all?.prems?.find((p) => p.id === premiseId) || null;
+  }, [premiseId, all?.prems]);
+
+  const addressLabel = useMemo(() => {
+    const strNo = premise?.address?.strNo || "";
+    const strName = premise?.address?.strName || "";
+    const strType = premise?.address?.strType || "";
+
+    return [strNo, strName, strType].filter(Boolean).join(" ").trim();
+  }, [premise]);
 
   return (
-    <View style={styles.container}>
-      {/* 🛠️ Tactical Work-in-Progress Icon */}
-      <View style={{ flexDirection: "row", gap: 20 }}>
-        <Octicons name="file-media" size={70} color="#cbd5e1" />
-        <FontAwesome6 name="microphone-lines" size={70} color="black" />
-        <Feather name="video" size={70} color="black" />
-      </View>
-
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>PREMISE MEDIA GALLERY</Text>
 
       <Text style={styles.subtitle}>
-        The Premise Media Review system is currently being energized.
+        {addressLabel || "Premise media review"}
       </Text>
 
-      {/* 🛡️ Status Badge */}
-      <View style={styles.badge}>
-        <Text style={styles.badgeText}>FUNCTIONALITY COMING SOON</Text>
+      <View style={styles.viewerWrap}>
+        <IrepsMediaViewer
+          media={premise?.media || []}
+          tags={["propertyTypePhoto", "propertyAdrPhoto"]}
+          address={addressLabel || "No Address"}
+        />
       </View>
 
       <Button
@@ -34,17 +47,15 @@ export default function PremiseMedia() {
       >
         RETURN TO MISSION
       </Button>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 30,
+    padding: 20,
   },
   title: {
     fontSize: 18,
@@ -52,6 +63,7 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     marginTop: 20,
     letterSpacing: 2,
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 13,
@@ -59,18 +71,10 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 10,
     lineHeight: 20,
+    marginBottom: 20,
   },
-  badge: {
-    backgroundColor: "#f1f5f9",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginTop: 20,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "#475569",
+  viewerWrap: {
+    marginTop: 10,
   },
   btn: {
     marginTop: 40,

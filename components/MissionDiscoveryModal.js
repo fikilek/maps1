@@ -28,6 +28,7 @@ export default function MissionDiscoveryModal() {
     router.push({
       pathname: "/(tabs)/premises/form",
       params: {
+        premiseId,
         action: JSON.stringify({ access: "no", meterType: "" }),
       },
     });
@@ -85,7 +86,7 @@ export default function MissionDiscoveryModal() {
         {/* ---------- ACCESS OPTIONS ---------- */}
 
         <Surface style={styles.modalCard} elevation={1}>
-          <Text variant="labelLarge">Access Status</Text>
+          <Text variant="labelLarge">Resource Type</Text>
 
           <View style={styles.toggleRow}>
             <Button

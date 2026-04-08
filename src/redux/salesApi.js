@@ -444,6 +444,85 @@ export const salesApi = createApi({
 
         keepUnusedDataFor: 3600,
       }),
+
+      getSalesAtomicByMeterNo: builder.query({
+        async queryFn(astNo) {
+          // console.log(`getSalesAtomicByMeterNo --astNo`, astNo);
+          try {
+            const meterNo = String(astNo || "").trim();
+            if (!meterNo) return { data: [] };
+
+            const col = collection(db, "conlog_sales_atomic");
+
+            const q = query(
+              col,
+              where("meterNo", "==", meterNo),
+              orderBy("txAtMs", "desc"),
+              // limit(200),
+            );
+
+            const snap = await getDocs(q);
+
+            const items = snap.docs.map((d) => ({
+              id: d.id,
+              ...d.data(),
+            }));
+            // console.log(`getSalesAtomicByMeterNo --items`, items);
+
+            return { data: items };
+          } catch (e) {
+            console.log("❌ getSalesAtomicByAstNo failed", e);
+            return { error: { message: e?.message || String(e) } };
+          }
+        },
+
+        serializeQueryArgs: ({ endpointName, queryArgs }) => {
+          return `${endpointName}_${String(queryArgs || "").trim()}`;
+        },
+
+        keepUnusedDataFor: 60,
+      }),
+
+      // inside endpoints: (builder) => { return { ... } }
+
+      getSalesMonthlyByLmAndMeterNo: builder.query({
+        async queryFn({ lmPcode, meterNo }) {
+          try {
+            const lm = String(lmPcode || "").trim();
+            const meter = String(meterNo || "").trim();
+
+            if (!lm || !meter) return { data: [] };
+
+            const colRef = collection(db, "conlog_sales_monthly");
+
+            const q = query(
+              colRef,
+              where("lmPcode", "==", lm),
+              where("meterNo", "==", meter),
+              orderBy("ym", "desc"),
+            );
+
+            const snap = await getDocs(q);
+
+            const items = snap.docs.map((d) => ({
+              id: d.id,
+              ...d.data(),
+            }));
+            return { data: items };
+          } catch (e) {
+            console.error("❌ getSalesMonthlyByLmAndMeterNo failed", e);
+            return { error: { message: e?.message || String(e) } };
+          }
+        },
+
+        serializeQueryArgs: ({ endpointName, queryArgs }) => {
+          const lm = String(queryArgs?.lmPcode || "").trim();
+          const meter = String(queryArgs?.meterNo || "").trim();
+          return `${endpointName}_${lm}_${meter}`;
+        },
+
+        keepUnusedDataFor: 60 * 10,
+      }),
     };
   },
 });
@@ -456,4 +535,6 @@ export const {
   useGetMetersForMonthQuery,
   useGetSalesMonthlyLmGroupsByLmAndYmQuery,
   useGetSalesMonthlyLmGroupsByLmAndYmsQuery,
+  useGetSalesAtomicByMeterNoQuery,
+  useGetSalesMonthlyByLmAndMeterNoQuery,
 } = salesApi;

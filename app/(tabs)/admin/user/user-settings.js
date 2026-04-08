@@ -43,11 +43,12 @@ export default function UserSettings() {
       await updateProfile({
         uid: user.uid,
         updates: {
-          "profile.name": editData.name,
-          "profile.surname": editData.surname,
-          "profile.email": editData.email,
-          "profile.displayName": `${editData.name} ${editData.surname}`,
-          "contact.cell": editData.cell,
+          "profile.name": editData.name || "NAv",
+          "profile.surname": editData.surname || "NAv",
+          "profile.email": editData.email || "NAv",
+          "profile.displayName":
+            `${editData.name || ""} ${editData.surname || ""}`.trim() || "NAv",
+          "contact.cell": editData.cell || "NAv",
         },
       }).unwrap();
       setIsEditing(false);

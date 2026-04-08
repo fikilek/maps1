@@ -15,6 +15,9 @@ import { useWarehouse } from "../../context/WarehouseContext";
 // 🛰️ BEACON SELECTOR: Visualizes property types instantly
 const getPropertyBeacon = (type = "") => {
   const t = type.toLowerCase();
+
+  if (t.includes("vacant land") || t.includes("land"))
+    return { name: "image-filter-hdr", color: "#84cc16" };
   if (t.includes("church") || t.includes("religion"))
     return { name: "church", color: "#6366f1" };
   if (t.includes("school") || t.includes("education"))
@@ -25,10 +28,10 @@ const getPropertyBeacon = (type = "") => {
     return { name: "office-building", color: "#8b5cf6" };
   if (t.includes("commercial") || t.includes("shop"))
     return { name: "storefront", color: "#ec4899" };
-  if (t.includes("business") || t.includes("shop"))
-    return { name: "storefront", color: "#ec4899" };
+  if (t.includes("business")) return { name: "storefront", color: "#ec4899" };
   if (t.includes("industrial") || t.includes("factory"))
     return { name: "factory", color: "#64748b" };
+
   return { name: "home", color: "#94a3b8" };
 };
 
@@ -85,8 +88,8 @@ const PremiseCard = memo(
 
     // const beacon = getPropertyBeacon(propertyTypeStr);
     const status = getStatusConfig(item?.occupancy?.status || "");
-    const naCount = Array.isArray(item?.metadata?.naCount)
-      ? item?.metadata?.naCount.length
+    const noAccessTrnIds = Array.isArray(item?.metadata.noAccessTrnIds)
+      ? item?.metadata.noAccessTrnIds.length
       : 0;
 
     const identityLabel = resolveEntityIdentity();
@@ -170,6 +173,25 @@ const PremiseCard = memo(
       });
     };
 
+    const isErfSelected = geoState?.selectedErf?.id === erfId;
+
+    const handleToggleErfSelection = () => {
+      if (isErfSelected) {
+        updateGeo({
+          selectedErf: null,
+          lastSelectionType: null,
+        });
+        return;
+      }
+
+      const parentErf = all?.erfs?.find((e) => e.id === erfId);
+
+      updateGeo({
+        selectedErf: parentErf || { id: erfId },
+        lastSelectionType: "ERF",
+      });
+    };
+
     return (
       <TouchableOpacity style={styles.card} activeOpacity={0.9}>
         {/* 🎗️ STATUS RIBBON */}
@@ -218,11 +240,11 @@ const PremiseCard = memo(
                 </Text>
               </Pressable>
               <View style={styles.typeTag}>
-                <Text style={styles.typeTagText}>
+                <Text style={styles.typeTagText} numberOfLines={1}>
                   {item?.propertyType?.type}
                 </Text>
                 <Text style={styles.typeTagName}>
-                  {item?.propertyType?.name}
+                  {item?.propertyType?.name} . {item?.propertyType?.unitNo}
                 </Text>
               </View>
             </View>
@@ -236,9 +258,29 @@ const PremiseCard = memo(
 
             {/* 🎯 THE TARGET ROW: Now contains Erf, Ward, and the Edit Button */}
             <View style={styles.geoRow}>
-              <Text
+              <Pressable
+                onPress={handleToggleErfSelection}
+                style={({ pressed }) => [
+                  styles.geoBadge,
+                  styles.erfBadgePressable,
+                  isErfSelected && styles.erfBadgeSelected,
+                  pressed && styles.erfBadgePressed,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.geoBadgeText,
+                    isErfSelected && styles.erfBadgeTextSelected,
+                  ]}
+                >
+                  {`Erf ${item?.erfNo || "N/A"}`}
+                </Text>
+              </Pressable>
+
+              {/* <Text
                 style={styles.geoBadge}
-              >{`Erf ${item?.erfNo || "N/A"}`}</Text>
+              >{`Erf ${item?.erfNo || "N/A"}`}</Text> */}
+
               <Text style={styles.geoDivider}>•</Text>
               <Text style={styles.geoBadge}>{`Ward ${wardNo || "?"}`}</Text>
 
@@ -258,7 +300,12 @@ const PremiseCard = memo(
                 {/* 📸 THE MEDIA GATEWAY (Placeholder) */}
                 <TouchableOpacity
                   style={styles.iconButton}
-                  onPress={() => router.push("/(tabs)/premises/premiseMedia")}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(tabs)/premises/premiseMedia",
+                      params: { premiseId: item.id },
+                    })
+                  }
                 >
                   <MaterialCommunityIcons
                     name="camera-iris"
@@ -321,7 +368,7 @@ const PremiseCard = memo(
               </Text>
             </View>
 
-            {naCount > 0 && (
+            {noAccessTrnIds > 0 && (
               <TouchableOpacity
                 style={styles.compactNaBadge}
                 onPress={() => onNaPress?.(item)}
@@ -331,7 +378,7 @@ const PremiseCard = memo(
                   size={14}
                   color="#EA580C"
                 />
-                <Text style={styles.naCountText}>{naCount}</Text>
+                <Text style={styles.noAccessTrnIdsText}>{noAccessTrnIds}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -474,7 +521,7 @@ const styles = StyleSheet.create({
     borderColor: "#FED7AA",
     gap: 2,
   },
-  naCountText: { fontSize: 12, fontWeight: "900", color: "#EA580C" },
+  noAccessTrnIdsText: { fontSize: 12, fontWeight: "900", color: "#EA580C" },
   actionsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -516,15 +563,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  geoBadge: {
-    fontSize: 10, // 🎯 Slightly smaller for better fit on one line
-    fontWeight: "800",
-    color: "#64748B",
-    backgroundColor: "#F1F5F9",
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
+  // geoBadge: {
+  //   fontSize: 10, // 🎯 Slightly smaller for better fit on one line
+  //   fontWeight: "800",
+  //   color: "#64748B",
+  //   backgroundColor: "#F1F5F9",
+  //   paddingHorizontal: 6,
+  //   paddingVertical: 1,
+  //   borderRadius: 4,
+  // },
   propertyType: {
     marginLeft: 10,
     fontSize: 12,
@@ -543,6 +590,9 @@ const styles = StyleSheet.create({
   typeTagName: {
     fontSize: 10,
   },
+  typeTagText: {
+    fontSize: 12,
+  },
   addressPressable: {
     borderRadius: 6,
     paddingVertical: 2,
@@ -551,5 +601,38 @@ const styles = StyleSheet.create({
 
   addressPressablePressed: {
     opacity: 0.6,
+  },
+
+  geoBadge: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+
+  geoBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#64748B",
+  },
+
+  erfBadgePressable: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  erfBadgeSelected: {
+    borderColor: "#2563eb",
+    backgroundColor: "#eff6ff",
+  },
+
+  erfBadgePressed: {
+    opacity: 0.7,
+  },
+
+  erfBadgeTextSelected: {
+    color: "#2563eb",
   },
 });

@@ -3,7 +3,6 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 
 import {
-  createUserWithEmailAndPassword,
   EmailAuthProvider,
   linkWithCredential,
   onAuthStateChanged,
@@ -21,7 +20,6 @@ import {
   getDoc,
   onSnapshot,
   serverTimestamp,
-  setDoc,
   updateDoc,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -90,8 +88,8 @@ export const authApi = createApi({
       async onCacheEntryAdded(_, { updateCachedData, cacheEntryRemoved }) {
         let profileUnsubscribe = null;
 
-        console.log(` `);
-        console.log(`getAuthState ---onCacheEntryAdded started`);
+        // console.log(` `);
+        // console.log(`getAuthState ---onCacheEntryAdded started`);
 
         const authUnsubscribe = onAuthStateChanged(auth, async (user) => {
           // 🛡️ Clean up old profile listener if user changes
@@ -137,132 +135,93 @@ export const authApi = createApi({
         authUnsubscribe();
         if (profileUnsubscribe) profileUnsubscribe();
 
-        console.log(`getAuthState ---onCacheEntryAdded ended`);
+        // console.log(`getAuthState ---onCacheEntryAdded ended`);
       },
     }),
 
-    // getAuthState: builder.query({
-    //   // 🔒 NEVER remove this query from cache
-    //   keepUnusedDataFor: Infinity,
-    //   queryFn: () => ({
-    //     data: {
-    //       ready: true,
-    //       isAuthenticated: false,
-    //       auth: null,
-    //       profile: null,
-    //       claims: null,
-    //     },
-    //   }),
-
-    //   async onCacheEntryAdded(_, { updateCachedData, cacheEntryRemoved }) {
-    //     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-    //       // 🔐 AUTH STATE RESOLVED (no user)
-    //       if (!user) {
-    //         updateCachedData(() => ({
-    //           ready: true,
-    //           isAuthenticated: false,
-    //           auth: null,
-    //           profile: null,
-    //           claims: null,
-    //         }));
-    //         return;
-    //       }
-
-    //       try {
-    //         // Load user profile
-    //         const userRef = doc(db, "users", user.uid);
-    //         const snap = await getDoc(userRef);
-
-    //         // Load claims
-    //         const tokenResult = await user.getIdTokenResult(true);
-
-    //         updateCachedData(() => ({
-    //           ready: true,
-    //           isAuthenticated: true,
-
-    //           auth: {
-    //             uid: user.uid,
-    //             email: user.email,
-    //           },
-
-    //           profile: snap.exists() ? snap.data() : null,
-
-    //           claims: tokenResult.claims,
-    //         }));
-    //       } catch (error) {
-    //         // 🧯 Fail-safe: still mark auth as resolved
-    //         updateCachedData(() => ({
-    //           ready: true,
-    //           isAuthenticated: true,
-    //           auth: {
-    //             uid: user.uid,
-    //             email: user.email,
-    //           },
-    //           profile: null,
-    //           claims: null,
-    //         }));
-    //       }
-    //     });
-
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
     /* =====================================================
         SIGN UP GST (Locked to Guest Role)
       ===================================================== */
 
-    signupGst: builder.mutation({
-      async queryFn({ email, password, name, surname, serviceProvider, role }) {
+    signup: builder.mutation({
+      async queryFn({ email, password, name, surname, serviceProvider }) {
         try {
-          const cred = await createUserWithEmailAndPassword(
-            auth,
+          const fn = httpsCallable(functions, "signupFieldWorker");
+
+          const res = await fn({
             email,
             password,
-          );
-          const uid = cred.user.uid;
-
-          await setDoc(doc(db, "users", uid), {
-            uid,
-            // 🛡️ Aligned to Schema v0.2 (Master Switch)
-            accountStatus: "DISABLED",
-            employment: {
-              // 🛡️ Reflect the operative's selected role so Zamo can see it
-              role: role || "GST",
-              serviceProvider: {
-                id: serviceProvider.id,
-                name: serviceProvider.name,
-              },
-              level: role === "SPV" ? 4 : 2, // Default levels for SPV (4) and FWR (2)
-            },
-            access: {
-              workbases: [],
-              activeWorkbase: null,
-            },
-            onboarding: {
-              // 🛑 Aligned to the Onboarding Matrix state
-              status: "AWAITING-MNG-CONFIRMATION",
-            },
-            profile: {
-              displayName: `${name} ${surname}`,
-              email: email.toLowerCase().trim(),
-              name: name.trim(),
-              surname: surname.trim(),
-            },
-            metadata: {
-              createdAt: serverTimestamp(),
-              createdByUid: uid, // Self-created
-              createdByUser: `${surname} ${name}`,
-              updatedAt: serverTimestamp(),
-            },
+            name,
+            surname,
+            serviceProvider, // { id, name }
           });
 
-          return { data: true };
+          console.log("signupFieldWorker res:", res);
+
+          return { data: res.data };
         } catch (error) {
-          return { error };
+          console.error("signup ----error", error);
+
+          return {
+            error: {
+              message: error?.message || "Could not complete signup.",
+            },
+          };
         }
       },
     }),
+
+    // signup: builder.mutation({
+    //   async queryFn({ email, password, name, surname, serviceProvider, role }) {
+    //     try {
+    //       const cred = await createUserWithEmailAndPassword(
+    //         auth,
+    //         email,
+    //         password,
+    //       );
+    //       const uid = cred.user.uid;
+
+    //       await setDoc(doc(db, "users", uid), {
+    //         uid,
+    //         // 🛡️ Aligned to Schema v0.2 (Master Switch)
+    //         accountStatus: "DISABLED",
+    //         employment: {
+    //           // 🛡️ Reflect the operative's selected role so Zamo can see it
+    //           role: role || "GST",
+    //           serviceProvider: {
+    //             id: serviceProvider.id,
+    //             name: serviceProvider.name,
+    //           },
+    //           level: role === "SPV" ? 4 : 2, // Default levels for SPV (4) and FWR (2)
+    //         },
+    //         access: {
+    //           workbases: [],
+    //           activeWorkbase: null,
+    //         },
+    //         onboarding: {
+    //           // 🛑 Aligned to the Onboarding Matrix state
+    //           status: "AWAITING-MNG-CONFIRMATION",
+    //         },
+    //         profile: {
+    //           displayName: `${name} ${surname}`,
+    //           email: email.toLowerCase().trim(),
+    //           name: name.trim(),
+    //           surname: surname.trim(),
+    //         },
+    //         metadata: {
+    //           createdAt: serverTimestamp(),
+    //           createdByUid: uid, // Self-created
+    //           createdByUser: `${surname} ${name}`,
+    //           updatedAt: serverTimestamp(),
+    //         },
+    //       });
+
+    //       return { data: true };
+    //     } catch (error) {
+    //       return { error };
+    //     }
+    //   },
+    // }),
 
     /* =====================================================
        SIGN IN
@@ -288,18 +247,12 @@ export const authApi = createApi({
     /* =====================================================
        SIGN OUT
        ===================================================== */
-
     signout: builder.mutation({
       async queryFn(_, { dispatch }) {
         try {
           await signOut(auth);
 
-          // 🔥 CLEAR ALL FIRESTORE LISTENERS
-          dispatch(authApi.util.resetApiState());
-          // dispatch(geoApi.util.resetApiState());
-          // add other APIs here (astsApi, erfsApi, etc.)
-
-          clearAuthState();
+          dispatch(clearAuthState());
 
           return { data: true };
         } catch (error) {
@@ -313,72 +266,16 @@ export const authApi = createApi({
         ===================================================== */
 
     updateProfile: builder.mutation({
-      async queryFn({ uid, update }) {
-        // 🎯 Matches the component: { uid, update }
+      async queryFn({ uid, updates }) {
         try {
           const userRef = doc(db, "users", uid);
-
-          // We use the values passed from the handleAuthorize function
-          await updateDoc(userRef, update);
-
+          await updateDoc(userRef, updates);
           return { data: true };
         } catch (error) {
           return { error };
         }
       },
     }),
-
-    // updateProfile: builder.mutation({
-    //   async queryFn({ uid, updates }) {
-    //     try {
-    //       const userRef = doc(db, "users", uid);
-
-    //       await updateDoc(userRef, {
-    //         ...updates,
-    //         "metadata.updatedAt": serverTimestamp(),
-    //         "metadata.updatedByUid": uid,
-    //       });
-
-    //       return { data: true };
-    //     } catch (error) {
-    //       return { error };
-    //     }
-    //   },
-
-    //   // 🚀 THE RERENDER TRIGGER: Manually sync the local RAM cache
-    //   async onQueryStarted({ uid, updates }, { dispatch, queryFulfilled }) {
-    //     try {
-    //       await queryFulfilled; // Wait for Firestore success
-
-    //       dispatch(
-    //         authApi.util.updateQueryData("getAuthState", undefined, (draft) => {
-    //           // 🎯 Update the local profile object so useAuth() reacts immediately
-    //           if (draft.profile && draft.auth?.uid === uid) {
-    //             // Handle the "access.activeWorkbase" dot notation specifically
-    //             if (updates["access.activeWorkbase"]) {
-    //               draft.profile.access.activeWorkbase =
-    //                 updates["access.activeWorkbase"];
-    //             }
-
-    //             // Handle other potential updates
-    //             Object.entries(updates).forEach(([key, value]) => {
-    //               if (key !== "access.activeWorkbase") {
-    //                 draft.profile[key] = value;
-    //               }
-    //             });
-
-    //             console.log(
-    //               "🧠 [CACHE SYNC]: Local profile updated to",
-    //               updates["access.activeWorkbase"]?.name,
-    //             );
-    //           }
-    //         }),
-    //       );
-    //     } catch (err) {
-    //       console.error("Cache Sync Failed:", err);
-    //     }
-    //   },
-    // }),
 
     /* =====================================================
    SET / SWITCH ACTIVE WORKBASE
@@ -602,24 +499,28 @@ export const authApi = createApi({
     }),
 
     /* =====================================================
-       INVITE MNG (SPU ONLY)
-       ===================================================== */
+   INVITE MNG (SPU / ADM)
+   ===================================================== */
     // src/redux/authApi.js
     inviteMng: builder.mutation({
-      async queryFn({ email, name, surname, mnc, workbases }) {
+      async queryFn({ email, name, surname, mnc }) {
         try {
           const fn = httpsCallable(functions, "inviteManagerUser");
+
           const res = await fn({
             email,
             name,
             surname,
-            mnc, // Single object: { id: 'SP_RSTE_01', name: 'RSTE' }
-            workbases, // Array of LMs: [{ id: 'ZA1048', name: 'Knysna LM' }, { id: 'WC048', name: 'Bitou' }]
+            mnc, // { id, name }
           });
-
+          console.log(`MNG created res: `, res);
           return { data: res.data };
         } catch (error) {
-          return { error: { message: error.message } };
+          return {
+            error: {
+              message: error?.message || "Could not invite manager.",
+            },
+          };
         }
       },
       invalidatesTags: ["User"],
@@ -655,6 +556,57 @@ export const authApi = createApi({
       // This tells Redux to refetch the users list so the new ADM appears immediately.
       invalidatesTags: ["User"],
     }),
+
+    /* =====================================================
+       INVITE SPV (MNG ONLY)
+       ===================================================== */
+    inviteSpv: builder.mutation({
+      async queryFn({ email, name, surname, serviceProvider }) {
+        try {
+          const fn = httpsCallable(functions, "inviteSupervisorUser");
+
+          const res = await fn({
+            email,
+            name,
+            surname,
+            serviceProvider, // { id, name }
+          });
+
+          console.log(`SPV created res: `, res);
+
+          return { data: res.data };
+        } catch (error) {
+          console.error("inviteSpv ----error", error);
+
+          return {
+            error: {
+              message: error?.message || "Could not invite supervisor.",
+            },
+          };
+        }
+      },
+      invalidatesTags: ["User"],
+    }),
+
+    /* =====================================================
+       AUTHORISE FWR (MNG ONLY)
+       ===================================================== */
+    authorizeFwr: builder.mutation({
+      async queryFn({ uid }) {
+        try {
+          const fn = httpsCallable(functions, "authorizeFieldWorker");
+          const res = await fn({ uid });
+          return { data: res.data };
+        } catch (error) {
+          return {
+            error: {
+              message: error?.message || "Could not authorize field worker.",
+            },
+          };
+        }
+      },
+      invalidatesTags: ["User"],
+    }),
   }),
 });
 
@@ -663,7 +615,7 @@ export const authApi = createApi({
    ===================================================== */
 export const {
   useGetAuthStateQuery,
-  useSignupGstMutation,
+  useSignupMutation,
   useSigninMutation,
   useSignoutMutation,
   useUpdateProfileMutation,
@@ -677,4 +629,6 @@ export const {
   useCreateAdminUserMutation,
   useInviteMngMutation,
   useInviteAdminMutation,
+  useInviteSpvMutation,
+  useAuthorizeFwrMutation,
 } = authApi;

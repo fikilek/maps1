@@ -14,8 +14,6 @@ export const WaterSections = ({
   disabled,
   agentName,
   agentUid,
-  errors,
-  setShowMapPicker, // 🛰️ Passed from parent
   erfBoundary = [],
   erfNo = "",
   erfCentroid = null,
@@ -34,6 +32,7 @@ export const WaterSections = ({
           tag={"astNoPhoto"}
           agentName={agentName}
           agentUid={agentUid}
+          fallbackGps={landingPoint}
         />
 
         <FormSelect
@@ -60,13 +59,16 @@ export const WaterSections = ({
           label="Meter Reading"
           name="ast.meterReading"
           disabled={disabled}
+          keyboardType="numeric"
+          numbersOnly={true}
         />
 
-        {values?.ast?.meterReading && (
+        {values?.ast?.meterReading?.trim() && (
           <IrepsMedia
             tag={"meterReadingPhoto"}
             agentName={agentName}
             agentUid={agentUid}
+            fallbackGps={landingPoint}
           />
         )}
       </FormSection>

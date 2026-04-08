@@ -2,110 +2,104 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useMemo } from "react";
-import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { Avatar, Button, Card, Chip, Text } from "react-native-paper";
 import { useAuth } from "../../../../src/hooks/useAuth";
-import { useUpdateProfileMutation } from "../../../../src/redux/authApi";
 import { useGetServiceProvidersQuery } from "../../../../src/redux/spApi";
 import { useGetUsersQuery } from "../../../../src/redux/usersApi";
 
+function getServiceProviderParentSpClient(serviceProvider) {
+  const clients = Array.isArray(serviceProvider?.clients)
+    ? serviceProvider.clients
+    : [];
+
+  return (
+    clients.find(
+      (client) =>
+        client?.clientType === "SP" &&
+        client?.relationshipType === "SUBC" &&
+        client?.id,
+    ) || null
+  );
+}
+
+function getDirectSubcChildren(parentSpId, allServiceProviders = []) {
+  return allServiceProviders.filter((serviceProvider) => {
+    const parentSpClient = getServiceProviderParentSpClient(serviceProvider);
+    return parentSpClient?.id === parentSpId;
+  });
+}
+
+function collectMngTreeServiceProviderIds(
+  rootSpId,
+  allServiceProviders = [],
+  visitedIds = new Set(),
+) {
+  if (!rootSpId) return [];
+  if (visitedIds.has(rootSpId)) return [];
+
+  visitedIds.add(rootSpId);
+
+  const childProviders = getDirectSubcChildren(rootSpId, allServiceProviders);
+
+  const childIds = childProviders.flatMap((childProvider) =>
+    collectMngTreeServiceProviderIds(
+      childProvider.id,
+      allServiceProviders,
+      visitedIds,
+    ),
+  );
+
+  return [rootSpId, ...childIds];
+}
+
 export default function PendingAuthorizations() {
-  const loggedUser = useAuth();
-  const { user, isMNG, isSPU, isADM, profile: authProfile } = loggedUser;
-
   const router = useRouter();
+  const { isMNG, isSPU, isADM, profile: authProfile } = useAuth();
 
-  // 🛰️ 1. Fetch all Service Providers to identify the "Family Tree"
-  const { data: allSps } = useGetServiceProvidersQuery();
+  const { data: allSps = [], isLoading: spsLoading } =
+    useGetServiceProvidersQuery();
 
-  // 🛰️ 2. Fetch all users in the pending state
-  const { data: allUsers, isLoading: usersLoading } = useGetUsersQuery();
-  // console.log(`PendingAuthorizations --allUsers`, allUsers);
-
-  const [updateProfile, { isLoading: isUpdating }] = useUpdateProfileMutation();
+  const { data: allUsers = [], isLoading: usersLoading } = useGetUsersQuery();
 
   const filteredRecruits = useMemo(() => {
-    if (!allUsers || !allSps) return [];
+    if (!Array.isArray(allUsers) || !Array.isArray(allSps)) return [];
 
     const pendingPool = allUsers.filter(
-      (u) => u.onboarding?.status === "AWAITING-MNG-CONFIRMATION",
+      (user) => user?.onboarding?.status === "AWAITING-MNG-CONFIRMATION",
     );
 
-    if (isSPU || isADM) return pendingPool;
+    if (isSPU || isADM) {
+      return pendingPool;
+    }
 
     if (isMNG) {
-      const mySpId = user.employment?.serviceProvider?.id;
+      const mySpId = authProfile?.employment?.serviceProvider?.id || null;
+      if (!mySpId) return [];
 
-      // 🛰️ Identify the SUBS (Children) who list the Manager's SP as a client
-      const mySubs = allSps
-        .filter((sp) => sp.clients?.some((c) => c.id === mySpId))
-        .map((sp) => sp.id);
-
-      // 🛡️ The MNG sees recruits from their own SP AND their Sub-contractor SPs
-      const authorizedSpIds = [mySpId, ...mySubs];
+      const authorizedSpIds = collectMngTreeServiceProviderIds(
+        mySpId,
+        allSps,
+        new Set(),
+      );
 
       return pendingPool.filter((recruit) =>
-        authorizedSpIds.includes(recruit.employment?.serviceProvider?.id),
+        authorizedSpIds.includes(recruit?.employment?.serviceProvider?.id),
       );
     }
 
     return [];
-  }, [allUsers, allSps, user, isMNG, isSPU, isADM]);
-  // console.log(`PendingAuthorizations --filteredRecruits`, filteredRecruits);
+  }, [allUsers, allSps, authProfile, isMNG, isSPU, isADM]);
 
-  const handleAuthorize = (recruit) => {
-    // 🛰️ SIGNAL RECOVERY: Direct inheritance from the Manager's logs
-    const managerWorkbases = loggedUser.workbases || [];
+  const isLoading = usersLoading || spsLoading;
 
-    Alert.alert(
-      "Mobilise Operative",
-      `Authorize ${recruit.profile.name} and grant inheritance of ${managerWorkbases.length} workbases?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "CONFIRM AUTHORIZATION",
-          onPress: async () => {
-            try {
-              const authorizerName =
-                authProfile?.profile?.displayName ||
-                user?.displayName ||
-                "System Admin";
-
-              // 🎯 TACTICAL ALIGNMENT: Calling the actual endpoint name
-              await updateProfile({
-                uid: recruit.uid,
-                update: {
-                  accountStatus: "ENABLED",
-                  "onboarding.status": "COMPLETED",
-                  "access.workbases": managerWorkbases,
-                  "metadata.updatedAt": new Date().toISOString(),
-                  "metadata.updatedByUser": authorizerName,
-                },
-              }).unwrap();
-
-              Alert.alert(
-                "Success",
-                "Territory inherited. Operative mobilized.",
-              );
-            } catch (err) {
-              console.log(`Update failure :`, err);
-              Alert.alert(
-                "Error",
-                "The Garrison failed to sync the inheritance.",
-              );
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  if (usersLoading)
+  if (isLoading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#2563eb" />
       </View>
     );
+  }
 
   return (
     <View style={styles.container}>
@@ -123,29 +117,33 @@ export default function PendingAuthorizations() {
         renderItem={({ item }) => (
           <Card style={styles.card} elevation={2}>
             <Card.Title
-              title={`${item.profile.name} ${item.profile.surname}`}
-              subtitle={item.profile.email}
+              title={`${item?.profile?.name || "NAv"} ${
+                item?.profile?.surname || ""
+              }`.trim()}
+              subtitle={item?.profile?.email || "NAv"}
               left={(props) => (
                 <Avatar.Text
                   {...props}
-                  label={item.profile.name[0]}
+                  label={item?.profile?.name?.[0] || "?"}
                   style={{
                     backgroundColor:
-                      item.employment.role === "SPV" ? "#8b5cf6" : "#2563eb",
+                      item?.employment?.role === "SPV" ? "#8b5cf6" : "#2563eb",
                   }}
                 />
               )}
             />
+
             <Card.Content>
               <View style={styles.badgeRow}>
                 <Chip icon="office-building" style={styles.chip}>
-                  {item.employment.serviceProvider?.name}
+                  {item?.employment?.serviceProvider?.name || "NAv"}
                 </Chip>
                 <Chip icon="account-hard-hat" style={styles.chip}>
-                  {item.employment.role}
+                  {item?.employment?.role || "NAv"}
                 </Chip>
               </View>
             </Card.Content>
+
             <Card.Actions style={styles.actions}>
               <Button
                 mode="outlined"
@@ -194,7 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 16,
     backgroundColor: "#fff",
-    borderWeight: 1,
+    borderWidth: 1,
     borderColor: "#e2e8f0",
   },
   badgeRow: { flexDirection: "row", gap: 8, marginTop: 4 },

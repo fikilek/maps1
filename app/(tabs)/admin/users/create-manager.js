@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Formik } from "formik";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -13,7 +13,6 @@ import {
 import {
   ActivityIndicator,
   Button,
-  Chip,
   Divider,
   List,
   Modal,
@@ -23,64 +22,86 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useInviteMngMutation } from "../../../../src/redux/authApi";
-import { useGetLmsByCountryQuery } from "../../../../src/redux/geoApi";
 import { useGetServiceProvidersQuery } from "../../../../src/redux/spApi";
 
 export default function CreateManagerScreen() {
   const router = useRouter();
   const [inviteMng, { isLoading: isInviting }] = useInviteMngMutation();
 
-  // 🛰️ LIVE DATA STREAMS
   const { data: allSPs = [], isLoading: loadingSPs } =
     useGetServiceProvidersQuery();
-  const { data: allLMs = [], isLoading: loadingLMs } =
-    useGetLmsByCountryQuery("ZA");
 
-  // 📝 LOCAL STATE FOR SELECTIONS
   const [selectedMNC, setSelectedMNC] = useState(null);
-  const [selectedLMs, setSelectedLMs] = useState([]);
   const [mncModal, setMncModal] = useState(false);
-  const [lmModal, setLmModal] = useState(false);
 
-  // 🕵️ FILTER: Only show Main Contractors
-  const mncList = allSPs.filter((sp) => sp?.profile?.classification === "MNC");
+  // Current rule:
+  // An SP is valid for MNG creation if:
+  // - status === ACTIVE
+  // - clients is a non-empty array
+  // - at least one client has clientType === "LM"
+  const mncList = useMemo(() => {
+    return (allSPs || []).filter((sp) => {
+      const status = String(sp?.status || "").toUpperCase();
+      const clients = Array.isArray(sp?.clients) ? sp.clients : [];
+      const hasLmClient = clients.some((client) => client?.clientType === "LM");
 
-  const toggleLM = (lm) => {
-    const exists = selectedLMs?.find((item) => item?.id === lm?.id);
-    if (exists) {
-      setSelectedLMs(selectedLMs?.filter((item) => item?.id !== lm?.id));
-    } else {
-      setSelectedLMs([...selectedLMs, { id: lm?.id, name: lm?.name }]);
-    }
+      return status === "ACTIVE" && hasLmClient;
+    });
+  }, [allSPs]);
+
+  const getSpName = (sp) =>
+    sp?.profile?.tradingName ||
+    sp?.profile?.registeredName ||
+    sp?.name ||
+    "NAv";
+
+  const getSpLmCount = (sp) => {
+    const clients = Array.isArray(sp?.clients) ? sp.clients : [];
+    return clients.filter((client) => client?.clientType === "LM").length;
   };
 
   const handleSubmit = async (values) => {
-    if (!selectedMNC)
+    if (
+      !values?.email?.trim() ||
+      !values?.name?.trim() ||
+      !values?.surname?.trim()
+    ) {
+      return Alert.alert("Hold!", "Email, name and surname are required.");
+    }
+
+    if (!selectedMNC?.id) {
       return Alert.alert("Hold!", "Select a Main Contractor first.");
-    if (selectedLMs.length === 0)
-      return Alert.alert("Hold!", "Assign at least one territory.");
-    console.log(`values`, values);
+    }
+
     try {
       await inviteMng({
-        email: values?.email?.toLowerCase()?.trim(),
-        name: values?.name,
-        surname: values?.surname,
-        mnc: { id: selectedMNC?.id, name: selectedMNC?.profile?.name },
-        workbases: selectedLMs,
+        email: values.email.toLowerCase().trim(),
+        name: values.name.trim(),
+        surname: values.surname.trim(),
+        mnc: {
+          id: selectedMNC.id,
+          name: getSpName(selectedMNC),
+        },
       }).unwrap();
 
-      Alert.alert("Mission Confirmed", `Manager ${values?.name} invited.`);
+      Alert.alert(
+        "Mission Confirmed",
+        `Manager ${values.name.trim()} invited successfully.`,
+      );
       router.back();
     } catch (err) {
-      Alert.alert("Command Error", err?.message || "Could not invite manager");
+      Alert.alert(
+        "Command Error",
+        err?.data || err?.message || "Could not invite manager.",
+      );
     }
   };
 
-  if (loadingSPs || loadingLMs) {
+  if (loadingSPs) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#2563eb" />
-        <Text style={styles.loadingText}>Syncing Sovereign Registries...</Text>
+        <Text style={styles.loadingText}>Syncing Service Providers...</Text>
       </View>
     );
   }
@@ -98,22 +119,25 @@ export default function CreateManagerScreen() {
             <View style={styles.form}>
               <TextInput
                 label="Email Address"
-                value={values?.email}
+                value={values.email}
                 onChangeText={handleChange("email")}
                 mode="outlined"
+                keyboardType="email-address"
+                autoCapitalize="none"
                 style={styles.input}
               />
+
               <View style={styles.row}>
                 <TextInput
                   label="First Name"
-                  value={values?.name}
+                  value={values.name}
                   onChangeText={handleChange("name")}
                   mode="outlined"
                   style={[styles.input, { flex: 1 }]}
                 />
                 <TextInput
                   label="Surname"
-                  value={values?.surname}
+                  value={values.surname}
                   onChangeText={handleChange("surname")}
                   mode="outlined"
                   style={[styles.input, { flex: 1 }]}
@@ -122,7 +146,7 @@ export default function CreateManagerScreen() {
 
               <Divider style={styles.divider} />
 
-              {/* 🏗️ MNC SELECTOR */}
+              {/* MNC SELECTOR */}
               <TouchableOpacity
                 onPress={() => setMncModal(true)}
                 style={styles.selector}
@@ -130,17 +154,30 @@ export default function CreateManagerScreen() {
                 <Text style={styles.boxLabel}>
                   Assigned Main Contractor (MNC)
                 </Text>
+
                 <View style={styles.selectorInner}>
-                  <Text
-                    style={[
-                      styles.selectedText,
-                      !selectedMNC && styles.placeholder,
-                    ]}
-                  >
-                    {selectedMNC
-                      ? selectedMNC?.profile?.name
-                      : "Select Contractor..."}
-                  </Text>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text
+                      style={[
+                        styles.selectedText,
+                        !selectedMNC && styles.placeholder,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {selectedMNC
+                        ? getSpName(selectedMNC)
+                        : "Select Main Contractor..."}
+                    </Text>
+
+                    {!!selectedMNC && (
+                      <Text style={styles.helperText} numberOfLines={1}>
+                        {getSpLmCount(selectedMNC)} LM workbase
+                        {getSpLmCount(selectedMNC) === 1 ? "" : "s"} will be
+                        inherited automatically
+                      </Text>
+                    )}
+                  </View>
+
                   <MaterialCommunityIcons
                     name="office-building"
                     size={20}
@@ -149,44 +186,14 @@ export default function CreateManagerScreen() {
                 </View>
               </TouchableOpacity>
 
-              {/* 🌍 LM SELECTOR */}
-              <TouchableOpacity
-                onPress={() => setLmModal(true)}
-                style={styles.selector}
-              >
-                <Text style={styles.boxLabel}>
-                  Operational Territories (Workbases)
+              {/* INFO BOX */}
+              <View style={styles.infoBox}>
+                <Text style={styles.infoTitle}>Workbase Inheritance</Text>
+                <Text style={styles.infoText}>
+                  You do not assign workbases manually here. When the Manager is
+                  created, the system reads LM clients from the selected Service
+                  Provider and inherits those workbases automatically.
                 </Text>
-                <View style={styles.selectorInner}>
-                  <Text
-                    style={[
-                      styles.selectedText,
-                      selectedLMs?.length === 0 && styles.placeholder,
-                    ]}
-                  >
-                    {selectedLMs?.length > 0
-                      ? `${selectedLMs?.length} Selected`
-                      : "Select Workbases..."}
-                  </Text>
-                  <MaterialCommunityIcons
-                    name="map-marker-multiple"
-                    size={20}
-                    color="#2563eb"
-                  />
-                </View>
-              </TouchableOpacity>
-
-              {/* 🏷️ CHIP DISPLAY */}
-              <View style={styles.chipRow}>
-                {selectedLMs?.map((lm) => (
-                  <Chip
-                    key={lm?.id}
-                    onClose={() => toggleLM(lm)}
-                    style={styles.chip}
-                  >
-                    {lm?.name}
-                  </Chip>
-                ))}
               </View>
 
               <Button
@@ -202,56 +209,36 @@ export default function CreateManagerScreen() {
           )}
         </Formik>
 
-        {/* 🏛️ MODALS */}
         <Portal>
           <Modal
             visible={mncModal}
             onDismiss={() => setMncModal(false)}
             contentContainerStyle={styles.modal}
           >
-            <Text style={styles.modalTitle}>Select MNC</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
-              {mncList?.map((mnc) => (
-                <List.Item
-                  key={mnc?.id}
-                  title={mnc?.profile?.name}
-                  onPress={() => {
-                    setSelectedMNC(mnc);
-                    setMncModal(false);
-                  }}
-                  left={(p) => <List.Icon {...p} icon="office-building" />}
-                />
-              ))}
-            </ScrollView>
-          </Modal>
+            <Text style={styles.modalTitle}>Select Main Contractor</Text>
 
-          <Modal
-            visible={lmModal}
-            onDismiss={() => setLmModal(false)}
-            contentContainerStyle={styles.modal}
-          >
-            <Text style={styles.modalTitle}>Select Workbases</Text>
-            <ScrollView style={{ maxHeight: 400 }}>
-              {allLMs?.map((lm) => (
-                <List.Item
-                  key={lm?.id}
-                  title={lm?.name}
-                  onPress={() => toggleLM(lm)}
-                  right={(p) =>
-                    selectedLMs.find((s) => s?.id === lm?.id) && (
-                      <List.Icon {...p} icon="check" color="#2563eb" />
-                    )
-                  }
-                />
-              ))}
+            <ScrollView style={{ maxHeight: 360 }}>
+              {mncList.length === 0 ? (
+                <Text style={styles.emptyText}>
+                  No active Service Providers with LM clients found.
+                </Text>
+              ) : (
+                mncList.map((mnc) => (
+                  <List.Item
+                    key={mnc?.id}
+                    title={getSpName(mnc)}
+                    description={`${getSpLmCount(mnc)} LM workbase${
+                      getSpLmCount(mnc) === 1 ? "" : "s"
+                    }`}
+                    onPress={() => {
+                      setSelectedMNC(mnc);
+                      setMncModal(false);
+                    }}
+                    left={(p) => <List.Icon {...p} icon="office-building" />}
+                  />
+                ))
+              )}
             </ScrollView>
-            <Button
-              onPress={() => setLmModal(false)}
-              mode="contained"
-              style={{ marginTop: 10 }}
-            >
-              DONE
-            </Button>
           </Modal>
         </Portal>
       </ScrollView>
@@ -279,7 +266,7 @@ const styles = StyleSheet.create({
   },
   form: { gap: 12 },
   row: { flexDirection: "row", gap: 10 },
-  input: { backgroundColor: "#698d96" },
+  input: { backgroundColor: "#f8fafc" },
   divider: { marginVertical: 8, backgroundColor: "transparent" },
   selector: {
     padding: 16,
@@ -300,14 +287,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
   },
-  selectedText: { fontSize: 15, fontWeight: "700", color: "#1e293b" },
+  selectedText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1e293b",
+  },
   placeholder: { color: "#94a3b8" },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
-  chip: { backgroundColor: "#769ac9" },
+  helperText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#64748b",
+  },
+  infoBox: {
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
+  infoTitle: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#1d4ed8",
+    textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  infoText: {
+    fontSize: 12,
+    color: "#1e3a8a",
+    lineHeight: 18,
+  },
   submitBtn: {
     marginTop: 20,
     borderRadius: 12,
-    backgroundColor: "#71ed61",
+    backgroundColor: "#2563eb",
     height: 50,
     justifyContent: "center",
   },
@@ -322,5 +335,10 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#1e293b",
     marginBottom: 16,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: "#64748b",
+    paddingVertical: 12,
   },
 });

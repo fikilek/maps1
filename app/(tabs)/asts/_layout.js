@@ -1,22 +1,12 @@
 import { Stack } from "expo-router";
 import { useMemo } from "react";
 import SovereignHeader from "../../../components/SovereignHeader";
-import { useGeo } from "../../../src/context/GeoContext";
+import { useWarehouse } from "../../../src/context/WarehouseContext";
 import { useAstFilter } from "../../../src/hooks/useAstFilter";
-import { useGetAstsByLmPcodeQuery } from "../../../src/redux/astsApi";
 
 export default function AstsLayout() {
-  const { geoState } = useGeo();
-  const lmPcode = geoState?.selectedLm?.id;
+  const { all } = useWarehouse();
 
-  // 🏛️ TACTICAL DATA HOOK
-  // Fetching here ensures the Header has access to the length immediately
-  const { data: asts, isLoading } = useGetAstsByLmPcodeQuery(
-    { lmPcode },
-    { skip: !lmPcode },
-  );
-
-  // 🎯 FILTER HOOK
   const {
     showFilters,
     setShowFilters,
@@ -25,23 +15,22 @@ export default function AstsLayout() {
     showSearch,
     setShowSearch,
     filterState,
-    setFilterState,
     resetFilters,
   } = useAstFilter();
 
-  // 📊 CALCULATION OF RATIOS
-  // We calculate the filtered count here to pass it to the "Filtered Pod"
   const filteredMeters = useMemo(() => {
-    let list = asts || [];
+    let list = all?.meters || [];
+
     if (filterState.mosiGroup) {
-      // Add your specific G1-R5 filtering logic here
       list = list.filter((a) => a.mosiGroup === filterState.mosiGroup);
     }
+
     if (filterState.status) {
       list = list.filter((a) => a.status === filterState.status);
     }
+
     return list;
-  }, [asts, filterState]);
+  }, [all?.meters, filterState]);
 
   const isFiltering =
     filterState.mosiGroup !== null || filterState.status !== null;
@@ -54,7 +43,7 @@ export default function AstsLayout() {
           header: () => (
             <SovereignHeader
               title="METERS"
-              totalCount={asts?.length || 0}
+              totalCount={all?.meters?.length || 0}
               filteredCount={filteredMeters?.length || 0}
               isFiltering={isFiltering}
               filterCount={
@@ -70,16 +59,13 @@ export default function AstsLayout() {
         }}
       />
 
-      {/* 🚀 Asset Lifecycle Report */}
       <Stack.Screen
         name="[id]"
         options={{
-          title: "Meter Report",
-          headerShown: true, // We use our own custom header in [id].js
+          headerShown: false,
         }}
       />
 
-      {/* 📸 Asset Media Gallery/Camera Strike */}
       <Stack.Screen
         name="media"
         options={{
@@ -91,7 +77,7 @@ export default function AstsLayout() {
             letterSpacing: 1,
           },
           headerShadowVisible: true,
-          presentation: "modal", // Gives it a focused "overlay" feel
+          presentation: "modal",
         }}
       />
 

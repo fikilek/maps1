@@ -1,15 +1,49 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
   orderBy,
   query,
+  setDoc,
   where,
 } from "firebase/firestore";
 import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
+
+function sortTrnsByUpdatedAtDesc(list) {
+  list.sort((a, b) => {
+    const aAt =
+      a?.accessData?.metadata?.updatedAt ||
+      a?.accessData?.metadata?.updated?.at ||
+      "";
+    const bAt =
+      b?.accessData?.metadata?.updatedAt ||
+      b?.accessData?.metadata?.updated?.at ||
+      "";
+
+    return String(bAt).localeCompare(String(aAt));
+  });
+}
+
+function normalizeMeterNo(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function getUpdatedAt(meta) {
+  return meta?.updatedAt || meta?.updated?.at || new Date().toISOString();
+}
+
+function getUpdatedByUid(meta) {
+  return meta?.updatedByUid || meta?.updated?.byUid || "NAv";
+}
+
+function getUpdatedByUser(meta) {
+  return meta?.updatedByUser || meta?.updated?.byUser || "NAv";
+}
 
 export const trnsApi = createApi({
   reducerPath: "trnsApi",
@@ -24,208 +58,367 @@ export const trnsApi = createApi({
     addTrn: builder.mutation({
       async queryFn(payload) {
         try {
-          const docRef = await addDoc(collection(db, "trns"), payload);
-          return { data: { id: docRef.id, ...payload } };
+          const { id, ...docData } = payload;
+
+          await setDoc(doc(db, "trns", id), docData);
+
+          return { data: payload };
         } catch (error) {
           return { error };
         }
       },
-      async onQueryStarted(payload, { dispatch, queryFulfilled }) {
-        const { accessData, ast, meterType } = payload;
-        const { premise, metadata, erfId } = accessData;
-        const lmPcode = metadata?.lmPcode;
 
-        // 🆔 Temporary IDs for immediate UI feedback
-        const tempTrnId = `TEMP_TRN_${Date.now()}`;
-        const tempAstId = `TEMP_AST_${Date.now()}`;
+      async onQueryStarted(payload, { dispatch, queryFulfilled }) {
+        const { id, accessData, ast, meterType } = payload;
+
+        const trnId = id;
+        const astId = id;
+
+        const premise = accessData?.premise || null;
+        const erfId = accessData?.erfId || null;
+        const parents = accessData?.parents || {};
+        const metadata = accessData?.metadata || {};
+
+        const lmPcode = parents?.lmPcode || null;
+        const wardPcode = parents?.wardPcode || null;
+
+        const trnsArg = { lmPcode, wardPcode };
+        const premisesArg = { lmPcode, wardPcode };
+        const erfsArg = { lmPcode, wardPcode };
+        const astsArg = { lmPcode, wardPcode };
+
+        const isMeterDiscovery = accessData?.trnType === "METER_DISCOVERY";
+        const isNoAccess = accessData?.access?.hasAccess === "no";
+        const isAccessed = accessData?.access?.hasAccess === "yes";
+
+        const updatedAt = getUpdatedAt(metadata);
+        const updatedByUid = getUpdatedByUid(metadata);
+        const updatedByUser = getUpdatedByUser(metadata);
+
+        const normalizedMeterNo = normalizeMeterNo(ast?.astData?.astNo);
+
+        let patchTrns = null;
+        let patchPremises = null;
+        let patchErfs = null;
+        let patchAsts = null;
 
         try {
-          // 🛰️ Bridge imports
           const { premisesApi } = await import("./premisesApi");
           const { erfsApi } = await import("./erfsApi");
           const { astsApi } = await import("./astsApi");
 
-          // 🎯 1. OPTIMISTIC TRANSACTION (The Audit Log)
-          // We unshift to the top so Zamo sees his latest work instantly
-          dispatch(
-            trnsApi.util.updateQueryData(
-              "getTrnsByLmPcode",
-              lmPcode,
-              (draft) => {
-                draft.unshift({
-                  id: tempTrnId,
-                  ...payload,
-                  isOptimistic: true,
-                });
-              },
-            ),
-          );
-
-          // 🎯 2. OPTIMISTIC ASSET (The Map Circle)
-          if (
-            accessData.trnType === "METER_DISCOVERY" &&
-            accessData.access.hasAccess === "yes"
-          ) {
-            dispatch(
-              astsApi.util.updateQueryData(
-                "getAstsByLmPcode",
-                lmPcode,
+          // 1. OPTIMISTIC TRN INSERT
+          if (lmPcode && wardPcode) {
+            patchTrns = dispatch(
+              trnsApi.util.updateQueryData(
+                "getTrnsByLmPcodeWardPcode",
+                trnsArg,
                 (draft) => {
-                  draft.push({
-                    id: tempAstId,
-                    accessData,
-                    ast,
-                    meterType,
-                    metadata: { ...metadata, isOptimistic: true },
+                  if (!Array.isArray(draft)) return;
+
+                  const exists = draft.some((t) => t.id === trnId);
+                  if (!exists) {
+                    draft.unshift({
+                      ...payload,
+                      derived:
+                        isMeterDiscovery && isAccessed
+                          ? {
+                              astId,
+                              master: {
+                                id: normalizedMeterNo || "NAv",
+                                visibility: "NAv",
+                              },
+                              processedAt: updatedAt,
+                            }
+                          : undefined,
+                      isOptimistic: true,
+                    });
+                  }
+                },
+              ),
+            );
+          }
+
+          // 2. NO ACCESS BRANCH
+          if (
+            isMeterDiscovery &&
+            isNoAccess &&
+            premise?.id &&
+            lmPcode &&
+            wardPcode
+          ) {
+            patchPremises = dispatch(
+              premisesApi.util.updateQueryData(
+                "getPremisesByLmPcodeWardPcode",
+                premisesArg,
+                (draft) => {
+                  if (!Array.isArray(draft)) return;
+
+                  const p = draft.find((item) => item.id === premise.id);
+                  if (!p) return;
+
+                  const existingNoAccessTrnIds = Array.isArray(
+                    p?.metadata?.noAccessTrnIds,
+                  )
+                    ? p.metadata.noAccessTrnIds
+                    : [];
+
+                  if (!existingNoAccessTrnIds.includes(trnId)) {
+                    p.metadata = {
+                      ...p.metadata,
+                      noAccessTrnIds: [...existingNoAccessTrnIds, trnId],
+                      updatedAt,
+                      updatedByUid,
+                      updatedByUser,
+                    };
+                  }
+
+                  draft.sort((a, b) => {
+                    const aAt =
+                      a?.metadata?.updatedAt || a?.metadata?.updated?.at || "";
+                    const bAt =
+                      b?.metadata?.updatedAt || b?.metadata?.updated?.at || "";
+                    return String(bAt).localeCompare(String(aAt));
                   });
                 },
               ),
             );
-          }
 
-          // 🎯 3. OPTIMISTIC PREMISE (Occupancy + Service Link)
-          if (premise?.id) {
-            dispatch(
-              premisesApi.util.updateQueryData(
-                "getPremisesByLmPcode",
-                lmPcode,
-                (draft) => {
-                  const p = draft.find((item) => item.id === premise.id);
-                  if (p) {
-                    p.occupancy = { ...p.occupancy, status: "ACCESSED" };
-                    if (!p.services)
-                      p.services = { waterMeters: [], electricityMeters: [] };
-                    const field =
-                      meterType === "water"
-                        ? "waterMeters"
-                        : "electricityMeters";
-                    if (!p.services[field]) p.services[field] = [];
-                    p.services[field].push(tempAstId);
-                  }
-                },
-              ),
-            );
-          }
+            if (erfId) {
+              patchErfs = dispatch(
+                erfsApi.util.updateQueryData(
+                  "getErfsByLmPcodeWardPcode",
+                  erfsArg,
+                  (draft) => {
+                    const list = Array.isArray(draft)
+                      ? draft
+                      : Array.isArray(draft?.metaEntries)
+                        ? draft.metaEntries
+                        : Array.isArray(draft?.items)
+                          ? draft.items
+                          : null;
 
-          // 🎯 4. OPTIMISTIC ERF (Timestamp Pulse)
-          if (erfId) {
-            dispatch(
-              erfsApi.util.updateQueryData(
-                "getErfsByLmPcodeWardPcode",
-                lmPcode,
-                (draft) => {
-                  const targetErf = draft?.metaEntries?.find(
-                    (e) => e.id === erfId,
-                  );
-                  if (targetErf) {
+                    if (!list) return;
+
+                    const targetErf = list.find((e) => e?.id === erfId);
+                    if (!targetErf) return;
+
                     targetErf.metadata = {
                       ...targetErf.metadata,
-                      updatedAt: new Date().toISOString(),
+                      updatedAt,
+                      updatedByUid,
+                      updatedByUser,
                     };
+                  },
+                ),
+              );
+            }
+          }
+
+          // 3. ACCESS DISCOVERY BRANCH
+          if (
+            isMeterDiscovery &&
+            isAccessed &&
+            premise?.id &&
+            lmPcode &&
+            wardPcode
+          ) {
+            patchAsts = dispatch(
+              astsApi.util.updateQueryData(
+                "getAstsByLmPcodeWardPcode",
+                astsArg,
+                (draft) => {
+                  if (!Array.isArray(draft)) return;
+
+                  const exists = draft.some((a) => a.id === astId);
+                  if (!exists) {
+                    draft.unshift({
+                      id: astId,
+                      accessData,
+                      ast,
+                      meterType,
+                      media: payload?.media || [],
+                      trnId,
+                      master: {
+                        id: normalizedMeterNo || "NAv",
+                        visibility: "NAv",
+                      },
+                      metadata: {
+                        createdAt: metadata?.createdAt || updatedAt,
+                        createdByUid: metadata?.createdByUid || updatedByUid,
+                        createdByUser: metadata?.createdByUser || updatedByUser,
+                        updatedAt,
+                        updatedByUid,
+                        updatedByUser,
+                      },
+                      isOptimistic: true,
+                    });
+                  }
+                },
+              ),
+            );
+
+            patchPremises = dispatch(
+              premisesApi.util.updateQueryData(
+                "getPremisesByLmPcodeWardPcode",
+                premisesArg,
+                (draft) => {
+                  if (!Array.isArray(draft)) return;
+
+                  const p = draft.find((item) => item.id === premise.id);
+                  if (!p) return;
+
+                  const serviceField =
+                    meterType === "water" ? "waterMeters" : "electricityMeters";
+
+                  if (!p.services) {
+                    p.services = {
+                      waterMeters: [],
+                      electricityMeters: [],
+                    };
+                  }
+
+                  if (!Array.isArray(p.services[serviceField])) {
+                    p.services[serviceField] = [];
+                  }
+
+                  if (!p.services[serviceField].includes(astId)) {
+                    p.services[serviceField].push(astId);
+                  }
+
+                  p.occupancy = {
+                    ...p.occupancy,
+                    status: "Accessed",
+                  };
+
+                  p.metadata = {
+                    ...p.metadata,
+                    updatedAt,
+                    updatedByUid,
+                    updatedByUser,
+                  };
+
+                  draft.sort((a, b) => {
+                    const aAt =
+                      a?.metadata?.updatedAt || a?.metadata?.updated?.at || "";
+                    const bAt =
+                      b?.metadata?.updatedAt || b?.metadata?.updated?.at || "";
+                    return String(bAt).localeCompare(String(aAt));
+                  });
+                },
+              ),
+            );
+
+            if (erfId) {
+              patchErfs = dispatch(
+                erfsApi.util.updateQueryData(
+                  "getErfsByLmPcodeWardPcode",
+                  erfsArg,
+                  (draft) => {
+                    const list = Array.isArray(draft)
+                      ? draft
+                      : Array.isArray(draft?.metaEntries)
+                        ? draft.metaEntries
+                        : Array.isArray(draft?.items)
+                          ? draft.items
+                          : null;
+
+                    if (!list) return;
+
+                    const targetErf = list.find((e) => e?.id === erfId);
+                    if (!targetErf) return;
+
+                    targetErf.metadata = {
+                      ...targetErf.metadata,
+                      updatedAt,
+                      updatedByUid,
+                      updatedByUser,
+                    };
+                  },
+                ),
+              );
+            }
+          }
+
+          const { data: finalTrn } = await queryFulfilled;
+
+          if (lmPcode && wardPcode) {
+            dispatch(
+              trnsApi.util.updateQueryData(
+                "getTrnsByLmPcodeWardPcode",
+                trnsArg,
+                (draft) => {
+                  if (!Array.isArray(draft)) return;
+
+                  const index = draft.findIndex((t) => t.id === trnId);
+                  if (index !== -1) {
+                    draft[index] = finalTrn;
                   }
                 },
               ),
             );
           }
-
-          // 🏁 THE HANDSHAKE
-          const { data: finalTrn } = await queryFulfilled;
-
-          // Replace the TEMP Transaction with the REAL one to avoid duplicates
-          dispatch(
-            trnsApi.util.updateQueryData(
-              "getTrnsByLmPcode",
-              lmPcode,
-              (draft) => {
-                const index = draft.findIndex((t) => t.id === tempTrnId);
-                if (index > -1) draft[index] = finalTrn;
-              },
-            ),
-          );
         } catch (err) {
-          console.error("❌ [TRN_PULSE_ERROR]:", err);
-          // Optional: You could trigger a manual refetch here to clean up the TEMP data if it fails
+          console.error("❌ [ADD_TRN_OPTIMISTIC_FAIL]:", err);
+          patchTrns?.undo?.();
+          patchPremises?.undo?.();
+          patchErfs?.undo?.();
+          patchAsts?.undo?.();
         }
       },
     }),
-    getTrnsByLmPcode: builder.query({
+
+    getTrnsByLmPcodeWardPcode: builder.query({
       queryFn: () => ({ data: [] }),
       async onCacheEntryAdded(
-        lmPcode,
+        { lmPcode, wardPcode },
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
+
         try {
           await cacheDataLoaded;
 
-          // 🎯 1. CLOUD SORT: Newest first (Ensure you have a composite index for this!)
+          if (!lmPcode || !wardPcode) return;
+
           const q = query(
             collection(db, "trns"),
-            where("accessData.metadata.lmPcode", "==", lmPcode),
-            orderBy("accessData.metadata.updated.at", "desc"),
+            where("accessData.parents.lmPcode", "==", lmPcode),
+            where("accessData.parents.wardPcode", "==", wardPcode),
+            orderBy("accessData.metadata.updatedAt", "desc"),
           );
 
-          unsubscribe = onSnapshot(q, (snapshot) => {
-            updateCachedData((draft) => {
-              // 🎯 2. INITIAL SYNC: Direct mapping of the sorted snapshot
-              if (snapshot.docChanges().length === snapshot.docs.length) {
-                return snapshot.docs.map((doc) => ({
-                  id: doc.id,
-                  ...doc.data(),
+          unsubscribe = onSnapshot(
+            q,
+            (snapshot) => {
+              // console.log("TRN snapshot size", snapshot.size);
+              // console.log(
+              //   "TRN ids",
+              //   snapshot.docs.map((d) => d.id),
+              // );
+
+              updateCachedData(() => {
+                const next = snapshot.docs.map((docSnap) => ({
+                  id: docSnap.id,
+                  ...docSnap.data(),
                 }));
-              }
-
-              // 🎯 3. SURGICAL UPDATES: New transactions unshifted to index 0
-              snapshot.docChanges().forEach((change) => {
-                if (change.type === "added") {
-                  const trn = { id: change.doc.id, ...change.doc.data() };
-                  const exists = draft.find((t) => t.id === trn.id);
-
-                  // 🛡️ Always unshift to the top for "Audit Log" feel
-                  if (!exists) draft.unshift(trn);
-                }
+                // console.log(`getTrnsByLmPcodeWardPcode --next`, next);
+                sortTrnsByUpdatedAtDesc(next);
+                return next;
               });
-            });
-          });
-        } catch (err) {
-          console.error("❌ [TRN_STREAM_ERROR]:", err);
+            },
+            (error) => {
+              console.error("❌ [TRN_WARD_SNAPSHOT_ERROR]:", error);
+            },
+          );
+        } catch (error) {
+          console.error("❌ [TRN_WARD_STREAM_ERROR]:", error);
         }
+
         await cacheEntryRemoved;
         unsubscribe();
       },
     }),
-
-    // getTrnsByLmPcode: builder.query({
-    //   queryFn: () => ({ data: [] }),
-    //   async onCacheEntryAdded(
-    //     lmPcode,
-    //     { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-    //   ) {
-    //     let unsubscribe = () => {};
-    //     try {
-    //       await cacheDataLoaded;
-    //       const q = query(
-    //         collection(db, "trns"),
-    //         where("accessData.metadata.lmPcode", "==", lmPcode),
-    //         // orderBy("accessData.metadata.updated.at", "desc"),
-    //       );
-    //       unsubscribe = onSnapshot(q, (snapshot) => {
-    //         updateCachedData((draft) => {
-    //           snapshot.docChanges().forEach((change) => {
-    //             const trn = { id: change.doc.id, ...change.doc.data() };
-    //             if (change.type === "added") {
-    //               // Transactions are immutable, so we only care about 'added'
-    //               const exists = draft.find((t) => t.id === trn.id);
-    //               if (!exists) draft.unshift(trn);
-    //             }
-    //           });
-    //         });
-    //       });
-    //     } catch {}
-    //     await cacheEntryRemoved;
-    //     unsubscribe();
-    //   },
-    // }),
 
     getTrnsByPremiseId: builder.query({
       async queryFn() {
@@ -376,14 +569,62 @@ export const trnsApi = createApi({
         unsubscribe();
       },
     }),
+
+    getTrnsByLmPcode: builder.query({
+      queryFn: () => ({ data: [] }),
+      async onCacheEntryAdded(
+        lmPcode,
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribe = () => {};
+        try {
+          await cacheDataLoaded;
+
+          // 🎯 1. CLOUD SORT: Newest first (Ensure you have a composite index for this!)
+          const q = query(
+            collection(db, "trns"),
+            where("accessData.metadata.lmPcode", "==", lmPcode),
+            orderBy("accessData.metadata.updated.at", "desc"),
+          );
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            updateCachedData((draft) => {
+              // 🎯 2. INITIAL SYNC: Direct mapping of the sorted snapshot
+              if (snapshot.docChanges().length === snapshot.docs.length) {
+                return snapshot.docs.map((doc) => ({
+                  id: doc.id,
+                  ...doc.data(),
+                }));
+              }
+
+              // 🎯 3. SURGICAL UPDATES: New transactions unshifted to index 0
+              snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                  const trn = { id: change.doc.id, ...change.doc.data() };
+                  const exists = draft.find((t) => t.id === trn.id);
+
+                  // 🛡️ Always unshift to the top for "Audit Log" feel
+                  if (!exists) draft.unshift(trn);
+                }
+              });
+            });
+          });
+        } catch (err) {
+          console.error("❌ [TRN_STREAM_ERROR]:", err);
+        }
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
+    }),
   }),
 });
 
 export const {
   useAddTrnMutation,
-  useGetTrnsByLmPcodeQuery,
+  useGetTrnsByLmPcodeWardPcodeQuery,
   useGetTrnsByCountryCodeQuery,
   useGetTrnsByPremiseIdQuery,
   useGetTrnByIdQuery,
   useGetTrnsByAstNoQuery,
+  useGetTrnsByLmPcodeQuery,
 } = trnsApi;
