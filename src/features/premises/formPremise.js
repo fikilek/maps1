@@ -389,12 +389,6 @@ export default function FormPremise() {
   function buildSystemFields() {
     const timestamp = new Date().toISOString();
 
-    const agentStamp = {
-      at: timestamp,
-      byUser: agentName || "Field Agent",
-      byUid: agentUid || "unknown_uid",
-    };
-
     const stampedParents = {
       countryPcode: admin?.country?.pcode || null,
       provincePcode: admin?.province?.pcode || null,
@@ -409,8 +403,6 @@ export default function FormPremise() {
       "UNK";
 
     const safeErfNo = String(erfNo || "N-A").replace(/\//g, "-");
-    // console.log(`safeErfNo`, safeErfNo);
-    // console.log(`wardNo`, wardNo);
 
     const generatedId = `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`;
 
@@ -445,8 +437,27 @@ export default function FormPremise() {
         },
 
         metadata: {
-          created: sourcePremise?.metadata?.created || agentStamp,
-          updated: agentStamp,
+          createdAt:
+            sourcePremise?.metadata?.createdAt ||
+            sourcePremise?.metadata?.created?.at ||
+            timestamp,
+
+          createdByUid:
+            sourcePremise?.metadata?.createdByUid ||
+            sourcePremise?.metadata?.created?.byUid ||
+            agentUid ||
+            "unknown_uid",
+
+          createdByUser:
+            sourcePremise?.metadata?.createdByUser ||
+            sourcePremise?.metadata?.created?.byUser ||
+            agentName ||
+            "Field Agent",
+
+          updatedAt: timestamp,
+          updatedByUid: agentUid || "unknown_uid",
+          updatedByUser: agentName || "Field Agent",
+
           noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
             ? sourcePremise.metadata.noAccessTrnIds
             : [],
@@ -465,12 +476,104 @@ export default function FormPremise() {
         waterMeters: [],
       },
       metadata: {
-        created: agentStamp,
-        updated: agentStamp,
+        createdAt: timestamp,
+        createdByUid: agentUid || "unknown_uid",
+        createdByUser: agentName || "Field Agent",
+
+        updatedAt: timestamp,
+        updatedByUid: agentUid || "unknown_uid",
+        updatedByUser: agentName || "Field Agent",
+
         noAccessTrnIds: [],
       },
     };
   }
+
+  // function buildSystemFields() {
+  //   const timestamp = new Date().toISOString();
+
+  //   const agentStamp = {
+  //     at: timestamp,
+  //     byUser: agentName || "Field Agent",
+  //     byUid: agentUid || "unknown_uid",
+  //   };
+
+  //   const stampedParents = {
+  //     countryPcode: admin?.country?.pcode || null,
+  //     provincePcode: admin?.province?.pcode || null,
+  //     dmPcode: admin?.district?.pcode || null,
+  //     lmPcode: admin?.localMunicipality?.pcode || null,
+  //     wardPcode: admin?.ward?.pcode || null,
+  //   };
+
+  //   const wardNo =
+  //     admin?.ward?.name?.match(/\d+/)?.[0] ||
+  //     admin?.ward?.pcode?.slice(-3) ||
+  //     "UNK";
+
+  //   const safeErfNo = String(erfNo || "N-A").replace(/\//g, "-");
+  //   // console.log(`safeErfNo`, safeErfNo);
+  //   // console.log(`wardNo`, wardNo);
+
+  //   const generatedId = `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`;
+
+  //   if (isEdit) {
+  //     return {
+  //       id: sourcePremise?.id,
+  //       schemaVersion: sourcePremise?.schemaVersion || "1.0.0",
+  //       erfId: sourcePremise?.erfId || id,
+  //       erfNo: sourcePremise?.erfNo || erfNo,
+
+  //       parents: {
+  //         countryPcode:
+  //           sourcePremise?.parents?.countryPcode || stampedParents.countryPcode,
+  //         provincePcode:
+  //           sourcePremise?.parents?.provincePcode ||
+  //           stampedParents.provincePcode,
+  //         dmPcode: sourcePremise?.parents?.dmPcode || stampedParents.dmPcode,
+  //         lmPcode: sourcePremise?.parents?.lmPcode || stampedParents.lmPcode,
+  //         wardPcode:
+  //           sourcePremise?.parents?.wardPcode || stampedParents.wardPcode,
+  //       },
+
+  //       services: {
+  //         electricityMeters: Array.isArray(
+  //           sourcePremise?.services?.electricityMeters,
+  //         )
+  //           ? sourcePremise.services.electricityMeters
+  //           : [],
+  //         waterMeters: Array.isArray(sourcePremise?.services?.waterMeters)
+  //           ? sourcePremise.services.waterMeters
+  //           : [],
+  //       },
+
+  //       metadata: {
+  //         created: sourcePremise?.metadata?.created || agentStamp,
+  //         updated: agentStamp,
+  //         noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
+  //           ? sourcePremise.metadata.noAccessTrnIds
+  //           : [],
+  //       },
+  //     };
+  //   }
+
+  //   return {
+  //     id: generatedId,
+  //     schemaVersion: "1.0.0",
+  //     erfId: id,
+  //     erfNo: erfNo,
+  //     parents: stampedParents,
+  //     services: {
+  //       electricityMeters: [],
+  //       waterMeters: [],
+  //     },
+  //     metadata: {
+  //       created: agentStamp,
+  //       updated: agentStamp,
+  //       noAccessTrnIds: [],
+  //     },
+  //   };
+  // }
 
   const handleSubmit = async (values, { setSubmitting }) => {
     setInProgress(true);
@@ -547,7 +650,7 @@ export default function FormPremise() {
       } else {
         await addPremise(finalValues).unwrap();
       }
-      updateGeo({ selectedErf: null, lastSelectionType: "ERF" });
+      updateGeo({ selectedPremise: null, lastSelectionType: "PREMISE" });
       ToastAndroid.show("Premise saved.", ToastAndroid.LONG);
       router.replace("/(tabs)/premises");
     } catch (err) {

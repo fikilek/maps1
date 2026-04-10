@@ -1,5 +1,6 @@
 import { useAuth } from "@/src/hooks/useAuth";
 import { useGetServiceProvidersQuery } from "@/src/redux/spApi";
+import { useGetUsersQuery } from "@/src/redux/usersApi";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
@@ -16,9 +17,15 @@ import { Badge, Divider, IconButton, Surface } from "react-native-paper";
 import { SpsHeader } from "../../../../src/features/sps/spsHeader";
 
 export default function ServiceProvidersListScreen() {
+  console.log(`Service Providers -- mounted`);
   const router = useRouter();
   const { profile, isSPU, isADM, isMNG, isSPV } = useAuth();
   const [viewMode, setViewMode] = useState("list");
+
+  const { data: users = [] } = useGetUsersQuery();
+
+  const [selectedSpUsers, setSelectedSpUsers] = useState([]);
+  const [usersModalVisible, setUsersModalVisible] = useState(false);
 
   const {
     data: serviceProviders = [],
@@ -59,9 +66,17 @@ export default function ServiceProvidersListScreen() {
             ),
         );
 
+        // 🔥 COUNT USERS
+        const spUsers = users.filter(
+          (user) =>
+            user?.employment?.serviceProvider?.id === serviceProvider?.id,
+        );
+
         return {
           ...serviceProvider,
           childCount: children.length,
+          userCount: spUsers.length,
+          users: spUsers, // keep for modal
         };
       })
       .sort(
@@ -69,7 +84,34 @@ export default function ServiceProvidersListScreen() {
           new Date(b?.metadata?.updatedAt || 0) -
           new Date(a?.metadata?.updatedAt || 0),
       );
-  }, [visibleServiceProviders]);
+  }, [visibleServiceProviders, users]);
+
+  const handleOpenUsersModal = (sp) => {
+    setSelectedSpUsers(sp.users || []);
+    setUsersModalVisible(true);
+  };
+
+  // const processedServiceProviders = useMemo(() => {
+  //   return [...visibleServiceProviders]
+  //     .map((serviceProvider) => {
+  //       const children = visibleServiceProviders.filter(
+  //         (otherServiceProvider) =>
+  //           otherServiceProvider?.clients?.some(
+  //             (client) => client?.id === serviceProvider?.id,
+  //           ),
+  //       );
+
+  //       return {
+  //         ...serviceProvider,
+  //         childCount: children.length,
+  //       };
+  //     })
+  //     .sort(
+  //       (a, b) =>
+  //         new Date(b?.metadata?.updatedAt || 0) -
+  //         new Date(a?.metadata?.updatedAt || 0),
+  //     );
+  // }, [visibleServiceProviders]);
 
   const renderServiceProviderCard = ({ item }) => (
     <Surface style={styles.card} elevation={1}>
@@ -97,6 +139,19 @@ export default function ServiceProvidersListScreen() {
         </View>
 
         <Badge style={styles.statusBadge}>{item?.status || "NAv"}</Badge>
+
+        {/* Show total users on this SP */}
+        <TouchableOpacity
+          style={styles.statItem}
+          onPress={() => handleOpenUsersModal(item)}
+        >
+          <MaterialCommunityIcons
+            name="account-group"
+            size={16}
+            color="#16a34a"
+          />
+          <Text style={styles.statText}>{item.userCount} Users</Text>
+        </TouchableOpacity>
       </View>
 
       <Divider style={styles.divider} />
@@ -253,6 +308,34 @@ export default function ServiceProvidersListScreen() {
           <Text style={styles.fabText}></Text>
         </TouchableOpacity>
       )}
+
+      {usersModalVisible && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Service Provider Users</Text>
+
+            <ScrollView style={{ maxHeight: 300 }}>
+              {selectedSpUsers.map((user) => (
+                <View key={user.uid} style={styles.userRow}>
+                  <Text style={styles.userName}>
+                    {user?.profile?.displayName || "NAv"}
+                  </Text>
+                  <Text style={styles.userRole}>
+                    {user?.employment?.role || "NAv"}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={() => setUsersModalVisible(false)}
+            >
+              <Text style={{ color: "#fff", fontWeight: "800" }}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -398,5 +481,53 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "900",
     fontSize: 14,
+  },
+
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modalCard: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderRadius: 16,
+    width: "85%",
+  },
+
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 12,
+  },
+
+  userRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+
+  userName: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  userRole: {
+    fontSize: 11,
+    color: "#64748b",
+  },
+
+  closeBtn: {
+    marginTop: 12,
+    backgroundColor: "#1e293b",
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
   },
 });

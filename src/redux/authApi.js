@@ -171,58 +171,6 @@ export const authApi = createApi({
       },
     }),
 
-    // signup: builder.mutation({
-    //   async queryFn({ email, password, name, surname, serviceProvider, role }) {
-    //     try {
-    //       const cred = await createUserWithEmailAndPassword(
-    //         auth,
-    //         email,
-    //         password,
-    //       );
-    //       const uid = cred.user.uid;
-
-    //       await setDoc(doc(db, "users", uid), {
-    //         uid,
-    //         // 🛡️ Aligned to Schema v0.2 (Master Switch)
-    //         accountStatus: "DISABLED",
-    //         employment: {
-    //           // 🛡️ Reflect the operative's selected role so Zamo can see it
-    //           role: role || "GST",
-    //           serviceProvider: {
-    //             id: serviceProvider.id,
-    //             name: serviceProvider.name,
-    //           },
-    //           level: role === "SPV" ? 4 : 2, // Default levels for SPV (4) and FWR (2)
-    //         },
-    //         access: {
-    //           workbases: [],
-    //           activeWorkbase: null,
-    //         },
-    //         onboarding: {
-    //           // 🛑 Aligned to the Onboarding Matrix state
-    //           status: "AWAITING-MNG-CONFIRMATION",
-    //         },
-    //         profile: {
-    //           displayName: `${name} ${surname}`,
-    //           email: email.toLowerCase().trim(),
-    //           name: name.trim(),
-    //           surname: surname.trim(),
-    //         },
-    //         metadata: {
-    //           createdAt: serverTimestamp(),
-    //           createdByUid: uid, // Self-created
-    //           createdByUser: `${surname} ${name}`,
-    //           updatedAt: serverTimestamp(),
-    //         },
-    //       });
-
-    //       return { data: true };
-    //     } catch (error) {
-    //       return { error };
-    //     }
-    //   },
-    // }),
-
     /* =====================================================
        SIGN IN
        ===================================================== */

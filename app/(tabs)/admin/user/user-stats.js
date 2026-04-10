@@ -41,7 +41,7 @@ export default function UserStatsReport() {
 
     const getTrnDate = (t) => {
       const rawDate =
-        t.accessData?.metadata?.updated?.at || t.metadata?.created?.at;
+        t.accessData?.metadata?.updatedAt || t.metadata?.createdAt;
       const dateString = rawDate?.__time__ || rawDate;
       return dateString ? new Date(dateString) : null;
     };
@@ -53,8 +53,8 @@ export default function UserStatsReport() {
 
     const myTrns = allTrns.filter((t) => {
       const isMyTrn =
-        t.accessData?.metadata?.updated?.byUid === user?.uid ||
-        t.metadata?.created?.byUid === user?.uid;
+        t.accessData?.metadata?.updatedByUid === user?.uid ||
+        t.metadata?.createdByUid === user?.uid;
       if (!isMyTrn) return false;
 
       const trnDate = getTrnDate(t);

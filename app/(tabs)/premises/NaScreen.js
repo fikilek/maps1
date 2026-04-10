@@ -40,7 +40,7 @@ const NaScreen = () => {
     const media = item.accessData?.media?.find(
       (m) => m.tag === "noAccessPhoto",
     );
-    const createdAt = item.accessData?.metadata?.created?.at;
+    const createdAt = item.accessData?.metadata?.createdAt;
 
     // 🛡️ Safe Date Conversion
     const dateObj = createdAt ? new Date(createdAt) : null;
@@ -63,7 +63,7 @@ const NaScreen = () => {
             {access?.reason || "Unknown Conflict"}
           </Text>
           <Text style={styles.agentText}>
-            By: {item.accessData?.metadata?.created?.byUser}
+            By: {item.accessData?.metadata?.createdByUser}
           </Text>
         </View>
 

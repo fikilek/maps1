@@ -30,7 +30,7 @@ const getTrnUpdatedAt = (trn) =>
   trn?.metadata?.updatedAt ||
   trn?.metadata?.createdAt ||
   trn?.accessData?.metadata?.updatedAt ||
-  trn?.accessData?.metadata?.created?.at ||
+  trn?.accessData?.metadata?.createdAt ||
   "NAv";
 
 const getTrnCreatedByUser = (trn) =>
@@ -63,7 +63,7 @@ const getAstUpdatedAt = (ast) =>
   ast?.accessData?.metadata?.updatedAt ||
   ast?.metadata?.updatedAt ||
   ast?.metadata?.createdAt ||
-  ast?.accessData?.metadata?.created?.at ||
+  ast?.accessData?.metadata?.createdAt ||
   "NAv";
 
 const getSaleUpdatedAt = (sale) =>

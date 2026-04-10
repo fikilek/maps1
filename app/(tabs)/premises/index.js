@@ -17,6 +17,7 @@ export default function PremisesScreen() {
   const router = useRouter();
   const { all, loading, scopeState } = useWarehouse();
   // console.log(`all.prems?.length`, all.prems?.length);
+  // console.log(`all.prems`, all.prems);
 
   const { openMissionDiscovery } = useDiscovery();
 

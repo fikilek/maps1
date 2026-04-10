@@ -104,12 +104,12 @@ export default function MeterDetailScreen() {
           <DataRow
             label="Created"
             value={new Date(asset?.createdAt).toLocaleDateString()}
-            subValue={`By ${metadata?.created?.byUser}`}
+            subValue={`By ${metadata?.createdByUser}`}
           />
           <DataRow
             label="Last Update"
-            value={new Date(metadata?.updated?.at).toLocaleDateString()}
-            subValue={`By ${metadata?.updated?.byUser}`}
+            value={new Date(metadata?.updatedAt).toLocaleDateString()}
+            subValue={`By ${metadata?.updatedByUser}`}
           />
         </InfoSection>
       </View>

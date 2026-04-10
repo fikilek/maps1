@@ -5,11 +5,7 @@ export const useUserStats = (users, transactions, filters) => {
   return useMemo(() => {
     return users.map((user) => {
       // 🕵️ Filter transactions belonging to this specific User
-      const userTrns = transactions.filter(
-        (t) =>
-          t.accessData?.metadata?.created?.byUid === user.uid ||
-          t.uid === user.uid,
-      );
+      const userTrns = transactions.filter((t) => t.uid === user.uid);
 
       // 📊 Calculate Specific Meter Actions
       const stats = {

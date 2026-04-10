@@ -325,6 +325,7 @@ export default function FormMeterDiscovery() {
         "onMeterDiscoveryCallable",
       );
 
+      console.log(`cleanPayload:`, cleanPayload);
       const callableResult = await onMeterDiscoveryCallable(cleanPayload);
       const result = callableResult?.data || {};
 
@@ -702,7 +703,6 @@ export default function FormMeterDiscovery() {
     () => getInitialValues(),
     [premiseId, actionRaw, trnId],
   );
-  // console.log(`FormMeterDiscovery ----actionInit`, actionInit);
 
   // 2. Setup the Watcher in a useEffect
   useEffect(() => {

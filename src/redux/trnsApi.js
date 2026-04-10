@@ -13,14 +13,8 @@ import { db } from "../firebase";
 
 function sortTrnsByUpdatedAtDesc(list) {
   list.sort((a, b) => {
-    const aAt =
-      a?.accessData?.metadata?.updatedAt ||
-      a?.accessData?.metadata?.updated?.at ||
-      "";
-    const bAt =
-      b?.accessData?.metadata?.updatedAt ||
-      b?.accessData?.metadata?.updated?.at ||
-      "";
+    const aAt = a?.accessData?.metadata?.updatedAt || "";
+    const bAt = b?.accessData?.metadata?.updatedAt || "";
 
     return String(bAt).localeCompare(String(aAt));
   });
@@ -34,15 +28,15 @@ function normalizeMeterNo(value) {
 }
 
 function getUpdatedAt(meta) {
-  return meta?.updatedAt || meta?.updated?.at || new Date().toISOString();
+  return meta?.updatedAt || new Date().toISOString();
 }
 
 function getUpdatedByUid(meta) {
-  return meta?.updatedByUid || meta?.updated?.byUid || "NAv";
+  return meta?.updatedByUid || "NAv";
 }
 
 function getUpdatedByUser(meta) {
-  return meta?.updatedByUser || meta?.updated?.byUser || "NAv";
+  return meta?.updatedByUser || "NAv";
 }
 
 export const trnsApi = createApi({
@@ -133,6 +127,8 @@ export const trnsApi = createApi({
                           : undefined,
                       isOptimistic: true,
                     });
+
+                    sortTrnsByUpdatedAtDesc(draft);
                   }
                 },
               ),
@@ -174,10 +170,8 @@ export const trnsApi = createApi({
                   }
 
                   draft.sort((a, b) => {
-                    const aAt =
-                      a?.metadata?.updatedAt || a?.metadata?.updated?.at || "";
-                    const bAt =
-                      b?.metadata?.updatedAt || b?.metadata?.updated?.at || "";
+                    const aAt = a?.metadata?.updatedAt || "";
+                    const bAt = b?.metadata?.updatedAt || "";
                     return String(bAt).localeCompare(String(aAt));
                   });
                 },
@@ -299,10 +293,8 @@ export const trnsApi = createApi({
                   };
 
                   draft.sort((a, b) => {
-                    const aAt =
-                      a?.metadata?.updatedAt || a?.metadata?.updated?.at || "";
-                    const bAt =
-                      b?.metadata?.updatedAt || b?.metadata?.updated?.at || "";
+                    const aAt = a?.metadata?.updatedAt || "";
+                    const bAt = b?.metadata?.updatedAt || "";
                     return String(bAt).localeCompare(String(aAt));
                   });
                 },
@@ -353,6 +345,7 @@ export const trnsApi = createApi({
                   const index = draft.findIndex((t) => t.id === trnId);
                   if (index !== -1) {
                     draft[index] = finalTrn;
+                    sortTrnsByUpdatedAtDesc(draft);
                   }
                 },
               ),
@@ -391,18 +384,11 @@ export const trnsApi = createApi({
           unsubscribe = onSnapshot(
             q,
             (snapshot) => {
-              // console.log("TRN snapshot size", snapshot.size);
-              // console.log(
-              //   "TRN ids",
-              //   snapshot.docs.map((d) => d.id),
-              // );
-
               updateCachedData(() => {
                 const next = snapshot.docs.map((docSnap) => ({
                   id: docSnap.id,
                   ...docSnap.data(),
                 }));
-                // console.log(`getTrnsByLmPcodeWardPcode --next`, next);
                 sortTrnsByUpdatedAtDesc(next);
                 return next;
               });
@@ -436,7 +422,7 @@ export const trnsApi = createApi({
           const q = query(
             collection(db, "trns"),
             where("accessData.premise.id", "==", premiseId),
-            orderBy("accessData.metadata.created.at", "desc"),
+            orderBy("accessData.metadata.createdAt", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
@@ -445,10 +431,12 @@ export const trnsApi = createApi({
                 if (change.type === "added") {
                   const trn = { id: change.doc.id, ...change.doc.data() };
                   if (!draft.find((t) => t.id === trn.id)) {
-                    draft.unshift(trn); // 🎯 Surgical Top-Insert
+                    draft.unshift(trn);
                   }
                 }
               });
+
+              sortTrnsByUpdatedAtDesc(draft);
             });
           });
         } catch (error) {
@@ -464,20 +452,19 @@ export const trnsApi = createApi({
         return { data: [] };
       },
       async onCacheEntryAdded(
-        country, // 🎯 Standard: Expects { id: "ZA", name: "South Africa" }
+        country,
         { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
       ) {
         let unsubscribe = () => {};
         try {
           await cacheDataLoaded;
 
-          // 🛡️ Guard: Ensure the ID exists before opening the stream
           const countryId = country?.id;
           if (!countryId) return;
 
           const q = query(
             collection(db, "trns"),
-            where("accessData.metadata.countryId", "==", countryId), // 🎯 Compare ID to ID
+            where("accessData.metadata.countryId", "==", countryId),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
@@ -499,7 +486,6 @@ export const trnsApi = createApi({
 
     getTrnById: builder.query({
       async queryFn(id) {
-        // We return empty initially as onCacheEntryAdded will populate it
         return { data: null };
       },
       async onCacheEntryAdded(
@@ -512,12 +498,11 @@ export const trnsApi = createApi({
 
           if (!id) return;
 
-          // 🛰️ Direct Real-time Link to the specific Transaction doc
           const docRef = doc(db, "trns", id);
 
           unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
-              updateCachedData((draft) => {
+              updateCachedData(() => {
                 return { id: docSnap.id, ...docSnap.data() };
               });
             }
@@ -547,7 +532,6 @@ export const trnsApi = createApi({
           const q = query(
             collection(db, "trns"),
             where("ast.astData.astNo", "==", astNo),
-            // Note: If you add orderBy, ensure you have the Firestore Index
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
@@ -556,10 +540,12 @@ export const trnsApi = createApi({
                 if (change.type === "added") {
                   const trn = { id: change.doc.id, ...change.doc.data() };
                   if (!draft.find((t) => t.id === trn.id)) {
-                    draft.unshift(trn); // 🎯 Surgical Top-Insert
+                    draft.unshift(trn);
                   }
                 }
               });
+
+              sortTrnsByUpdatedAtDesc(draft);
             });
           });
         } catch (error) {
@@ -580,16 +566,14 @@ export const trnsApi = createApi({
         try {
           await cacheDataLoaded;
 
-          // 🎯 1. CLOUD SORT: Newest first (Ensure you have a composite index for this!)
           const q = query(
             collection(db, "trns"),
             where("accessData.metadata.lmPcode", "==", lmPcode),
-            orderBy("accessData.metadata.updated.at", "desc"),
+            orderBy("accessData.metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
             updateCachedData((draft) => {
-              // 🎯 2. INITIAL SYNC: Direct mapping of the sorted snapshot
               if (snapshot.docChanges().length === snapshot.docs.length) {
                 return snapshot.docs.map((doc) => ({
                   id: doc.id,
@@ -597,16 +581,29 @@ export const trnsApi = createApi({
                 }));
               }
 
-              // 🎯 3. SURGICAL UPDATES: New transactions unshifted to index 0
               snapshot.docChanges().forEach((change) => {
                 if (change.type === "added") {
                   const trn = { id: change.doc.id, ...change.doc.data() };
                   const exists = draft.find((t) => t.id === trn.id);
 
-                  // 🛡️ Always unshift to the top for "Audit Log" feel
                   if (!exists) draft.unshift(trn);
+                } else if (change.type === "modified") {
+                  const trn = { id: change.doc.id, ...change.doc.data() };
+                  const index = draft.findIndex((t) => t.id === trn.id);
+                  if (index !== -1) {
+                    draft[index] = trn;
+                  } else {
+                    draft.unshift(trn);
+                  }
+                } else if (change.type === "removed") {
+                  const index = draft.findIndex((t) => t.id === change.doc.id);
+                  if (index !== -1) {
+                    draft.splice(index, 1);
+                  }
                 }
               });
+
+              sortTrnsByUpdatedAtDesc(draft);
             });
           });
         } catch (err) {

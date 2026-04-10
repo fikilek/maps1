@@ -9,10 +9,10 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
-import { Button, Modal, Portal } from "react-native-paper";
+import { Button, Menu, Modal, Portal } from "react-native-paper";
 import { useWarehouse } from "../../src/context/WarehouseContext";
 
-const { width, height } = Dimensions.get("window");
+const { height } = Dimensions.get("window");
 
 function isSamePoint(a, b, tolerance = 0.000001) {
   if (!a || !b) return false;
@@ -20,6 +20,7 @@ function isSamePoint(a, b, tolerance = 0.000001) {
   const aLat = Number(a?.lat);
   const aLng = Number(a?.lng);
   const bLat = Number(b?.lat);
+
   const bLng = Number(b?.lng);
 
   if (
@@ -34,24 +35,37 @@ function isSamePoint(a, b, tolerance = 0.000001) {
   return Math.abs(aLat - bLat) < tolerance && Math.abs(aLng - bLng) < tolerance;
 }
 
+function getPremiseUnitLabel(prem = {}) {
+  const unitNo = prem?.propertyType?.unitNo;
+  const unitName = prem?.propertyType?.name;
+
+  if (unitNo && unitNo !== "NAv") return String(unitNo);
+  if (unitName && unitName !== "NAv") return String(unitName);
+
+  return "";
+}
+
 const FormMapPositioner = ({
   label = "Physical Asset Positioning",
   name,
   erfId,
   defaultLocation,
 }) => {
-  // console.log(`FormMapPositioner --defaultLocation`, defaultLocation);
+  console.log(
+    `FormMapPositioner rendered with erfId: ${erfId} and defaultLocation:`,
+    defaultLocation,
+  );
   const [showMap, setShowMap] = useState(false);
+  const [mapType, setMapType] = useState("standard");
+  const [mapTypeMenuVisible, setMapTypeMenuVisible] = useState(false);
+
   const { all } = useWarehouse();
   const { values, errors, setFieldValue } = useFormikContext();
+
   const targetGeo = all?.geoLibrary?.[erfId] || null;
-  // console.log(`FormMapPositioner --targetGeo`, targetGeo);
 
   const startLat = defaultLocation?.lat ?? targetGeo?.centroid?.lat ?? -34.028;
-  // console.log(`FormMapPositioner --startLat`, startLat);
-
   const startLng = defaultLocation?.lng ?? targetGeo?.centroid?.lng ?? 23.076;
-  // console.log(`FormMapPositioner --startLng`, startLng);
 
   const erfCoordinates = useMemo(() => {
     if (!targetGeo?.geometry) return null;
@@ -84,17 +98,18 @@ const FormMapPositioner = ({
   const fieldError = getIn(errors, name);
   const hasError = !!fieldError;
 
-  const currentLocation = getIn(values, name); // { lat, lng }
-  // console.log(`FormMapPositioner --currentLocation`, currentLocation);
+  const currentLocation = getIn(values, name);
 
-  const resolvedLocation =
-    currentLocation &&
-    typeof currentLocation === "object" &&
-    typeof currentLocation.lat === "number" &&
-    typeof currentLocation.lng === "number"
-      ? currentLocation
-      : { lat: startLat, lng: startLng };
-  // console.log(`FormMapPositioner --resolvedLocation`, resolvedLocation);
+  const resolvedLocation = useMemo(
+    () =>
+      currentLocation &&
+      typeof currentLocation === "object" &&
+      typeof currentLocation.lat === "number" &&
+      typeof currentLocation.lng === "number"
+        ? currentLocation
+        : { lat: startLat, lng: startLng },
+    [currentLocation, startLat, startLng],
+  );
 
   const hasValidCurrentPoint =
     currentLocation &&
@@ -113,6 +128,62 @@ const FormMapPositioner = ({
     hasValidDefaultPoint &&
     !isSamePoint(currentLocation, defaultLocation);
 
+  const getMapTypeLabel = (type) => {
+    if (type === "satellite") return "SATELLITE";
+    if (type === "hybrid") return "HYBRID";
+    return "NORMAL";
+  };
+
+  const getMapTypeIcon = (type) => {
+    if (type === "satellite") return "satellite-variant";
+    if (type === "hybrid") return "layers";
+    return "map-outline";
+  };
+
+  const existingPremises = useMemo(() => {
+    return (all?.prems || []).filter((prem) => {
+      if (!prem?.id) return false;
+      if (prem?.parents?.erfId !== erfId && prem?.erfId !== erfId) return false;
+
+      const lat = prem?.geometry?.centroid?.lat;
+      const lng = prem?.geometry?.centroid?.lng;
+
+      if (typeof lat !== "number" || typeof lng !== "number") return false;
+
+      const sameAsCurrent = isSamePoint(
+        { lat, lng },
+        resolvedLocation,
+        0.0000001,
+      );
+
+      return !sameAsCurrent;
+    });
+  }, [all?.prems, erfId, resolvedLocation]);
+
+  const existingMeters = useMemo(() => {
+    return (all?.meters || []).filter((meter) => {
+      if (!meter?.id) return false;
+      if (meter?.accessData?.erfId !== erfId) return false;
+
+      const lat = meter?.ast?.location?.gps?.lat;
+      const lng = meter?.ast?.location?.gps?.lng;
+
+      return typeof lat === "number" && typeof lng === "number";
+    });
+  }, [all?.meters, erfId]);
+
+  const erfCentroidCoords = useMemo(() => {
+    const lat = targetGeo?.centroid?.lat;
+    const lng = targetGeo?.centroid?.lng;
+
+    if (typeof lat !== "number" || typeof lng !== "number") return null;
+
+    return {
+      latitude: lat,
+      longitude: lng,
+    };
+  }, [targetGeo]);
+
   const handleDragEnd = (e) => {
     const { latitude, longitude } = e.nativeEvent.coordinate;
 
@@ -124,14 +195,24 @@ const FormMapPositioner = ({
     console.log(`📡 [POSITION SECURED]: ${latitude}, ${longitude}`);
   };
 
+  const handleOpenMap = () => {
+    setMapType("standard");
+    setMapTypeMenuVisible(false);
+    setShowMap(true);
+  };
+
+  const handleCloseMap = () => {
+    setMapTypeMenuVisible(false);
+    setShowMap(false);
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.topLabel}>{label}</Text>
 
       <TouchableOpacity
-        onPress={() => setShowMap(true)}
+        onPress={handleOpenMap}
         style={[styles.selector, hasError && styles.errorBorder]}
-        // style={[styles.selector, !isVerified && styles.errorBorder]}
       >
         <View style={styles.row}>
           <View
@@ -166,30 +247,79 @@ const FormMapPositioner = ({
       <Portal>
         <Modal
           visible={showMap}
-          onDismiss={() => setShowMap(false)}
+          onDismiss={handleCloseMap}
           contentContainerStyle={styles.modalContent}
         >
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>DRAG PIN TO PHYSICAL ASSET</Text>
 
-            <View style={styles.modalBtnRow}>
-              <Button
-                mode="outlined"
-                onPress={() => setShowMap(false)}
-                textColor="#475569"
-                style={styles.cancelBtn}
+            <View style={styles.modalControlsRow}>
+              <Menu
+                visible={mapTypeMenuVisible}
+                onDismiss={() => setMapTypeMenuVisible(false)}
+                anchor={
+                  <TouchableOpacity
+                    style={styles.mapTypeBtn}
+                    onPress={() => setMapTypeMenuVisible(true)}
+                  >
+                    <MaterialCommunityIcons
+                      name={getMapTypeIcon(mapType)}
+                      size={18}
+                      color="#0f172a"
+                    />
+                    <Text style={styles.mapTypeBtnText}>
+                      {getMapTypeLabel(mapType)}
+                    </Text>
+                    <MaterialCommunityIcons
+                      name="chevron-down"
+                      size={18}
+                      color="#0f172a"
+                    />
+                  </TouchableOpacity>
+                }
               >
-                CANCEL
-              </Button>
+                <Menu.Item
+                  onPress={() => {
+                    setMapType("standard");
+                    setMapTypeMenuVisible(false);
+                  }}
+                  title="NORMAL"
+                />
+                <Menu.Item
+                  onPress={() => {
+                    setMapType("satellite");
+                    setMapTypeMenuVisible(false);
+                  }}
+                  title="SATELLITE"
+                />
+                <Menu.Item
+                  onPress={() => {
+                    setMapType("hybrid");
+                    setMapTypeMenuVisible(false);
+                  }}
+                  title="HYBRID"
+                />
+              </Menu>
 
-              <Button
-                mode="contained"
-                onPress={() => setShowMap(false)}
-                buttonColor="#059669"
-                disabled={!isVerified}
-              >
-                DONE
-              </Button>
+              <View style={styles.modalBtnRow}>
+                <Button
+                  mode="outlined"
+                  onPress={handleCloseMap}
+                  textColor="#475569"
+                  style={styles.cancelBtn}
+                >
+                  CANCEL
+                </Button>
+
+                <Button
+                  mode="contained"
+                  onPress={handleCloseMap}
+                  buttonColor="#059669"
+                  disabled={!isVerified}
+                >
+                  DONE
+                </Button>
+              </View>
             </View>
           </View>
 
@@ -197,7 +327,9 @@ const FormMapPositioner = ({
             <MapView
               provider={PROVIDER_GOOGLE}
               style={styles.map}
+              mapType={mapType}
               showsUserLocation={true}
+              showsMyLocationButton={true}
               initialRegion={{
                 latitude: resolvedLocation.lat,
                 longitude: resolvedLocation.lng,
@@ -214,6 +346,69 @@ const FormMapPositioner = ({
                 />
               )}
 
+              {erfCentroidCoords && (
+                <Marker
+                  coordinate={erfCentroidCoords}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges={true}
+                  zIndex={5}
+                >
+                  <View style={styles.erfCentroidSquare} />
+                </Marker>
+              )}
+
+              {existingPremises.map((prem) => {
+                const unitLabel = getPremiseUnitLabel(prem);
+
+                return (
+                  <Marker
+                    key={`existing-prem-${prem.id}`}
+                    coordinate={{
+                      latitude: prem.geometry.centroid.lat,
+                      longitude: prem.geometry.centroid.lng,
+                    }}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={true}
+                    zIndex={6}
+                  >
+                    <View style={styles.existingPremiseWrap}>
+                      {!!unitLabel && (
+                        <View style={styles.existingPremiseLabel}>
+                          <Text style={styles.existingPremiseLabelText}>
+                            {unitLabel}
+                          </Text>
+                        </View>
+                      )}
+                      <View style={styles.existingPremiseDot} />
+                    </View>
+                  </Marker>
+                );
+              })}
+
+              {existingMeters.map((meter) => {
+                const meterGps = meter?.ast?.location?.gps;
+                const isWater = meter?.meterType === "water";
+
+                return (
+                  <Marker
+                    key={`existing-meter-${meter.id}`}
+                    coordinate={{
+                      latitude: meterGps.lat,
+                      longitude: meterGps.lng,
+                    }}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={true}
+                    zIndex={7}
+                  >
+                    <MaterialCommunityIcons
+                      name={isWater ? "water" : "lightning-bolt"}
+                      size={18}
+                      color={isWater ? "#3B82F6" : "#F59E0B"}
+                    />
+                  </Marker>
+                );
+              })}
+
               <Marker
                 draggable
                 coordinate={{
@@ -222,15 +417,8 @@ const FormMapPositioner = ({
                 }}
                 onDragEnd={handleDragEnd}
                 anchor={{ x: 0.5, y: 1 }}
-              >
-                <View style={styles.markerWrapper}>
-                  <MaterialCommunityIcons
-                    name="map-marker"
-                    size={50}
-                    color="#dc2626"
-                  />
-                </View>
-              </Marker>
+                zIndex={20}
+              />
             </MapView>
 
             <View pointerEvents="none" style={styles.mapTip}>
@@ -249,6 +437,7 @@ export default FormMapPositioner;
 
 const styles = StyleSheet.create({
   container: { paddingVertical: 10 },
+
   topLabel: {
     fontSize: 10,
     fontWeight: "900",
@@ -257,6 +446,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
+
   selector: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -267,8 +457,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
   },
+
   errorBorder: { borderColor: "#ef4444", borderLeftWidth: 6 },
+
   row: { flexDirection: "row", alignItems: "center", flex: 1 },
+
   iconCircle: {
     width: 44,
     height: 44,
@@ -276,8 +469,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+
   textBlock: { marginLeft: 12 },
+
   selectorValue: { fontSize: 13, fontWeight: "800" },
+
   actionText: {
     fontSize: 11,
     color: "#94a3b8",
@@ -286,21 +482,7 @@ const styles = StyleSheet.create({
   },
 
   map: { flex: 1 },
-  tipSurface: {
-    position: "absolute",
-    bottom: 50,
-    alignSelf: "center",
-    backgroundColor: "#1e293b",
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 30,
-  },
-  tipText: {
-    color: "#fff",
-    fontWeight: "900",
-    fontSize: 12,
-    letterSpacing: 0.5,
-  },
+
   markerWrapper: {
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
@@ -324,7 +506,7 @@ const styles = StyleSheet.create({
 
   modalHeader: {
     flexDirection: "column",
-    alignItems: "center", // centers horizontally
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 14,
@@ -342,9 +524,37 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
+  modalControlsRow: {
+    width: "100%",
+    alignItems: "center",
+  },
+
+  mapTypeBtn: {
+    minWidth: 130,
+    height: 36,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#f8fafc",
+    marginBottom: 12,
+  },
+
+  mapTypeBtnText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#0f172a",
+    marginHorizontal: 6,
+    flex: 1,
+    textAlign: "center",
+  },
+
   modalBtnRow: {
     flexDirection: "row",
-    justifyContent: "center", // center buttons
+    justifyContent: "center",
     gap: 12,
   },
 
@@ -371,5 +581,43 @@ const styles = StyleSheet.create({
 
   mapWrapper: {
     flex: 1,
+  },
+
+  erfCentroidSquare: {
+    width: 12,
+    height: 12,
+    backgroundColor: "#2563EB",
+    borderWidth: 1,
+    borderColor: "#ffffff",
+  },
+
+  existingPremiseWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  existingPremiseLabel: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginBottom: 2,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+  },
+
+  existingPremiseLabelText: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#0f172a",
+  },
+
+  existingPremiseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#000000",
+    borderWidth: 1,
+    borderColor: "#ffffff",
   },
 });

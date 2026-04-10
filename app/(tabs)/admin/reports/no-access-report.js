@@ -64,6 +64,7 @@ export default function NoAccessReport() {
             activityDate: item?.activityDate || "NAv",
             erfNo: item?.erf?.no || "NAv",
             address: item?.premise?.address || "NAv",
+            propertyType: item?.premise?.propertyType || "NAv",
             reason: item?.access?.reason || "NAv",
             agent: item?.user?.name || "NAv",
             timestamp: item?.trn?.updatedAt || item?.trn?.createdAt || "NAv",
@@ -213,6 +214,11 @@ export default function NoAccessReport() {
               <Text style={styles.adrText} numberOfLines={1}>
                 {item.address}
               </Text>
+              {item.propertyType && item.propertyType !== "NAv" && (
+                <Text style={styles.propertyTypeText} numberOfLines={1}>
+                  {item.propertyType}
+                </Text>
+              )}
               <Text style={styles.timeText}>
                 {item.activityDate !== "NAv"
                   ? item.activityDate
@@ -364,6 +370,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     color: "#334155",
+  },
+  propertyTypeText: {
+    fontSize: 10,
+    fontWeight: "400",
+    color: "#006aff",
   },
 
   timeText: {

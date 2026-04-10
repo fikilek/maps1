@@ -115,9 +115,26 @@ export default function MeterRegistryScreen() {
     return meterType || "NAv";
   };
 
+  const getPropertyTypeLabel = (propertyType) => {
+    if (!propertyType || propertyType === "NAv") return "NAv";
+
+    if (typeof propertyType === "string") {
+      return propertyType;
+    }
+
+    if (typeof propertyType === "object") {
+      return (
+        propertyType?.type || propertyType?.name || propertyType?.label || "NAv"
+      );
+    }
+
+    return "NAv";
+  };
+
   const renderRow = useCallback(({ item }) => {
     const updatedLabel = formatUpdatedAt(item?.metadata?.updatedAt);
     const meterTypeLabel = getMeterTypeLabel(item?.meterType);
+    const propertyTypeLabel = getPropertyTypeLabel(item?.premisePropertyType);
 
     return (
       <View style={styles.tableRow}>
@@ -129,6 +146,10 @@ export default function MeterRegistryScreen() {
 
         <Text style={[styles.td, styles.colAddress]}>
           {item?.premiseAddress || "NAv"}
+        </Text>
+
+        <Text style={[styles.td, styles.colPropertyType]}>
+          {propertyTypeLabel}
         </Text>
 
         <Text style={[styles.td, styles.colErf]}>{item?.erfNo || "NAv"}</Text>
@@ -179,6 +200,9 @@ export default function MeterRegistryScreen() {
             </View>
 
             <Text style={[styles.th, styles.colAddress]}>Premise Address</Text>
+            <Text style={[styles.th, styles.colPropertyType]}>
+              Property Type
+            </Text>
             <Text style={[styles.th, styles.colErf]}>ERF</Text>
             <Text style={[styles.th, styles.colWard]}>Ward</Text>
             <Text style={[styles.th, styles.colUpdated]}>Updated</Text>
@@ -210,7 +234,7 @@ const styles = StyleSheet.create({
   },
 
   tableWrap: {
-    minWidth: 860,
+    minWidth: 1020,
     paddingHorizontal: 12,
     paddingBottom: 16,
   },
@@ -273,6 +297,10 @@ const styles = StyleSheet.create({
 
   colAddress: {
     width: 240,
+  },
+
+  colPropertyType: {
+    width: 150,
   },
 
   colErf: {

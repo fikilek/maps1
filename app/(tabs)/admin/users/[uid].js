@@ -45,34 +45,34 @@ export default function UserDetailEditor() {
   }, [lms, targetUser?.access?.workbases]);
 
   // 🔨 THE BULK FORGE
-  const handleBulkAdd = async () => {
-    if (selectedIds.length === 0) return setModalVisible(false);
+  // const handleBulkAdd = async () => {
+  //   if (selectedIds.length === 0) return setModalVisible(false);
 
-    // Map IDs back to the full objects {id, name}
-    const newAdditions = lms
-      .filter((lm) => selectedIds.includes(lm.id))
-      .map((lm) => ({ id: lm.id, name: lm.name }));
+  //   // Map IDs back to the full objects {id, name}
+  //   const newAdditions = lms
+  //     .filter((lm) => selectedIds.includes(lm.id))
+  //     .map((lm) => ({ id: lm.id, name: lm.name }));
 
-    const currentList = targetUser?.access?.workbases || [];
-    const newList = [...currentList, ...newAdditions];
+  //   const currentList = targetUser?.access?.workbases || [];
+  //   const newList = [...currentList, ...newAdditions];
 
-    try {
-      await updateProfile({
-        uid: targetUser.uid,
-        update: {
-          "access.workbases": newList,
-          ...(!targetUser.access?.activeWorkbase && {
-            "access.activeWorkbase": newAdditions[0],
-          }),
-        },
-      }).unwrap();
+  //   try {
+  //     await updateProfile({
+  //       uid: targetUser.uid,
+  //       update: {
+  //         "access.workbases": newList,
+  //         ...(!targetUser.access?.activeWorkbase && {
+  //           "access.activeWorkbase": newAdditions[0],
+  //         }),
+  //       },
+  //     }).unwrap();
 
-      setSelectedIds([]); // Clear the pen
-      setModalVisible(false); // Close the gates
-    } catch (err) {
-      console.error("Bulk Assignment Failed:", err);
-    }
-  };
+  //     setSelectedIds([]); // Clear the pen
+  //     setModalVisible(false); // Close the gates
+  //   } catch (err) {
+  //     console.error("Bulk Assignment Failed:", err);
+  //   }
+  // };
 
   const handleToggleAccount = async () => {
     const currentStatus = targetUser?.accountStatus || "ACTIVE";
@@ -90,28 +90,28 @@ export default function UserDetailEditor() {
   };
 
   // ✂️ SHRED: Revoke a jurisdiction
-  const handleRemoveWorkbase = async (wbId) => {
-    const currentList = targetUser?.access?.workbases || [];
-    const newList = currentList.filter((w) => w.id !== wbId);
+  // const handleRemoveWorkbase = async (wbId) => {
+  //   const currentList = targetUser?.access?.workbases || [];
+  //   const newList = currentList.filter((w) => w.id !== wbId);
 
-    // Check if we are removing the jurisdiction they are currently "active" in
-    const isActive = targetUser?.access?.activeWorkbase?.id === wbId;
+  //   // Check if we are removing the jurisdiction they are currently "active" in
+  //   const isActive = targetUser?.access?.activeWorkbase?.id === wbId;
 
-    try {
-      await updateProfile({
-        uid: targetUser.uid,
-        update: {
-          "access.workbases": newList,
-          // If we removed the active one, teleport them to the next available or null
-          ...(isActive && {
-            "access.activeWorkbase": newList.length > 0 ? newList[0] : null,
-          }),
-        },
-      }).unwrap();
-    } catch (err) {
-      console.error("Failed to revoke workbase:", err);
-    }
-  };
+  //   try {
+  //     await updateProfile({
+  //       uid: targetUser.uid,
+  //       update: {
+  //         "access.workbases": newList,
+  //         // If we removed the active one, teleport them to the next available or null
+  //         ...(isActive && {
+  //           "access.activeWorkbase": newList.length > 0 ? newList[0] : null,
+  //         }),
+  //       },
+  //     }).unwrap();
+  //   } catch (err) {
+  //     console.error("Failed to revoke workbase:", err);
+  //   }
+  // };
 
   if (!targetUser) return <Text style={styles.center}>User Not Found</Text>;
 
@@ -140,7 +140,7 @@ export default function UserDetailEditor() {
       <View style={styles.selectorBox}>
         <View style={styles.rowHeader}>
           <Text style={styles.subLabel}>Allocated Jurisdictions</Text>
-          {(isSPU || isADM) && (
+          {/* {(isSPU || isADM) && (
             <Button
               mode="contained"
               onPress={() => setModalVisible(true)}
@@ -149,14 +149,14 @@ export default function UserDetailEditor() {
             >
               + Assign
             </Button>
-          )}
+          )} */}
         </View>
 
         <View style={styles.chipContainer}>
           {(targetUser?.access?.workbases || []).map((wb) => (
             <Chip
               key={wb.id}
-              onClose={() => handleRemoveWorkbase(wb.id)}
+              // onClose={() => handleRemoveWorkbase(wb.id)}
               style={styles.wbChip}
             >
               {wb.name}
@@ -255,7 +255,7 @@ export default function UserDetailEditor() {
             </Button>
             <Button
               mode="contained"
-              onPress={handleBulkAdd}
+              // onPress={handleBulkAdd}
               disabled={selectedIds.length === 0}
             >
               Confirm ({selectedIds.length})

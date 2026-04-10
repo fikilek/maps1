@@ -10,12 +10,16 @@ export default function AdminDashboard() {
   return (
     <ScrollView style={styles.container}>
       <Section title="Operational Management">
-        <Card
-          title="Service Providers"
-          subtitle="View & manage contractors"
-          onPress={() => router.push("/(tabs)/admin/service-providers")}
-        />
+        {/* SPU/ADM see all SPs, MNG/SPV(MNC) see own MNC and SUBS , SPV(SUBC) see SP, FWR see own SP */}
+        {(isSPU || isADM || isMNG || isFWR || isSPV) && (
+          <Card
+            title="Service Providers"
+            subtitle="View & manage contractors"
+            onPress={() => router.push("/(tabs)/admin/service-providers")}
+          />
+        )}
 
+        {/* All see own user */}
         {(isSPU || isADM || isMNG || isFWR || isSPV) && (
           <Card
             title="User"
@@ -24,7 +28,8 @@ export default function AdminDashboard() {
           />
         )}
 
-        {(isSPU || isADM || isMNG) && (
+        {/* SPU/ADM see all users, MNG/SPV(MNC) see own MNC users and SUBs users , SPV(SUBC) see own SP users, FWR no access */}
+        {(isSPU || isADM || isMNG || isSPV) && (
           <Card
             title="Users"
             subtitle="View platform users"

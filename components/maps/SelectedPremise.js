@@ -88,9 +88,9 @@ const styles = StyleSheet.create({
   },
   premiseLabel: {
     backgroundColor: "#507adc",
-    padding: 8,
+    padding: 4,
     borderRadius: 4,
-    marginTop: 2,
+    // marginTop: 2,
   },
   premiseLabelText: {
     fontSize: 6,

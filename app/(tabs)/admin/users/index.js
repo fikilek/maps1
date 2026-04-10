@@ -1,3 +1,4 @@
+import { useGetServiceProvidersQuery } from "@/src/redux/spApi";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
@@ -17,7 +18,7 @@ import { useGetUsersQuery } from "../../../../src/redux/usersApi";
 
 export default function UsersListScreen() {
   const router = useRouter();
-  const { isSPU, isADM, isMNG } = useAuth();
+  const { profile, isSPU, isADM, isMNG, isSPV, isFWR } = useAuth();
 
   const [filterVisible, setFilterVisible] = useState(false);
 
@@ -36,6 +37,8 @@ export default function UsersListScreen() {
     accountStatus: "ALL",
     serviceProvider: "ALL",
   });
+
+  const { data: serviceProviders = [] } = useGetServiceProvidersQuery();
 
   const { data: users = [], isLoading, error } = useGetUsersQuery();
   const [updateProfile] = useUpdateProfileMutation();
@@ -72,8 +75,66 @@ export default function UsersListScreen() {
     return ["ALL", ...values];
   }, [users]);
 
+  const visibleUsers = useMemo(() => {
+    if (!users || users.length === 0) return [];
+
+    const viewerSpId = profile?.employment?.serviceProvider?.id || null;
+
+    // 🔴 FWR — NO ACCESS
+    if (isFWR) return [];
+
+    // 🟢 SPU / ADM — SEE ALL
+    if (isSPU || isADM) return users;
+
+    // 🔍 Find viewer SP
+    const viewerSp =
+      (serviceProviders || []).find((sp) => sp?.id === viewerSpId) || null;
+
+    // 🔍 Determine if viewer SP is SUBC
+    const viewerIsSubc =
+      viewerSp?.clients?.some(
+        (client) =>
+          client?.clientType === "SP" && client?.relationshipType === "SUBC",
+      ) || false;
+
+    // 🔍 Find SUBCs under viewer MNC
+    const descendantSubcIds = (serviceProviders || [])
+      .filter((sp) =>
+        (sp?.clients || []).some(
+          (client) =>
+            client?.clientType === "SP" &&
+            client?.relationshipType === "SUBC" &&
+            client?.id === viewerSpId,
+        ),
+      )
+      .map((sp) => sp?.id)
+      .filter(Boolean);
+
+    return (users || []).filter((u) => {
+      const userSpId = u?.employment?.serviceProvider?.id || null;
+
+      // 🟡 MNG → own SP + SUBCs
+      if (isMNG) {
+        return [viewerSpId, ...descendantSubcIds].includes(userSpId);
+      }
+
+      // 🟣 SPV
+      if (isSPV) {
+        // SPV-SUBC → own SP only
+        if (viewerIsSubc) {
+          return userSpId === viewerSpId;
+        }
+
+        // SPV-MNC → same as MNG
+        return [viewerSpId, ...descendantSubcIds].includes(userSpId);
+      }
+
+      return false;
+    });
+  }, [users, serviceProviders, profile, isSPU, isADM, isMNG, isSPV, isFWR]);
+
   const filteredUsers = useMemo(() => {
-    return [...(users || [])]
+    return [...(visibleUsers || [])]
       .filter((u) => {
         if (!u?.profile) return false;
 

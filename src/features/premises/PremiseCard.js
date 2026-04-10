@@ -58,6 +58,10 @@ const PremiseCard = memo(
     onDuplicate,
     onNaPress,
   }) => {
+    console.log(
+      `Rendering PremiseCard for ${item?.id} - ${item?.address?.strName}`,
+      item?.metadata,
+    );
     const isFlat = item?.propertyType?.type === "Flats";
     const erfId = item?.erfId; // 🎯 The link to the sovereign
 
@@ -226,38 +230,82 @@ const PremiseCard = memo(
           </TouchableOpacity>
 
           <View style={styles.identityColumn}>
-            <View style={styles.identityRow}>
-              <Pressable
-                onPress={handleTogglePremiseSelection}
-                style={({ pressed }) => [
-                  styles.addressPressable,
-                  pressed && styles.addressPressablePressed,
-                  { backgroundColor: isSelected ? "lightgrey" : null },
-                ]}
-              >
-                <Text style={styles.addressText}>
-                  {addressStr || "No Address"}
-                </Text>
-              </Pressable>
-              <View style={styles.typeTag}>
-                <Text style={styles.typeTagText} numberOfLines={1}>
-                  {item?.propertyType?.type}
-                </Text>
-                <Text style={styles.typeTagName}>
-                  {item?.propertyType?.name} . {item?.propertyType?.unitNo}
-                </Text>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                // paddingRight: 12,
+              }}
+            >
+              <View>
+                {/* Street Address */}
+                <Pressable
+                  onPress={handleTogglePremiseSelection}
+                  style={({ pressed }) => [
+                    styles.addressPressable,
+                    pressed && styles.addressPressablePressed,
+                    { backgroundColor: isSelected ? "lightgrey" : null },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 16,
+                      fontWeight: "800",
+                      color: "#1E293B",
+                    }}
+                    numberOfLines={1}
+                  >
+                    {addressStr || "No Address"}
+                  </Text>
+                </Pressable>
+
+                {/* Property Type */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    // marginTop: 4,
+                  }}
+                >
+                  <Text style={styles.typeTagText} numberOfLines={1}>
+                    {item?.propertyType?.type}
+                  </Text>
+                  {/* <Text style={styles.typeTagName}>
+                    {item?.propertyType?.name} . {item?.propertyType?.unitNo}
+                  </Text> */}
+                </View>
+
+                <View style={{}}>
+                  <Text
+                    style={[styles.propertyTypeText, { color: beacon.color }]}
+                  >
+                    {`${identityLabel}`}
+                  </Text>
+                </View>
+              </View>
+
+              {/* COMPACT MAP PORTAL */}
+              <View>
+                <TouchableOpacity
+                  style={{ justifyContent: `center`, alignItems: "center" }}
+                  onPress={() => onMapPress?.(item)}
+                >
+                  <View style={styles.iconCircle}>
+                    <MaterialCommunityIcons
+                      name="map-search"
+                      size={20}
+                      color="#00BFFF"
+                    />
+                  </View>
+                  <Text style={styles.mapLabel}>MAP</Text>
+                </TouchableOpacity>
               </View>
             </View>
-            <View style={styles.identityRow}>
-              <Text style={[styles.propertyTypeText, { color: beacon.color }]}>
-                {`${identityLabel}`}
-              </Text>
-            </View>
-
-            {/* lets have a btn to duplicate the premise if its a flat */}
 
             {/* 🎯 THE TARGET ROW: Now contains Erf, Ward, and the Edit Button */}
             <View style={styles.geoRow}>
+              {/* Erf No */}
               <Pressable
                 onPress={handleToggleErfSelection}
                 style={({ pressed }) => [
@@ -277,14 +325,12 @@ const PremiseCard = memo(
                 </Text>
               </Pressable>
 
-              {/* <Text
-                style={styles.geoBadge}
-              >{`Erf ${item?.erfNo || "N/A"}`}</Text> */}
-
               <Text style={styles.geoDivider}>•</Text>
+
+              {/* Ward No */}
               <Text style={styles.geoBadge}>{`Ward ${wardNo || "?"}`}</Text>
 
-              {/* 🛡️ THE EDIT BEACON: Moved INSIDE geoRow to stay on one line */}
+              {/* EDIT Btn*/}
               <TouchableOpacity
                 onPress={() => onEditPress?.(item)}
                 style={styles.editIconBtn}
@@ -296,8 +342,8 @@ const PremiseCard = memo(
                 />
               </TouchableOpacity>
 
+              {/* 📸 THE MEDIA  */}
               <View style={styles.actionGroup}>
-                {/* 📸 THE MEDIA GATEWAY (Placeholder) */}
                 <TouchableOpacity
                   style={styles.iconButton}
                   onPress={() =>
@@ -315,7 +361,7 @@ const PremiseCard = memo(
                 </TouchableOpacity>
               </View>
 
-              {/* 👯 THE DUPLICATE BEACON: ONLY AND ONLY FOR FLATS */}
+              {/* 👯 THE DUPLICATE Btn: ONLY AND ONLY FOR FLATS */}
               {isFlat && (
                 <TouchableOpacity
                   onPress={handleDuplicate}
@@ -331,21 +377,6 @@ const PremiseCard = memo(
               )}
             </View>
           </View>
-
-          {/* COMPACT MAP PORTAL */}
-          <TouchableOpacity
-            style={styles.mapAction}
-            onPress={() => onMapPress?.(item)}
-          >
-            <View style={styles.iconCircle}>
-              <MaterialCommunityIcons
-                name="map-search"
-                size={20}
-                color="#00BFFF"
-              />
-            </View>
-            <Text style={styles.mapLabel}>MAP</Text>
-          </TouchableOpacity>
         </View>
 
         {/* 🏛️ THE COMMAND STRIP */}
@@ -464,7 +495,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 12,
   },
-  identityColumn: { flex: 1, justifyContent: "center" },
+  identityColumn: { flex: 1, justifyContent: "center", gap: 6 },
   identityRow: { flexDirection: "row", alignItems: "center" },
   addressText: {
     fontSize: 16,
@@ -548,6 +579,7 @@ const styles = StyleSheet.create({
 
   geoRow: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center", // 🎯 Keeps icons and text vertically centered
     marginTop: 4,
     gap: 6, // 🎯 Ensures consistent spacing between badges
@@ -595,8 +627,8 @@ const styles = StyleSheet.create({
   },
   addressPressable: {
     borderRadius: 6,
-    paddingVertical: 2,
-    paddingHorizontal: 2,
+    // paddingVertical: 2,
+    // paddingHorizontal: 2,
   },
 
   addressPressablePressed: {
