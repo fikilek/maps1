@@ -22,11 +22,20 @@ const SovereignLocationPicker = ({
   erfNo = "N/A",
   erfCentroid = null,
   disabled = false,
+
+  // 🆕 NEW
+  nearbyErfs = [],
+  nearbyPremises = [],
+  nearbyMeters = [],
 }) => {
   const { values, setFieldValue, errors, touched } = useFormikContext();
   const [modalVisible, setModalVisible] = useState(false);
   const [mapType, setMapType] = useState("standard");
   const [mapTypeMenuVisible, setMapTypeMenuVisible] = useState(false);
+
+  const [showNeighbourhoods, setShowNeighbourhoods] = useState(true);
+  const [selectedErfTracksViewChanges, setSelectedErfTracksViewChanges] =
+    useState(true);
 
   const rawValue = getIn(values, name);
   const error = getIn(errors, name);
@@ -103,6 +112,19 @@ const SovereignLocationPicker = ({
   };
 
   const currentCoords = getCoords(rawValue);
+  const selectedErfCoords = getCoords(erfCentroid);
+
+  useEffect(() => {
+    if (!modalVisible) return;
+
+    setSelectedErfTracksViewChanges(true);
+
+    const timeout = setTimeout(() => {
+      setSelectedErfTracksViewChanges(false);
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [modalVisible, erfNo, erfCentroid]);
 
   return (
     <FormSection title={label}>
@@ -179,14 +201,22 @@ const SovereignLocationPicker = ({
           >
             <Surface style={styles.modalSurface}>
               <View style={styles.modalHeader}>
-                <IconButton
-                  icon="close"
-                  size={24}
-                  onPress={() => setModalVisible(false)}
-                />
+                <View
+                  style={{
+                    borderWidth: 0.5,
+                    borderColor: "#cbd5e1",
+                    // padding: 4,
+                    borderRadius: 6,
+                  }}
+                >
+                  <IconButton
+                    icon="close"
+                    size={24}
+                    onPress={() => setModalVisible(false)}
+                  />
+                </View>
 
                 <View style={styles.titleGroup}>
-                  <Text style={styles.modalTitle}>SITUATIONAL POSITIONING</Text>
                   <Text style={styles.modalSubTitle}>ERF {erfNo}</Text>
                 </View>
 
@@ -236,6 +266,18 @@ const SovereignLocationPicker = ({
                     title="HYBRID"
                   />
                 </Menu>
+
+                <TouchableOpacity
+                  style={styles.contextBtn}
+                  onPress={() => setShowNeighbourhoods((prev) => !prev)}
+                >
+                  <MaterialCommunityIcons
+                    name={showNeighbourhoods ? "eye" : "eye-off"}
+                    size={18}
+                    color="#0f172a"
+                  />
+                  <Text style={styles.contextBtnText}>CONTEXT</Text>
+                </TouchableOpacity>
               </View>
 
               <MapView
@@ -259,21 +301,75 @@ const SovereignLocationPicker = ({
                   />
                 )}
 
+                {erfCentroid && (
+                  <Marker
+                    coordinate={selectedErfCoords}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={selectedErfTracksViewChanges}
+                    zIndex={20}
+                  >
+                    <View style={styles.selectedErfLabel}>
+                      <Text style={styles.selectedErfLabelText}>{erfNo}</Text>
+                    </View>
+                  </Marker>
+                )}
+
+                {/* 🧭 NEIGHBOURHOODS */}
+                {showNeighbourhoods && (
+                  <>
+                    {/* 🔶 Nearby ERFs */}
+                    {nearbyErfs.map((erf) => (
+                      <Polygon
+                        key={`erf-${erf.id}`}
+                        coordinates={erf.boundary}
+                        strokeColor="#64748b"
+                        fillColor="rgba(100,116,139,0.1)"
+                        strokeWidth={1}
+                      />
+                    ))}
+
+                    {/* 🔷 Nearby Premises */}
+                    {nearbyPremises.map((prem) => (
+                      <Marker
+                        key={`prem-${prem.id}`}
+                        coordinate={{
+                          latitude: prem.coordinate?.lat,
+                          longitude: prem.coordinate?.lng,
+                        }}
+                        title={`${prem?.address?.strNo || ""} ${prem?.address?.strName || ""}`}
+                        description={`${prem?.propertyType?.type || "NAv"} • ${prem?.propertyType?.name || "NAv"} • ${prem?.propertyType?.unitNo || "NAv"}`}
+                        pinColor="#1bbe57"
+                      />
+                    ))}
+
+                    {/* ⚡ Nearby Meters */}
+                    {nearbyMeters.map((meter) => (
+                      <Marker
+                        key={`meter-${meter.id}`}
+                        coordinate={{
+                          latitude: meter.coordinate?.lat,
+                          longitude: meter.coordinate?.lng,
+                        }}
+                        pinColor={
+                          meter.meterType === "water"
+                            ? "#0ea5e9"
+                            : meter.meterType === "electricity"
+                              ? "#f59e0b"
+                              : "#94a3b8"
+                        }
+                      />
+                    ))}
+                  </>
+                )}
+
                 <Marker
                   draggable
                   coordinate={tempCoords}
                   onDragEnd={(e) => setTempCoords(e.nativeEvent.coordinate)}
-                  zIndex={10}
-                >
-                  <View style={styles.activeMarker}>
-                    <MaterialCommunityIcons
-                      name={icon}
-                      size={58}
-                      color="#0f172a"
-                    />
-                    <View style={styles.markerShadow} />
-                  </View>
-                </Marker>
+                  zIndex={40}
+                  pinColor="#ce6b6b"
+                  tracksViewChanges={true}
+                />
               </MapView>
 
               <View style={styles.modalFooter}>
@@ -356,12 +452,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderBottomWidth: 1,
     borderBottomColor: "#f1f5f9",
+    gap: 10,
   },
 
   titleGroup: {
     flex: 1,
     alignItems: "center",
-    marginRight: 8,
+    // marginRight: 8,
+    paddingVertical: 8,
+    // minHeight: 40,
   },
 
   modalTitle: {
@@ -371,14 +470,14 @@ const styles = StyleSheet.create({
   },
 
   modalSubTitle: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "bold",
     color: "#fff",
     backgroundColor: "#0f172a",
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 8,
     borderRadius: 4,
-    marginTop: 4,
+    // marginTop: 4,
   },
 
   mapTypeBtn: {
@@ -432,6 +531,38 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.2)",
     borderRadius: 5,
     marginTop: -5,
+  },
+
+  contextBtn: {
+    height: 34,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#f8fafc",
+  },
+
+  contextBtnText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#0f172a",
+  },
+  selectedErfLabel: {
+    backgroundColor: "rgba(255, 255, 255, 0.92)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "#FFD700",
+  },
+
+  selectedErfLabelText: {
+    color: "#848484",
+    fontSize: 10,
+    // fontWeight: "900",
   },
 });
 

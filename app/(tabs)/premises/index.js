@@ -17,7 +17,6 @@ export default function PremisesScreen() {
   const router = useRouter();
   const { all, loading, scopeState } = useWarehouse();
   // console.log(`all.prems?.length`, all.prems?.length);
-  // console.log(`all.prems`, all.prems);
 
   const { openMissionDiscovery } = useDiscovery();
 
@@ -109,6 +108,8 @@ export default function PremisesScreen() {
   const handleDiscover = useCallback(
     (p) => {
       const parentErf = erfById[p?.erfId] || null;
+      console.log(`PremiseCard - parentErf`, parentErf);
+      console.log(`PremiseCard - premise`, p);
 
       updateGeo({
         selectedErf: parentErf || { id: p?.erfId, erfNo: p?.erfNo },

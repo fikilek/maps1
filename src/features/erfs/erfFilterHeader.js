@@ -5,33 +5,12 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Button, Dialog, Portal, Surface } from "react-native-paper";
 import { useWarehouse } from "../../context/WarehouseContext";
 
-const ErfFilterHeader = ({
-  selectedWard,
-  setSelectedWard,
-  // availableWards,
-  filteredCount,
-  totalCount,
-  selectedErf, // 🎯 Pass the selection in
-  onScrollToSelected, // 🎯 Pass the scroll action in
-  // 🎯 NEW PROPS FOR SORTING
-  sortOrder = "DESC",
-  onToggleSort,
-}) => {
+const ErfFilterHeader = ({ selectedWard, setSelectedWard, filteredCount }) => {
   const [visible, setVisible] = useState(false);
   const showDialog = () => setVisible(true);
   const hideDialog = () => setVisible(false);
 
   const { available } = useWarehouse();
-  // console.log(
-  //   `ErfsScreen --available?.wards?.length`,
-  //   available?.wards?.length,
-  // );
-
-  // console.log(`ErfFilterHeader ----selectedWard`, selectedWard);
-  // console.log(`ErfFilterHeader ----filteredCount`, filteredCount);
-  // console.log(`ErfFilterHeader ----totalCount`, totalCount);
-  // console.log(`ErfFilterHeader ----available?.wards`, available?.wards);
-
   const displayWardName =
     selectedWard === "ALL" || !selectedWard
       ? "All Wards"
@@ -56,48 +35,6 @@ const ErfFilterHeader = ({
           </Button>
         </View>
 
-        {/* Sort Btn  - Sort by upadatedAt descening andascending order */}
-        {/* 🚀 NEW: SORT TOGGLE (Between Ward and Center) */}
-        {/* <TouchableOpacity
-          style={styles.sortCol}
-          onPress={onToggleSort}
-          activeOpacity={0.6}
-        >
-          <MaterialCommunityIcons
-            name={
-              sortOrder === "DESC"
-                ? "sort-calendar-descending"
-                : "sort-calendar-ascending"
-            }
-            size={26}
-            color="#2563eb"
-          />
-          <Text style={styles.sortText}>{sortOrder}</Text>
-        </TouchableOpacity> */}
-
-        {/* 🎯 CENTER: THE TARGET LOCATOR (SelectedErfBtn) */}
-        {selectedErf && (
-          <View style={styles.centerCol}>
-            <TouchableOpacity
-              style={styles.targetBtn}
-              onPress={onScrollToSelected}
-              activeOpacity={0.7}
-            >
-              <View
-                style={{
-                  width: "70%",
-                  alignItems: "center",
-                }}
-              >
-                <Text style={{ fontSize: 10 }}>Selected Erf</Text>
-                <Text
-                  style={styles.targetText}
-                >{`ERF ${selectedErf?.erfNo}`}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        )}
-
         {/* 📊 RIGHT: TACTICAL STATS */}
         <View style={styles.rightCol}>
           {/* <View style={styles.statsBox}> */}
@@ -107,12 +44,6 @@ const ErfFilterHeader = ({
               {filteredCount}
             </Text>
           </Text>
-          {/* <View style={styles.divider} />
-            <Text style={styles.statsText}>
-              {`LM Total Erfs: `}
-              <Text style={styles.boldText}>{totalCount}</Text>
-            </Text> */}
-          {/* </View> */}
         </View>
       </View>
 

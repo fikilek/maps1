@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { memo, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Marker } from "react-native-maps";
@@ -26,20 +27,17 @@ function NeighbourhoodMeterMarkerBase({
   return (
     <Marker
       coordinate={coordinate}
-      anchor={{ x: 0.1, y: 0.1 }}
+      anchor={{ x: 0.2, y: 0.2 }}
       zIndex={1200}
       tracksViewChanges={tracksViewChanges}
     >
-      <View
-        style={[
-          styles.meterMarkerCircle,
-          {
-            backgroundColor: isWater ? "#3B82F6" : "#EAB308",
-            borderColor: isAnomaly ? "#EF4444" : "#FFFFFF",
-            borderWidth: isAnomaly ? 2 : 1,
-          },
-        ]}
-      />
+      <View>
+        <MaterialCommunityIcons
+          name={isWater ? "water" : "lightning-bolt"}
+          size={20}
+          color={isWater ? "#3B82F6" : "#EAB308"}
+        />
+      </View>
     </Marker>
   );
 }

@@ -67,6 +67,48 @@ function buildMeterDiscoveryTrnId({ wardPcode, erfNo, meterType }) {
   return `TRN_MDIS_${ts}_${typeCode}_${safeWardPcode}_${safeErfNo}`;
 }
 
+function toLatLng(value) {
+  if (!value) return null;
+
+  if (Array.isArray(value) && value.length === 2) {
+    return { lat: Number(value[0]), lng: Number(value[1]) };
+  }
+
+  if (value?.lat != null && value?.lng != null) {
+    return { lat: Number(value.lat), lng: Number(value.lng) };
+  }
+
+  if (value?.latitude != null && value?.longitude != null) {
+    return { lat: Number(value.latitude), lng: Number(value.longitude) };
+  }
+
+  return null;
+}
+
+function getDistanceMeters(pointA, pointB) {
+  const a = toLatLng(pointA);
+  const b = toLatLng(pointB);
+
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = 6371000;
+
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const x =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  const y = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+
+  return R * y;
+}
+
 // --- MAIN FORM COMPONENT ---
 export default function FormMeterDiscovery() {
   const { premiseId, action: actionRaw } = useLocalSearchParams();
@@ -749,6 +791,103 @@ export default function FormMeterDiscovery() {
     all?.geoLibrary?.[selectedErfId] || all?.geoEntries?.[selectedErfId];
   const erfBoundary = getSafeCoords(erfGeo?.geometry);
 
+  const NEIGHBOURHOOD_RADIUS_METERS = 120;
+
+  const nearbyPremises = useMemo(() => {
+    if (!landingPoint || !Array.isArray(all?.prems)) return [];
+
+    return all.prems
+      .filter((item) => item?.id !== premise?.id)
+      .map((item) => {
+        const coordinate = toLatLng(item?.geometry?.centroid);
+        const distance = getDistanceMeters(landingPoint, coordinate);
+
+        return {
+          id: item?.id,
+          coordinate,
+          distance,
+          address: {
+            strNo: item?.address?.strNo || "NAv",
+            strName: item?.address?.strName || "NAv",
+          },
+          propertyType: {
+            type: item?.propertyType?.type || "NAv",
+            name: item?.propertyType?.name || "NAv",
+            unitNo: item?.propertyType?.unitNo || "NAv",
+          },
+        };
+      })
+      .filter(
+        (item) =>
+          item.coordinate && item.distance <= NEIGHBOURHOOD_RADIUS_METERS,
+      );
+  }, [all?.prems, landingPoint, premise?.id]);
+
+  const nearbyMeters = useMemo(() => {
+    if (!landingPoint || !Array.isArray(all?.meters)) return [];
+
+    return all.meters
+      .map((item) => {
+        const coordinate = toLatLng(
+          item?.accessData?.gps ||
+            item?.ast?.location?.gps ||
+            item?.location?.gps ||
+            item?.geometry?.centroid,
+        );
+
+        const distance = getDistanceMeters(landingPoint, coordinate);
+
+        return {
+          id: item?.id,
+          coordinate,
+          distance,
+          meterType: item?.meterType || "NAv",
+        };
+      })
+      .filter(
+        (item) =>
+          item.coordinate && item.distance <= NEIGHBOURHOOD_RADIUS_METERS,
+      );
+  }, [all?.meters, landingPoint]);
+
+  const nearbyErfs = useMemo(() => {
+    if (!landingPoint || !Array.isArray(all?.erfs)) return [];
+
+    return all.erfs
+      .filter((item) => item?.id !== selectedErfId)
+      .map((item) => {
+        const boundaryGeo =
+          all?.geoLibrary?.[item?.id] || all?.geoEntries?.[item?.id];
+
+        const boundary = getSafeCoords(boundaryGeo?.geometry);
+        const coordinate = toLatLng(
+          item?.geometry?.centroid || boundaryGeo?.centroid,
+        );
+        const distance = getDistanceMeters(landingPoint, coordinate);
+
+        return {
+          id: item?.id,
+          erfNo: item?.erfNo || "NAv",
+          coordinate,
+          boundary,
+          distance,
+        };
+      })
+      .filter(
+        (item) =>
+          item.coordinate &&
+          Array.isArray(item.boundary) &&
+          item.boundary.length > 0 &&
+          item.distance <= NEIGHBOURHOOD_RADIUS_METERS,
+      );
+  }, [
+    all?.erfs,
+    all?.geoLibrary,
+    all?.geoEntries,
+    landingPoint,
+    selectedErfId,
+  ]);
+
   return (
     <>
       {/* 🛡️ THE GLOBAL GUARD: Drop it at the very top of your JSX */}
@@ -847,6 +986,9 @@ export default function FormMeterDiscovery() {
                       erfCentroid={landingPoint}
                       landingPoint={landingPoint}
                       icon={"tooltip-outline"}
+                      nearbyErfs={nearbyErfs}
+                      nearbyPremises={nearbyPremises}
+                      nearbyMeters={nearbyMeters}
                     />
                   ) : (
                     <WaterSections
@@ -861,6 +1003,9 @@ export default function FormMeterDiscovery() {
                       erfCentroid={landingPoint}
                       landingPoint={landingPoint}
                       icon={"tooltip-outline"}
+                      nearbyErfs={nearbyErfs}
+                      nearbyPremises={nearbyPremises}
+                      nearbyMeters={nearbyMeters}
                     />
                   )}
                 </View>

@@ -187,9 +187,12 @@ const TrnItem = ({ item }) => {
 };
 
 export default function TrnsScreen() {
-  const { all, sync } = useWarehouse();
+  const { filtered, sync } = useWarehouse();
 
-  const trns = all?.trns || [];
+  const trns = filtered?.trns || [];
+  // const { all, sync } = useWarehouse();
+
+  // const trns = all?.trns || [];
   const trnsSync = sync?.trns || {};
   const scopeSync = sync?.scope || {};
 

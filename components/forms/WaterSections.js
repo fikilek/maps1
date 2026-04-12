@@ -19,6 +19,9 @@ export const WaterSections = ({
   erfCentroid = null,
   landingPoint,
   icon,
+  nearbyErfs = [],
+  nearbyPremises = [],
+  nearbyMeters = [],
 }) => {
   return (
     <View style={disabled && { opacity: 0.7 }}>
@@ -89,6 +92,9 @@ export const WaterSections = ({
         referenceBoundary={erfBoundary}
         erfNo={erfNo}
         erfCentroid={erfCentroid}
+        nearbyErfs={nearbyErfs}
+        nearbyPremises={nearbyPremises}
+        nearbyMeters={nearbyMeters}
       />
     </View>
   );

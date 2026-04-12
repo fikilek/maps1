@@ -13,24 +13,49 @@ import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 
 // 🛰️ BEACON SELECTOR: Visualizes property types instantly
-const getPropertyBeacon = (type = "") => {
-  const t = type.toLowerCase();
+const getPropertyBeacon = (type = "", occupancyStatus = "") => {
+  const t = String(type || "").toLowerCase();
+  const o = String(occupancyStatus || "").toLowerCase();
 
-  if (t.includes("vacant land") || t.includes("land"))
+  if (t.includes("residential") && o.includes("under construction")) {
+    return { name: "home-off-outline", color: "#f59e0b" };
+  }
+
+  if (t.includes("vacant land") || t.includes("land")) {
     return { name: "image-filter-hdr", color: "#84cc16" };
-  if (t.includes("church") || t.includes("religion"))
+  }
+
+  if (t.includes("church") || t.includes("religion")) {
     return { name: "church", color: "#6366f1" };
-  if (t.includes("school") || t.includes("education"))
+  }
+
+  if (t.includes("school") || t.includes("education")) {
     return { name: "school", color: "#10b981" };
-  if (t.includes("township")) return { name: "home-variant", color: "#f59e0b" };
-  if (t.includes("suburb")) return { name: "home-city", color: "#3b82f6" };
-  if (t.includes("flat") || t.includes("sectional"))
+  }
+
+  if (t.includes("township")) {
+    return { name: "home-variant", color: "#f59e0b" };
+  }
+
+  if (t.includes("suburb")) {
+    return { name: "home-city", color: "#3b82f6" };
+  }
+
+  if (t.includes("flat") || t.includes("sectional")) {
     return { name: "office-building", color: "#8b5cf6" };
-  if (t.includes("commercial") || t.includes("shop"))
+  }
+
+  if (t.includes("commercial") || t.includes("shop")) {
     return { name: "storefront", color: "#ec4899" };
-  if (t.includes("business")) return { name: "storefront", color: "#ec4899" };
-  if (t.includes("industrial") || t.includes("factory"))
+  }
+
+  if (t.includes("business")) {
+    return { name: "storefront", color: "#ec4899" };
+  }
+
+  if (t.includes("industrial") || t.includes("factory")) {
     return { name: "factory", color: "#64748b" };
+  }
 
   return { name: "home", color: "#94a3b8" };
 };
@@ -58,10 +83,6 @@ const PremiseCard = memo(
     onDuplicate,
     onNaPress,
   }) => {
-    console.log(
-      `Rendering PremiseCard for ${item?.id} - ${item?.address?.strName}`,
-      item?.metadata,
-    );
     const isFlat = item?.propertyType?.type === "Flats";
     const erfId = item?.erfId; // 🎯 The link to the sovereign
 
@@ -76,7 +97,11 @@ const PremiseCard = memo(
       const unit = item?.propertyType?.unitNo || "";
 
       // 🎯 Logic A: Flats / Sectional Title (Show Name + Unit)
-      if (type === "Flats" || type === "Sectional Title") {
+      if (
+        type === "Flats" ||
+        type === "Sectional Title" ||
+        type === "Industrial"
+      ) {
         return `${name}${unit ? ` | Unit ${unit}` : ""}`;
       }
 
@@ -92,6 +117,7 @@ const PremiseCard = memo(
 
     // const beacon = getPropertyBeacon(propertyTypeStr);
     const status = getStatusConfig(item?.occupancy?.status || "");
+    const occupancyStatus = item?.occupancy?.status || "Unknown";
     const noAccessTrnIds = Array.isArray(item?.metadata.noAccessTrnIds)
       ? item?.metadata.noAccessTrnIds.length
       : 0;
@@ -99,7 +125,10 @@ const PremiseCard = memo(
     const identityLabel = resolveEntityIdentity();
     const addressStr =
       `${item?.address?.strNo || ""} ${item?.address?.strName || ""} ${item?.address?.strType || ""}`.trim();
-    const beacon = getPropertyBeacon(item?.propertyType?.type);
+    const beacon = getPropertyBeacon(
+      item?.propertyType?.type,
+      item?.occupancy?.status,
+    );
 
     // 🏛️ THE DUPLICATE TRIGGER
     const handleDuplicate = () => {
@@ -271,16 +300,22 @@ const PremiseCard = memo(
                   <Text style={styles.typeTagText} numberOfLines={1}>
                     {item?.propertyType?.type}
                   </Text>
-                  {/* <Text style={styles.typeTagName}>
-                    {item?.propertyType?.name} . {item?.propertyType?.unitNo}
-                  </Text> */}
                 </View>
 
-                <View style={{}}>
-                  <Text
-                    style={[styles.propertyTypeText, { color: beacon.color }]}
-                  >
-                    {`${identityLabel}`}
+                {/* Ptoperty type name */}
+                {item?.propertyType?.name && (
+                  <View style={{}}>
+                    <Text
+                      style={[styles.propertyTypeText, { color: beacon.color }]}
+                    >
+                      {`${identityLabel}`}
+                    </Text>
+                  </View>
+                )}
+
+                <View>
+                  <Text style={{ fontSize: 10, fontWeight: "300" }}>
+                    {occupancyStatus}
                   </Text>
                 </View>
               </View>

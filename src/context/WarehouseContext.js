@@ -46,7 +46,6 @@ export const WarehouseProvider = ({ children }) => {
       return String(w?.id || "").startsWith(lmPcode);
     });
   }, [wardsList, lmPcode]);
-  // console.log(`wards`, wards);
 
   const selectedWardIsValid = useMemo(() => {
     if (!lmPcode || !selectedWard?.id) return false;
@@ -55,8 +54,8 @@ export const WarehouseProvider = ({ children }) => {
       (w) =>
         (w?.id && w.id === selectedWard.id) ||
         (w?.pcode && w.pcode === selectedWard.id) ||
-        (w?.id && w.id === selectedWard.pcode) ||
-        (w?.pcode && w.pcode === selectedWard.pcode),
+        (w?.id && w.id === selectedWard?.pcode) ||
+        (w?.pcode && w.pcode === selectedWard?.pcode),
     );
   }, [lmPcode, selectedWard?.id, selectedWard?.pcode, wards]);
 
@@ -75,28 +74,18 @@ export const WarehouseProvider = ({ children }) => {
       { lmPcode, wardPcode },
       { skip: !lmPcode || !wardPcode },
     );
-  // console.log(`wardPrems`, wardPrems);
 
-  // keep these old for now until we move them too
-  // const { data: meters = [], isLoading: astsLoading } =
-  //   useGetAstsByLmPcodeQuery(lmPcode, { skip: !lmPcode });
   const { data: cloudMeters = [], isLoading: metersLoading } =
     useGetAstsByLmPcodeWardPcodeQuery(
       { lmPcode, wardPcode },
       { skip: !lmPcode || !wardPcode },
     );
-  // console.log(`cloudMeters`, cloudMeters);
-  // console.log(`lmPcode`, lmPcode);
-  // console.log(`wardPcode`, wardPcode);
 
   const { data: cloudTrns = [], isLoading: trnsLoading } =
     useGetTrnsByLmPcodeWardPcodeQuery(
       { lmPcode, wardPcode },
       { skip: !lmPcode || !wardPcode },
     );
-  // console.log(`cloudTrns`, cloudTrns);
-  // console.log(`lmPcode`, lmPcode);
-  // console.log(`wardPcode`, wardPcode);
 
   const expectedPackKey =
     lmPcode && wardPcode ? `${lmPcode}__${wardPcode}` : null;
@@ -110,7 +99,24 @@ export const WarehouseProvider = ({ children }) => {
   const packKeyMatches =
     !!expectedPackKey && currentPackKey === expectedPackKey;
 
-  const warehouse = useMemo(() => {
+  // Narrow geo ids only for filtered selectors
+  const selectedErfId = geoState?.selectedErf?.id || null;
+  const selectedPremiseId = geoState?.selectedPremise?.id || null;
+  const selectedMeterId =
+    geoState?.selectedMeter?.ast?.astData?.astId ||
+    geoState?.selectedMeter?.id ||
+    null;
+
+  // -------------------------------------------------
+  // 1) BASE / STABLE DATA
+  // -------------------------------------------------
+  const available = useMemo(() => {
+    return {
+      wards: lmPcode ? wards : [],
+    };
+  }, [lmPcode, wards]);
+
+  const all = useMemo(() => {
     const allWards = scopeReady ? wards : [];
     const allErfs =
       scopeReady && packKeyMatches ? wardErfs?.metaEntries || [] : [];
@@ -118,12 +124,74 @@ export const WarehouseProvider = ({ children }) => {
     const allMeters = scopeReady ? cloudMeters || [] : [];
     const allTrns = scopeReady ? cloudTrns || [] : [];
 
-    // const allWards = wards;
-    // const allErfs = packKeyMatches ? wardErfs?.metaEntries || [] : [];
-    // const allPrems = wardPcode ? wardPrems || [] : [];
-    // const allMeters = cloudMeters || [];
-    // const allTrns = cloudTrns || [];
+    const geoLibrary = buildGeoLibrary({
+      wards: allWards,
+      erfGeoEntries: packKeyMatches ? wardErfs?.geoEntries || {} : {},
+    });
 
+    return {
+      wards: allWards,
+      erfs: allErfs,
+      prems: allPrems,
+      meters: allMeters,
+      trns: allTrns,
+      geoLibrary,
+    };
+  }, [
+    scopeReady,
+    wards,
+    wardErfs,
+    wardPrems,
+    cloudMeters,
+    cloudTrns,
+    packKeyMatches,
+  ]);
+
+  // -------------------------------------------------
+  // 2) FILTERED DATA
+  // Only this part should react to leaf geo selection.
+  // -------------------------------------------------
+  const filtered = useMemo(() => {
+    return {
+      wards: selectFilteredWards({ wards: all.wards }),
+      erfs: selectFilteredErfs({
+        erfs: all.erfs,
+        selectedErfId,
+      }),
+      prems: selectFilteredPrems({
+        prems: all.prems,
+        selectedErfId,
+        selectedPremiseId,
+      }),
+      meters: selectFilteredMeters({
+        meters: all.meters,
+        selectedErfId,
+        selectedPremiseId,
+        selectedMeterId,
+      }),
+      trns: selectFilteredTrns({
+        trns: all.trns,
+        selectedErfId,
+        selectedPremiseId,
+        selectedMeterId,
+      }),
+    };
+  }, [
+    all.wards,
+    all.erfs,
+    all.prems,
+    all.meters,
+    all.trns,
+    selectedErfId,
+    selectedPremiseId,
+    selectedMeterId,
+  ]);
+
+  // -------------------------------------------------
+  // 3) SYNC STATE
+  // Keep separate from filtered selection churn.
+  // -------------------------------------------------
+  const sync = useMemo(() => {
     const wardErfsSync = packKeyMatches
       ? (wardErfs?.sync ?? {
           status: "idle",
@@ -149,8 +217,8 @@ export const WarehouseProvider = ({ children }) => {
     const wardsSync = {
       status: !lmPcode ? "idle" : wardsLoading ? "syncing" : "ready",
       lmPcode,
-      firstSnapshotAt: allWards.length > 0 ? Date.now() : 0,
-      lastSyncAt: allWards.length > 0 ? Date.now() : 0,
+      firstSnapshotAt: 0,
+      lastSyncAt: 0,
       lastError: null,
     };
 
@@ -166,22 +234,6 @@ export const WarehouseProvider = ({ children }) => {
       wardPcode: selectedWard?.pcode || selectedWard?.id || null,
     };
 
-    const trnsSync = {
-      status: !lmPcode
-        ? "idle"
-        : !wardPcode
-          ? "awaiting-ward"
-          : trnsLoading
-            ? "syncing"
-            : "ready",
-      lmPcode,
-      wardPcode,
-      size: allTrns.length,
-      lastError: null,
-      firstSnapshotAt: allTrns.length > 0 ? Date.now() : 0,
-      lastSyncAt: allTrns.length > 0 ? Date.now() : 0,
-    };
-
     const metersSync = {
       status: !lmPcode
         ? "idle"
@@ -192,76 +244,48 @@ export const WarehouseProvider = ({ children }) => {
             : "ready",
       lmPcode,
       wardPcode,
-      size: allMeters.length,
+      size: all.meters.length,
       lastError: null,
-      firstSnapshotAt: allMeters.length > 0 ? Date.now() : 0,
-      lastSyncAt: allMeters.length > 0 ? Date.now() : 0,
+      firstSnapshotAt: 0,
+      lastSyncAt: 0,
     };
 
-    const erfById = new Map(allErfs.map((e) => [e.id, e]));
-
-    const geoLibrary = buildGeoLibrary({
-      wards: allWards,
-      erfGeoEntries: packKeyMatches ? wardErfs?.geoEntries || {} : {},
-    });
-
-    const filteredWards = selectFilteredWards({ wards: allWards }, geoState);
-    const filteredErfs = selectFilteredErfs({ erfs: allErfs }, geoState);
-    const filteredPrems = selectFilteredPrems(
-      { prems: allPrems, erfById },
-      geoState,
-    );
-    const filteredMeters = selectFilteredMeters(
-      { meters: allMeters },
-      geoState,
-    );
-    // console.log(`filteredMeters`, filteredMeters);
-    const filteredTrns = selectFilteredTrns({ trns: allTrns }, geoState);
+    const trnsSync = {
+      status: !lmPcode
+        ? "idle"
+        : !wardPcode
+          ? "awaiting-ward"
+          : trnsLoading
+            ? "syncing"
+            : "ready",
+      lmPcode,
+      wardPcode,
+      size: all.trns.length,
+      lastError: null,
+      firstSnapshotAt: 0,
+      lastSyncAt: 0,
+    };
 
     return {
-      available: {
-        wards: lmPcode ? wards : [],
-      },
-      all: {
-        wards: allWards,
-        erfs: allErfs,
-        prems: allPrems,
-        meters: allMeters,
-        trns: allTrns,
-        geoLibrary,
-      },
-      filtered: {
-        wards: filteredWards,
-        erfs: filteredErfs,
-        prems: filteredPrems,
-        meters: filteredMeters,
-        trns: filteredTrns,
-      },
-      sync: {
-        scope: scopeSync,
-        wards: wardsSync,
-        erfs: wardErfsSync,
-        meters: metersSync,
-        trns: trnsSync,
-      },
+      scope: scopeSync,
+      wards: wardsSync,
+      erfs: wardErfsSync,
+      meters: metersSync,
+      trns: trnsSync,
     };
   }, [
-    wards,
-    wardErfs,
-    wardPrems,
     packKeyMatches,
-    cloudMeters,
-    cloudTrns,
-    geoState,
+    wardErfs,
     lmPcode,
     wardPcode,
     expectedPackKey,
     wardsLoading,
+    metersLoading,
+    trnsLoading,
     selectedWard,
     selectedWardIsValid,
-    trnsLoading,
-    metersLoading,
-    scopeReady,
+    all.meters.length,
+    all.trns.length,
   ]);
 
   const loading =
@@ -271,8 +295,22 @@ export const WarehouseProvider = ({ children }) => {
     (scopeReady && metersLoading) ||
     (scopeReady && trnsLoading);
 
+  // -------------------------------------------------
+  // 4) FINAL PUBLIC VALUE
+  // Preserve current contract exactly.
+  // -------------------------------------------------
+  const value = useMemo(() => {
+    return {
+      available,
+      all,
+      filtered,
+      sync,
+      loading,
+    };
+  }, [available, all, filtered, sync, loading]);
+
   return (
-    <WarehouseContext.Provider value={{ ...warehouse, loading }}>
+    <WarehouseContext.Provider value={value}>
       {children}
     </WarehouseContext.Provider>
   );

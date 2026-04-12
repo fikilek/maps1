@@ -51,10 +51,6 @@ const FormMapPositioner = ({
   erfId,
   defaultLocation,
 }) => {
-  console.log(
-    `FormMapPositioner rendered with erfId: ${erfId} and defaultLocation:`,
-    defaultLocation,
-  );
   const [showMap, setShowMap] = useState(false);
   const [mapType, setMapType] = useState("standard");
   const [mapTypeMenuVisible, setMapTypeMenuVisible] = useState(false);

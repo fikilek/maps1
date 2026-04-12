@@ -27,7 +27,7 @@ export const buildGeoLibrary = ({ wards = [], erfGeoEntries = {} }) => {
   return geoLibrary;
 };
 
-export const selectFilteredWards = ({ wards = [] }, geo) => {
+export const selectFilteredWards = ({ wards = [] }) => {
   const wardsArr = Array.isArray(wards) ? wards : [];
 
   // Always return the full LM ward pool.
@@ -36,93 +36,84 @@ export const selectFilteredWards = ({ wards = [] }, geo) => {
   return [...wardsArr].sort((a, b) => (a.code ?? 0) - (b.code ?? 0));
 };
 
-export const selectFilteredErfs = ({ erfs = [] }, geo) => {
+export const selectFilteredErfs = ({ erfs = [], selectedErfId = null }) => {
   const erfsArr = Array.isArray(erfs) ? erfs : [];
 
-  let pool = erfsArr;
-
-  if (geo.selectedErf) {
-    pool = pool.filter((e) => e.id === geo.selectedErf.id);
-  } else if (geo.selectedWard) {
-    const wardId = geo.selectedWard.id;
-    pool = pool.filter(
-      (e) => e.admin?.ward?.id === wardId || e.admin?.ward?.pcode === wardId,
-    );
+  if (selectedErfId) {
+    return erfsArr.filter((e) => e?.id === selectedErfId);
   }
 
-  return [...pool].sort(
+  return [...erfsArr].sort(
     (a, b) =>
       toMillis(b?.metadata?.updatedAt) - toMillis(a?.metadata?.updatedAt),
   );
 };
 
-export const selectFilteredPrems = ({ prems = [], erfById }, geo) => {
+export const selectFilteredPrems = ({
+  prems = [],
+  selectedErfId = null,
+  selectedPremiseId = null,
+}) => {
   const premsArr = Array.isArray(prems) ? prems : [];
 
-  if (geo.selectedPremise) {
-    return premsArr.filter((p) => p.id === geo.selectedPremise.id);
+  if (selectedPremiseId) {
+    return premsArr.filter((p) => p?.id === selectedPremiseId);
   }
 
-  if (geo.selectedErf) {
-    return premsArr.filter((p) => p.erfId === geo.selectedErf.id);
-  }
-
-  if (geo.selectedWard) {
-    const wardId = geo.selectedWard.id;
-    return premsArr.filter((p) => {
-      const parentErf = erfById?.get(p.erfId);
-      return (
-        parentErf?.admin?.ward?.id === wardId ||
-        parentErf?.admin?.ward?.pcode === wardId
-      );
-    });
+  if (selectedErfId) {
+    return premsArr.filter((p) => p?.erfId === selectedErfId);
   }
 
   return premsArr;
 };
 
-export const selectFilteredMeters = ({ meters = [] }, geo) => {
+export const selectFilteredMeters = ({
+  meters = [],
+  selectedErfId = null,
+  selectedPremiseId = null,
+  selectedMeterId = null,
+}) => {
   const metersArr = Array.isArray(meters) ? meters : [];
 
-  if (geo.selectedMeter) {
-    return metersArr.filter((m) => m.id === geo.selectedMeter.id);
-  }
-
-  if (geo.selectedPremise) {
+  if (selectedMeterId) {
     return metersArr.filter(
-      (m) => m.accessData?.premise?.id === geo.selectedPremise.id,
+      (m) => (m?.ast?.astData?.astId || m?.id || null) === selectedMeterId,
     );
   }
 
-  if (geo.selectedErf) {
-    return metersArr.filter((m) => m.accessData?.erfId === geo.selectedErf.id);
+  if (selectedPremiseId) {
+    return metersArr.filter(
+      (m) => m?.accessData?.premise?.id === selectedPremiseId,
+    );
   }
 
-  if (geo.selectedWard) {
-    const wardKey = geo.selectedWard?.pcode || geo.selectedWard?.id;
-    return metersArr.filter(
-      (m) => m.accessData?.parents?.wardPcode === wardKey,
-    );
+  if (selectedErfId) {
+    return metersArr.filter((m) => m?.accessData?.erfId === selectedErfId);
   }
 
   return metersArr;
 };
 
-export const selectFilteredTrns = ({ trns = [] }, geo) => {
+export const selectFilteredTrns = ({
+  trns = [],
+  selectedErfId = null,
+  selectedPremiseId = null,
+  selectedMeterId = null,
+}) => {
   const trnsArr = Array.isArray(trns) ? trns : [];
 
-  if (geo.selectedPremise) {
+  if (selectedMeterId) {
+    return trnsArr.filter((t) => t?.derived?.astId === selectedMeterId);
+  }
+
+  if (selectedPremiseId) {
     return trnsArr.filter(
-      (t) => t.accessData?.premise?.id === geo.selectedPremise.id,
+      (t) => t?.accessData?.premise?.id === selectedPremiseId,
     );
   }
 
-  if (geo.selectedErf) {
-    return trnsArr.filter((t) => t.accessData?.erfId === geo.selectedErf.id);
-  }
-
-  if (geo.selectedWard) {
-    return trnsArr.filter((t) => t.accessData?.wardId === geo.selectedWard.id);
+  if (selectedErfId) {
+    return trnsArr.filter((t) => t?.accessData?.erfId === selectedErfId);
   }
 
   return trnsArr;

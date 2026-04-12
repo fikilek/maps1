@@ -212,12 +212,23 @@ export default function MapsScreen() {
     const prem = premiseActionPrem;
     if (!prem?.id) return;
 
+    const parentErf = all?.erfs?.find((erf) => erf?.id === prem?.erfId) || null;
+    console.log(`Map - parenErf`, parentErf);
+    console.log(`Map - premise`, prem);
+
+    updateGeo({
+      selectedErf: parentErf || { id: prem?.erfId, erfNo: prem?.erfNo },
+      selectedPremise: prem,
+      lastSelectionType: "PREMISE",
+    });
+
     setPremiseActionPrem(null);
 
     openMissionDiscovery({
       premiseId: prem.id,
+      premise: prem,
     });
-  }, [premiseActionPrem, openMissionDiscovery]);
+  }, [premiseActionPrem, all?.erfs, updateGeo, openMissionDiscovery]);
 
   const handleAdjustPremisePositionFromModal = useCallback(() => {
     const prem = premiseActionPrem;
@@ -592,14 +603,14 @@ export default function MapsScreen() {
               coordinate={{ latitude: cLat, longitude: cLng }}
               erfNo={erf?.erfNo}
               onPress={(e) => {
-                e?.stopPropagation?.();
+                // e?.stopPropagation?.();
                 updateGeo({ selectedErf: erf, lastSelectionType: "ERF" });
-                router.push({
-                  pathname: "/premises/formPremise",
-                  params: {
-                    id: erf?.id,
-                  },
-                });
+                // router.push({
+                //   pathname: "/premises/formPremise",
+                //   params: {
+                //     id: erf?.id,
+                //   },
+                // });
               }}
             />
           </React.Fragment>
@@ -704,58 +715,6 @@ export default function MapsScreen() {
         );
       });
   };
-
-  // const renderMetersNeighborhood = () => {
-  //   if (!scopeReady || !showLayers?.asts || !region || zoom < 18) return null;
-
-  //   const latMin = region.latitude - region.latitudeDelta / 2;
-  //   const latMax = region.latitude + region.latitudeDelta / 2;
-  //   const lngMin = region.longitude - region.longitudeDelta / 2;
-  //   const lngMax = region.longitude + region.longitudeDelta / 2;
-
-  //   return all?.meters
-  //     ?.filter((m) => {
-  //       const lat = m?.ast?.location?.gps?.lat;
-  //       const lng = m?.ast?.location?.gps?.lng;
-  //       return (
-  //         lat &&
-  //         lng &&
-  //         lat >= latMin &&
-  //         lat <= latMax &&
-  //         lng >= lngMin &&
-  //         lng <= lngMax
-  //       );
-  //     })
-  //     .map((m) => {
-  //       const coordinate = {
-  //         latitude: m.ast.location.gps.lat,
-  //         longitude: m.ast.location.gps.lng,
-  //       };
-  //       const isWater = m.meterType === "water";
-  //       const isAnomaly =
-  //         !!m.ast?.anomalies?.anomaly && m.ast.anomalies.anomaly !== "N/A";
-
-  //       return (
-  //         <Marker
-  //           key={`nb-meter-${m.id}`}
-  //           coordinate={coordinate}
-  //           anchor={{ x: 0.1, y: 0.1 }}
-  //           zIndex={1200}
-  //         >
-  //           <View
-  //             style={[
-  //               styles.meterMarkerCircle,
-  //               {
-  //                 backgroundColor: isWater ? "#3B82F6" : "#EAB308",
-  //                 borderColor: isAnomaly ? "#EF4444" : "#FFFFFF",
-  //                 borderWidth: isAnomaly ? 2 : 1,
-  //               },
-  //             ]}
-  //           />
-  //         </Marker>
-  //       );
-  //     });
-  // };
 
   const renderServiceConnections = () => {
     if (!scopeReady || !showLayers?.sc || !region || zoom < 18) return null;

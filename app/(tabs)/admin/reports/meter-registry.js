@@ -115,6 +115,18 @@ export default function MeterRegistryScreen() {
     return meterType || "NAv";
   };
 
+  const getVisibilityLabel = (visibility) => {
+    const value = String(visibility || "")
+      .trim()
+      .toUpperCase();
+
+    if (!value) return "NAv";
+    if (value === "VISIBLE") return "VISIBLE";
+    if (value === "INVISIBLE") return "INVISIBLE";
+
+    return visibility || "NAv";
+  };
+
   const getPropertyTypeLabel = (propertyType) => {
     if (!propertyType || propertyType === "NAv") return "NAv";
 
@@ -134,6 +146,7 @@ export default function MeterRegistryScreen() {
   const renderRow = useCallback(({ item }) => {
     const updatedLabel = formatUpdatedAt(item?.metadata?.updatedAt);
     const meterTypeLabel = getMeterTypeLabel(item?.meterType);
+    const visibilityLabel = getVisibilityLabel(item?.visibility);
     const propertyTypeLabel = getPropertyTypeLabel(item?.premisePropertyType);
 
     return (
@@ -143,6 +156,8 @@ export default function MeterRegistryScreen() {
         </Text>
 
         <Text style={[styles.td, styles.colType]}>{meterTypeLabel}</Text>
+
+        <Text style={[styles.td, styles.colVisibility]}>{visibilityLabel}</Text>
 
         <Text style={[styles.td, styles.colAddress]}>
           {item?.premiseAddress || "NAv"}
@@ -199,6 +214,8 @@ export default function MeterRegistryScreen() {
               </View>
             </View>
 
+            <Text style={[styles.th, styles.colVisibility]}>Visibility</Text>
+
             <Text style={[styles.th, styles.colAddress]}>Premise Address</Text>
             <Text style={[styles.th, styles.colPropertyType]}>
               Property Type
@@ -234,7 +251,7 @@ const styles = StyleSheet.create({
   },
 
   tableWrap: {
-    minWidth: 1020,
+    minWidth: 1140,
     paddingHorizontal: 12,
     paddingBottom: 16,
   },
@@ -293,6 +310,10 @@ const styles = StyleSheet.create({
 
   colType: {
     width: 120,
+  },
+
+  colVisibility: {
+    width: 110,
   },
 
   colAddress: {

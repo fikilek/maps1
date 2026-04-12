@@ -16,12 +16,14 @@ export const ElectricitySections = ({
   agentName,
   agentUid,
   errors,
-  // 🛰️ Forensic Geometry Bundle
   erfBoundary,
   erfNo,
   erfCentroid,
   landingPoint,
   icon,
+  nearbyErfs = [],
+  nearbyPremises = [],
+  nearbyMeters = [],
 }) => {
   // 🛰️ TRANSFORMING SETTINGS FOR MULTI-SELECT
   // We take the raw strings from Firestore and turn them into {label, value} objects
@@ -186,6 +188,9 @@ export const ElectricitySections = ({
           referenceBoundary={erfBoundary}
           erfNo={erfNo}
           erfCentroid={erfCentroid}
+          nearbyErfs={nearbyErfs}
+          nearbyPremises={nearbyPremises}
+          nearbyMeters={nearbyMeters}
         />
       </FormSection>
 
