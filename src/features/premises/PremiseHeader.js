@@ -4,49 +4,30 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Badge } from "react-native-paper";
 import { useWarehouse } from "../../../src/context/WarehouseContext";
 import { usePremiseFilter } from "../../context/PremiseFilterContext";
+import { filterPremises } from "./filterPremises";
 
 export const PremiseHeader = ({
   onStatsPress,
   onFilterPress,
   onSearchPress,
+  isFiltering: isFilteringProp,
+  filterCount: filterCountProp,
+  onQuickReset,
 }) => {
   const { all } = useWarehouse();
-  // const { filterState, setFilterState, showSearch } =
-  //   useContext(PremiseFilterContext);
-
-  const { filterState, setFilterState, showSearch, setShowSearch } =
-    usePremiseFilter(); // 🚀 CLEANER
+  const { filterState, showSearch } = usePremiseFilter();
 
   const totalCount = all?.prems?.length || 0;
 
   const filteredCount = useMemo(() => {
-    let list = all?.prems || [];
-    if (filterState?.propertyTypes?.length > 0) {
-      list = list.filter((p) =>
-        filterState.propertyTypes.includes(p?.propertyType?.type),
-      );
-    }
-    return list.length;
-  }, [all?.prems, filterState.propertyTypes]);
+    return filterPremises(all?.prems || [], filterState).length;
+  }, [all?.prems, filterState]);
 
-  const isFiltering = filterState?.propertyTypes?.length > 0;
-
-  const handleQuickReset = () => {
-    // 🎯 Clear the whole tactical board
-    setFilterState({
-      propertyTypes: [],
-      wards: [],
-      searchQuery: "",
-    });
-  };
-
-  // const handleQuickReset = () => {
-  //   setFilterState({ propertyTypes: [] });
-  // };
+  const isFiltering = Boolean(isFilteringProp);
+  const filterCount = Number(filterCountProp || 0);
 
   return (
     <View style={styles.headerContainer}>
-      {/* 🏛️ LEFT: TACTICAL RATIO & SEARCH POD */}
       <View style={styles.leftSection}>
         <View style={styles.statPod}>
           <Text style={styles.statLabel}>TOTAL</Text>
@@ -64,7 +45,6 @@ export const PremiseHeader = ({
           </Text>
         </View>
 
-        {/* 🔍 SEARCH POD: Shows Label + Icon, Hides when Search is Active */}
         {!showSearch && (
           <>
             <View style={styles.podDivider} />
@@ -81,7 +61,6 @@ export const PremiseHeader = ({
         )}
       </View>
 
-      {/* 🏛️ RIGHT: TOOLS */}
       <View style={styles.rightSection}>
         <TouchableOpacity style={styles.statsBtn} onPress={onStatsPress}>
           <MaterialCommunityIcons
@@ -95,7 +74,7 @@ export const PremiseHeader = ({
           {isFiltering && (
             <TouchableOpacity
               style={styles.podActionBtn}
-              onPress={handleQuickReset}
+              onPress={onQuickReset}
             >
               <MaterialCommunityIcons
                 name="filter-off-outline"
@@ -104,7 +83,9 @@ export const PremiseHeader = ({
               />
             </TouchableOpacity>
           )}
+
           {isFiltering && <View style={styles.podDivider} />}
+
           <TouchableOpacity style={styles.podActionBtn} onPress={onFilterPress}>
             <View>
               <MaterialCommunityIcons
@@ -114,7 +95,7 @@ export const PremiseHeader = ({
               />
               {isFiltering && (
                 <Badge size={14} style={styles.filterBadge}>
-                  {filterState.propertyTypes.length}
+                  {filterCount}
                 </Badge>
               )}
             </View>

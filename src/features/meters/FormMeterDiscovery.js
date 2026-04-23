@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import {
+  ActivityIndicator,
   Divider,
   Modal,
   Portal,
@@ -35,7 +36,13 @@ import { functions } from "../../firebase";
 import { useAuth } from "../../hooks/useAuth";
 import { useGetSettingsQuery } from "../../redux/settingsApi";
 import { useAddTrnMutation } from "../../redux/trnsApi";
-import { addSubmissionQueueItem } from "../../utils/submissionQueue";
+import { getPremiseQueueItemByPremiseId } from "../../utils/premiseSubmissionQueue";
+import {
+  addSubmissionQueueItem,
+  getSubmissionQueueItemById,
+  removeSubmissionQueueItem,
+  updateSubmissionQueueItem,
+} from "../../utils/submissionQueue";
 import { ForensicFooter } from "./ForensicFooter";
 
 const NA_REASONS = [
@@ -111,7 +118,19 @@ function getDistanceMeters(pointA, pointB) {
 
 // --- MAIN FORM COMPONENT ---
 export default function FormMeterDiscovery() {
-  const { premiseId, action: actionRaw } = useLocalSearchParams();
+  const {
+    premiseId,
+    action: actionRaw,
+    queueItemId: queueItemIdRaw,
+  } = useLocalSearchParams();
+
+  const queueItemId = Array.isArray(queueItemIdRaw)
+    ? queueItemIdRaw[0]
+    : queueItemIdRaw;
+
+  // const { premiseId, action: actionRaw } = useLocalSearchParams();
+
+  const [editQueueItem, setEditQueueItem] = useState(undefined);
 
   const action = (() => {
     try {
@@ -141,7 +160,72 @@ export default function FormMeterDiscovery() {
   /*
   START GEOGRAPHY
   */
-  const premise = all.prems.find((p) => p.id === premiseId);
+
+  // look for premise doc from the wrehouse. If cant find, as an alternative, go to mmkv for the premise details (which should be there since the agent had to have opened the form to get here)
+
+  /*
+  GET PREMISE DOC 
+  */
+  //  First check the warehouse
+  const [draftPremise, setDraftPremise] = useState(null);
+
+  const warehousePremise = useMemo(
+    () => (all?.prems || []).find((p) => p.id === premiseId) || null,
+    [all?.prems, premiseId],
+  );
+
+  // Get premise doc from premise draft in mmkv as a fallabck
+  useEffect(() => {
+    let mounted = true;
+
+    const loadDraftPremise = async () => {
+      if (warehousePremise || !premiseId) {
+        if (mounted) setDraftPremise(null);
+        return;
+      }
+
+      const queueItem = await getPremiseQueueItemByPremiseId(premiseId);
+
+      if (mounted) {
+        setDraftPremise(queueItem?.payload || null);
+      }
+    };
+
+    loadDraftPremise();
+
+    return () => {
+      mounted = false;
+    };
+  }, [warehousePremise, premiseId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadEditQueueItem = async () => {
+      if (!queueItemId) {
+        if (mounted) setEditQueueItem(null);
+        return;
+      }
+
+      const queueItem = await getSubmissionQueueItemById(queueItemId);
+
+      if (mounted) {
+        setEditQueueItem(queueItem || null);
+      }
+    };
+
+    loadEditQueueItem();
+
+    return () => {
+      mounted = false;
+    };
+  }, [queueItemId]);
+
+  const isEditMode = !!queueItemId;
+
+  const premise = warehousePremise || draftPremise || null;
+  // const premise = all.prems.find((p) => p.id === premiseId);
+
   const parents = premise?.parents || {};
   const countryPcode = parents?.countryPcode;
   const provincePcode = parents?.provincePcode;
@@ -191,7 +275,60 @@ export default function FormMeterDiscovery() {
     [wardPcode, premise?.erfNo, currentMissionType],
   );
 
-  function buildTrnSystemFields() {
+  async function getPremiseSubmitGate(formPremiseId) {
+    if (!formPremiseId || formPremiseId === "NAv") {
+      return {
+        ok: false,
+        resolvedPremiseId: "NAv",
+        reason: "Premise id is missing.",
+      };
+    }
+
+    const draftPremise = await getPremiseQueueItemByPremiseId(formPremiseId);
+
+    // No draft in MMKV -> treat as already-synced/server premise
+    if (!draftPremise) {
+      return {
+        ok: true,
+        resolvedPremiseId: formPremiseId,
+        reason: "",
+      };
+    }
+
+    // Draft exists but not yet synced successfully
+    if (
+      draftPremise?.status !== "SUCCESS" ||
+      draftPremise?.result?.success !== true
+    ) {
+      return {
+        ok: false,
+        resolvedPremiseId: "NAv",
+        reason:
+          "This meter draft cannot be submitted until the parent premise has been successfully saved.",
+      };
+    }
+
+    // Draft says success, but no Firestore premise id returned
+    if (
+      !draftPremise?.result?.premiseId ||
+      draftPremise?.result?.premiseId === "NAv"
+    ) {
+      return {
+        ok: false,
+        resolvedPremiseId: "NAv",
+        reason:
+          "Parent premise sync completed, but no Firestore premise id was returned.",
+      };
+    }
+
+    return {
+      ok: true,
+      resolvedPremiseId: draftPremise.result.premiseId,
+      reason: "",
+    };
+  }
+
+  function buildTrnSystemFields(resolvedPremiseId = null) {
     const timestamp = new Date().toISOString();
 
     return {
@@ -217,7 +354,7 @@ export default function FormMeterDiscovery() {
       },
 
       premise: {
-        id: premise?.id,
+        id: resolvedPremiseId || premise?.id || "NAv",
         address: premiseAddress || "N/Av",
         propertyType: propType || "N/Av",
       },
@@ -230,18 +367,21 @@ export default function FormMeterDiscovery() {
       return;
     }
 
-    setInProgress(true);
+    const formPremiseId = premise?.id || "NAv";
+    const gate = await getPremiseSubmitGate(formPremiseId);
+
+    let cleanPayload = null;
+    let baseSystemFields = null;
 
     try {
-      // 🔌 STEP 1: CHECK CONNECTIVITY
-      const netState = await NetInfo.fetch();
-      const isOnline = netState.isConnected && netState.isInternetReachable;
+      // Build system fields once.
+      // If the premise draft is already successfully synced, use the real Firestore premise id.
+      // Otherwise fall back to the current premise id for local draft storage purposes.
+      baseSystemFields = buildTrnSystemFields(
+        gate?.ok ? gate.resolvedPremiseId : premise?.id || "NAv",
+      );
 
-      const baseSystemFields = buildTrnSystemFields();
-
-      // 🧱 STEP 2: BUILD CLEAN PAYLOAD (NO UPLOAD YET)
-      let cleanPayload = null;
-
+      // Build clean payload once.
       if (values?.accessData?.access?.hasAccess === "no") {
         cleanPayload = {
           id: values.id,
@@ -287,51 +427,104 @@ export default function FormMeterDiscovery() {
         ),
       );
 
-      // 🚫 OFFLINE PATH
-      if (!isOnline) {
-        console.log(`--- OFFLINE MODE: Saving to local queue ---`);
+      const saveMeterDraftToQueue = async (messageTitle, messageBody) => {
+        const nextContext = {
+          meterNo: values?.ast?.astData?.astNo || "NAv",
+          meterType: cleanPayload?.meterType || "NAv",
+          erfId: baseSystemFields?.erfId || "NAv",
+          erfNo: baseSystemFields?.erfNo || "NAv",
+          premiseId: premise?.id || "NAv",
+          lmPcode: lmPcode || "NAv",
+          wardPcode: wardPcode || "NAv",
+        };
 
-        const queueResult = await addSubmissionQueueItem({
-          formType: "METER_DISCOVERY",
-          payload: cleanPayload,
-          context: {
-            meterNo: values?.ast?.astData?.astNo || "NAv",
-            meterType: cleanPayload?.meterType || "NAv",
-            erfId: baseSystemFields?.erfId || "NAv",
-            erfNo: baseSystemFields?.erfNo || "NAv",
-            premiseId: premise?.id || "NAv",
-            lmPcode: lmPcode || "NAv",
-            wardPcode: wardPcode || "NAv",
-          },
-          createdByUid: agentUid,
-          createdByUser: agentName,
-        });
+        let queueResult = null;
 
-        if (!queueResult?.success) {
-          // throw new Error("Failed to save offline submission.");
-          console.log(
-            `handleSubmitDiscovery --- Failed to save offline submission.id`,
-            queueResult,
+        if (queueItemId) {
+          queueResult = await updateSubmissionQueueItem(
+            queueItemId,
+            {
+              payload: cleanPayload,
+              context: nextContext,
+              status: "PENDING",
+              result: {
+                success: false,
+                code: "NAv",
+                message: "NAv",
+                trnId: "NAv",
+              },
+              sync: {
+                attempts: 0,
+                lastAttemptAt: "NAv",
+                nextRetryAt: "NAv",
+              },
+            },
+            agentUid,
+            agentName,
           );
+        } else {
+          queueResult = await addSubmissionQueueItem({
+            formType: "METER_DISCOVERY",
+            payload: cleanPayload,
+            context: nextContext,
+            createdByUid: agentUid,
+            createdByUser: agentName,
+          });
         }
 
-        Alert.alert(
-          "Saved Offline",
-          "No internet connection. This submission was saved locally and will sync automatically when online.",
-        );
+        if (!queueResult?.success) {
+          Alert.alert(
+            "Draft Save Failed",
+            "Failed to save meter discovery draft locally.",
+          );
+          return false;
+        }
+
+        Alert.alert(messageTitle, messageBody);
 
         setShowSuccess(true);
 
-        updateGeo({ selectedErf: null, lastSelectionType: "ERF" });
         setTimeout(() => {
+          updateGeo({ selectedPremise: null, lastSelectionType: "PREMISE" });
           router.replace("/(tabs)/premises");
-          setInProgress(false);
         }, 1500);
+
+        return true;
+      };
+
+      // GATE BLOCK PATH:
+      // Parent premise not yet successfully synced to Firestore.
+      // Save locally instead of discarding the work.
+      if (!gate.ok) {
+        console.log("Premise Not Ready", gate.reason);
+
+        await saveMeterDraftToQueue(
+          "Saved as Draft",
+          "This meter draft was saved locally. It can only be submitted after the parent premise has been successfully saved.",
+        );
 
         return;
       }
 
-      // 🌐 ONLINE PATH
+      setInProgress(true);
+
+      // Connectivity is only checked after the gate passes.
+      const netState = await NetInfo.fetch();
+      const isOnline = netState.isConnected && netState.isInternetReachable;
+
+      // OFFLINE PATH:
+      // Parent premise is valid, but there is no connectivity.
+      if (!isOnline) {
+        await saveMeterDraftToQueue(
+          "Saved Offline",
+          "No internet connection. This submission was saved locally and will sync automatically when online.",
+        );
+
+        setInProgress(false);
+        return;
+      }
+
+      // ONLINE PATH
       const storage = getStorage();
 
       const syncedMedia = await Promise.all(
@@ -367,7 +560,6 @@ export default function FormMeterDiscovery() {
         "onMeterDiscoveryCallable",
       );
 
-      console.log(`cleanPayload:`, cleanPayload);
       const callableResult = await onMeterDiscoveryCallable(cleanPayload);
       const result = callableResult?.data || {};
 
@@ -382,6 +574,10 @@ export default function FormMeterDiscovery() {
         );
 
         return;
+      }
+
+      if (queueItemId) {
+        await removeSubmissionQueueItem(queueItemId);
       }
 
       setShowSuccess(true);
@@ -450,8 +646,8 @@ export default function FormMeterDiscovery() {
 
         // 🧠 The Intelligent Detail
         anomalyDetail: string().when("anomaly", {
-          is: (val) => val && val.length > 0 && val !== "Meter Ok", // 🎯 Required if selected and NOT "Meter Ok"
-          then: (schema) => schema.required("Detail is required"),
+          is: (val) => !!String(val || "").trim(),
+          then: (schema) => schema.required("Anomaly detail is required"),
           otherwise: (schema) => schema.notRequired().nullable(),
         }),
       }),
@@ -551,22 +747,17 @@ export default function FormMeterDiscovery() {
           }),
         }),
       }),
-      anomalies: object().shape(
-        {
-          // 🏛️ The Trigger
-          anomaly: string().required("Anomaly Required"),
+      anomalies: object().shape({
+        // 🏛️ The Trigger
+        anomaly: string().required("Anomaly Required"),
 
-          // 🧠 The Intelligent Detail - Forced Dependency
-          anomalyDetail: string().when(["anomaly"], {
-            is: (anomaly) =>
-              anomaly && anomaly !== "" && anomaly !== "Meter Ok",
-            then: (schema) =>
-              schema.required("Detail is required for this anomaly"),
-            otherwise: (schema) => schema.notRequired().nullable(),
-          }),
-        },
-        [["anomaly", "anomalyDetail"]],
-      ), // 🎯 This ensures circular awareness
+        // 🧠 The Intelligent Detail - Forced Dependency
+        anomalyDetail: string().when("anomaly", {
+          is: (val) => !!String(val || "").trim(),
+          then: (schema) => schema.required("Anomaly detail is required"),
+          otherwise: (schema) => schema.notRequired().nullable(),
+        }),
+      }), // 🎯 This ensures circular awareness
       sc: object().shape({
         status: string().required("SC Status Required"),
       }),
@@ -651,6 +842,35 @@ export default function FormMeterDiscovery() {
   });
 
   const getInitialValues = () => {
+    const editPayload = editQueueItem?.payload || null;
+
+    if (editPayload) {
+      const editHasAccess =
+        editPayload?.accessData?.access?.hasAccess === "no" ? "no" : "yes";
+
+      const editMeterType =
+        editHasAccess === "no" ? "NA" : editPayload?.meterType || "electricity";
+
+      if (editHasAccess === "no") {
+        return {
+          initValues: editPayload,
+          schema: accessSchema,
+        };
+      }
+
+      if (editMeterType === "water") {
+        return {
+          initValues: editPayload,
+          schema: WaterDiscoverySchema,
+        };
+      }
+
+      return {
+        initValues: editPayload,
+        schema: ElecDiscoverySchema,
+      };
+    }
+
     // 🎯 Standardize access to the string "yes" or "no"
     const accessStr = action?.access === "yes" ? "yes" : "no";
 
@@ -710,25 +930,25 @@ export default function FormMeterDiscovery() {
         },
         ast: {
           astData: {
-            astNo: "123456789",
-            astManufacturer: "Conlog",
-            astName: "Bec55",
+            astNo: "",
+            astManufacturer: "",
+            astName: "",
             meter: {
-              phase: "single",
-              type: "prepaid",
-              category: "Normal",
-              keypad: { serialNo: "tyu67890", comment: "" }, // 🎯 Initialized
-              cb: { size: "90", comment: "" }, // 🎯 Initialized
+              phase: "",
+              type: "",
+              category: "",
+              keypad: { serialNo: "", comment: "" }, // 🎯 Initialized
+              cb: { size: "", comment: "" }, // 🎯 Initialized
             },
           },
           anomalies: {
-            anomaly: "Meter Ok",
-            anomalyDetail: "Operationally Ok",
+            anomaly: "",
+            anomalyDetail: "",
           },
-          sc: { status: "connected" },
+          sc: { status: "" },
           location: {
             gps: null, // 🛰️ Will be an Object {lat, lng} via the Picker
-            placement: "kiosk",
+            placement: "",
           },
           ogs: { hasOffGridSupply: "no" },
           normalisation: { actionTaken: ["none"] },
@@ -741,10 +961,16 @@ export default function FormMeterDiscovery() {
   };
 
   // const actionInit = useMemo(() => getInitialValues(), [premiseId, actionRaw]);
+
   const actionInit = useMemo(
     () => getInitialValues(),
-    [premiseId, actionRaw, trnId],
+    [premiseId, actionRaw, trnId, editQueueItem],
   );
+
+  // const actionInit = useMemo(
+  //   () => getInitialValues(),
+  //   [premiseId, actionRaw, trnId],
+  // );
 
   // 2. Setup the Watcher in a useEffect
   useEffect(() => {
@@ -887,6 +1113,32 @@ export default function FormMeterDiscovery() {
     landingPoint,
     selectedErfId,
   ]);
+
+  if (isEditMode && editQueueItem === undefined) {
+    return (
+      <View style={styles.loaderWrap}>
+        <ActivityIndicator size="large" color="#2563eb" />
+        <Text style={styles.loaderText}>Loading draft...</Text>
+      </View>
+    );
+  }
+
+  if (isEditMode && editQueueItem === null) {
+    return (
+      <View style={styles.loaderWrap}>
+        <Text style={styles.loaderText}>Draft not found.</Text>
+      </View>
+    );
+  }
+
+  if (!premise) {
+    return (
+      <View style={styles.loaderWrap}>
+        <ActivityIndicator size="large" color="#2563eb" />
+        <Text style={styles.loaderText}>Loading premise...</Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -1467,5 +1719,19 @@ const styles = StyleSheet.create({
     color: "#FFD700",
     fontSize: 10,
     fontWeight: "900",
+  },
+  loaderWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 24,
+  },
+
+  loaderText: {
+    marginTop: 12,
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#64748b",
   },
 });

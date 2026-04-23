@@ -4,7 +4,6 @@ import { Marker } from "react-native-maps";
 
 function NeighbourhoodErfMarkerBase({ coordinate, erfNo, onPress }) {
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
-  console.log(`NeighbourhoodErfMarker -- erfNo`, erfNo);
 
   useEffect(() => {
     setTracksViewChanges(true);

@@ -16,6 +16,8 @@ import { useWarehouse } from "../../../src/context/WarehouseContext";
 const TrnItem = ({ item }) => {
   const router = useRouter();
 
+  // console.log(`TrnItem --item`, item);
+
   const isWater = item.meterType === "water";
 
   const accessVal = item.accessData?.access?.hasAccess;
@@ -46,7 +48,7 @@ const TrnItem = ({ item }) => {
     ? item.ast?.astData?.astNo || "NO METER"
     : "NO METER NUMBER";
 
-  const dateAt = item.accessData?.metadata?.updated?.at;
+  const dateAt = item.accessData?.metadata?.updatedAt;
 
   const rawDate = dateAt?.__time__ || dateAt;
 
@@ -190,9 +192,8 @@ export default function TrnsScreen() {
   const { filtered, sync } = useWarehouse();
 
   const trns = filtered?.trns || [];
-  // const { all, sync } = useWarehouse();
+  console.log(`trns`, trns);
 
-  // const trns = all?.trns || [];
   const trnsSync = sync?.trns || {};
   const scopeSync = sync?.scope || {};
 

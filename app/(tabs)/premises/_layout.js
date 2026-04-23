@@ -19,7 +19,6 @@ function PremisesLayoutContent() {
   const { activeWorkbase } = useAuth();
   const lmPcode = activeWorkbase?.id;
 
-  // 🛡️ CONSUME CONTEXT SAFELY
   const {
     showFilters,
     setShowFilters,
@@ -29,20 +28,30 @@ function PremisesLayoutContent() {
     setShowSearch,
     filterState,
     setFilterState,
+    resetFilters,
   } = usePremiseFilter();
 
-  // 🛰️ DATA FETCHING
   const { data: transactions = [] } = useGetTrnsByLmPcodeQuery(
     { lmPcode },
     { skip: !lmPcode },
   );
 
-  // 📊 STATS DERIVATION
   const stats = usePremiseStats(
     all?.prems || [],
     transactions || [],
     all?.erfs,
   );
+
+  const activeFilterCount =
+    (filterState?.propertyTypes?.length > 0 ? 1 : 0) +
+    (filterState?.occupancyStatuses?.length > 0 ? 1 : 0) +
+    (filterState?.geofenceIds?.length > 0 ? 1 : 0) +
+    (filterState?.electricityMeterCounts?.length > 0 ? 1 : 0) +
+    (filterState?.waterMeterCounts?.length > 0 ? 1 : 0) +
+    (filterState?.noAccessCounts?.length > 0 ? 1 : 0) +
+    (String(filterState?.searchQuery || "").trim() ? 1 : 0);
+
+  const isFiltering = activeFilterCount > 0;
 
   return (
     <>
@@ -55,6 +64,9 @@ function PremisesLayoutContent() {
                 onFilterPress={() => setShowFilters(true)}
                 onStatsPress={() => setShowStats(true)}
                 onSearchPress={() => setShowSearch(true)}
+                isFiltering={isFiltering}
+                filterCount={activeFilterCount}
+                onQuickReset={resetFilters}
               />
             ),
           }}

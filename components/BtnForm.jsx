@@ -28,7 +28,7 @@ const BtnForm = (props) => {
         justifyContent: "center",
         alignItems: "center",
       }}
-      onPress={handlePress}
+      onPress={() => handlePress()}
     >
       <Text
         style={{

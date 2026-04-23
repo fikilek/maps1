@@ -115,9 +115,6 @@ function ReportTilesGrid({ tiles = [], onTilePress }) {
   const row1 = tiles.slice(0, 2);
   const row2 = tiles.slice(2, 4);
   const row3 = tiles.slice(4, 5);
-  console.log(`row1`, row1);
-  console.log(`row2`, row2);
-  console.log(`row3`, row3);
 
   return (
     <View style={styles.tilesWrap}>
@@ -185,7 +182,7 @@ export default function AstReportHubScreen() {
       params: { id, astNo },
     });
   }, [selectedAst, premise, erf, activeWard, activeLm, id, astNo]);
-  console.log(`reportContext `, reportContext);
+  // console.log(`reportContext `, reportContext);
 
   const { data: sales = [], isLoading: loadingSales } =
     useGetSalesAtomicByMeterNoQuery(reportContext?.meterNo, {
@@ -213,7 +210,6 @@ export default function AstReportHubScreen() {
       metrics: tileMetrics,
     });
   }, [reportContext, tileMetrics]);
-  console.log(`tiles`, tiles);
 
   const handleTilePress = (tile) => {
     const isInspectPrep = tile?.pathname?.includes("inspect-prep");

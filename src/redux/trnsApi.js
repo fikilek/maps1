@@ -568,7 +568,7 @@ export const trnsApi = createApi({
 
           const q = query(
             collection(db, "trns"),
-            where("accessData.metadata.lmPcode", "==", lmPcode),
+            where("accessData.parents.lmPcode", "==", lmPcode),
             orderBy("accessData.metadata.updatedAt", "desc"),
           );
 

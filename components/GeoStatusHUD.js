@@ -3,7 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useGeo } from "../src/context/GeoContext";
 
 export default function GeoStatusHUD() {
-  const { geoState, updateGeo } = useGeo();
+  const { geoState } = useGeo();
   const {
     selectedLm,
     selectedWard,

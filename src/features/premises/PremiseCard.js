@@ -45,6 +45,10 @@ const getPropertyBeacon = (type = "", occupancyStatus = "") => {
     return { name: "office-building", color: "#8b5cf6" };
   }
 
+  if (t.includes("government") || t.includes("municipal")) {
+    return { name: "domain", color: "#2563eb" };
+  }
+
   if (t.includes("commercial") || t.includes("shop")) {
     return { name: "storefront", color: "#ec4899" };
   }
@@ -100,7 +104,8 @@ const PremiseCard = memo(
       if (
         type === "Flats" ||
         type === "Sectional Title" ||
-        type === "Industrial"
+        type === "Industrial" ||
+        type === "Government"
       ) {
         return `${name}${unit ? ` | Unit ${unit}` : ""}`;
       }
@@ -174,7 +179,7 @@ const PremiseCard = memo(
 
       // 🎯 TAP 1: Select the Erf (The Sovereign)
       updateGeo({
-        selectedErf: parentErf || { id: erfId },
+        selectedErf: parentErf || null,
         lastSelectionType: "ERF",
       });
 
@@ -220,7 +225,7 @@ const PremiseCard = memo(
       const parentErf = all?.erfs?.find((e) => e.id === erfId);
 
       updateGeo({
-        selectedErf: parentErf || { id: erfId },
+        selectedErf: parentErf || null,
         lastSelectionType: "ERF",
       });
     };

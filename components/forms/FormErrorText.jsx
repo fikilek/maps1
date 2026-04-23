@@ -6,6 +6,7 @@ const FormErrorText = ({ error, touched }) => {
   return (
     <Text
       style={{
+        margin: 0,
         color: "red",
         fontSize: 12,
       }}

@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Button, Dialog, List, Portal, TextInput } from "react-native-paper";
 import { object, ref, string } from "yup";
 
 export const gstSignupInitialValues = {
-  surname: "kentane",
-  name: "sveve",
-  email: "sveve@gmail.com",
-  password: "fkpass123",
-  confirmPassword: "fkpass123",
-  phoneNumber: "0812345678",
+  surname: "",
+  name: "",
+  email: "",
+  password: "",
+  confirmPassword: "",
+  phoneNumber: "",
   serviceProvider: "",
 };
 
@@ -54,7 +54,7 @@ const ServiceProviderSelect = ({ value, options, onSelect, disabled }) => {
         style={{ backgroundColor: "yellow" }}
       >
         <View style={{ position: "relative", marginBottom: 0 }}>
-          <View
+          {/* <View
             style={{
               alignSelf: "flex-start",
               paddingHorizontal: 6,
@@ -73,7 +73,7 @@ const ServiceProviderSelect = ({ value, options, onSelect, disabled }) => {
             <Text style={{ fontSize: 12, color: "black" }}>
               Service Provider
             </Text>
-          </View>
+          </View> */}
           <TextInput
             mode="outlined"
             value={value?.name || ""}

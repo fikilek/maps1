@@ -75,7 +75,7 @@ export const ElectricitySections = ({
   return (
     <View style={disabled && { opacity: 0.7 }}>
       {/* ⚡ SECTION 1: CORE METER DATA */}
-      <FormSection title="Meter Details">
+      <FormSection title="Electricity Meter Details">
         <FormInputMeterNo
           label="Meter Number"
           name="ast.astData.astNo"

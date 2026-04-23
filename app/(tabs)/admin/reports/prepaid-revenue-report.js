@@ -5,11 +5,11 @@
 
 import NetInfo from "@react-native-community/netinfo";
 import { skipToken } from "@reduxjs/toolkit/query";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useRouter } from "expo-router";
 import { useDispatch } from "react-redux";
 
 import AtomicPurchasesModal from "../../../../components/AtomicPurchasesModal";
@@ -31,6 +31,7 @@ import {
   useGetSalesMonthlyLmByLmAndYmsQuery,
   useGetSalesMonthlyLmGroupsByLmAndYmQuery,
 } from "../../../../src/redux/salesApi";
+import { getMonthlyFromKV } from "../../../../src/storage/salesMonthlyKV";
 
 function normalizeMeter(s) {
   return String(s || "")
@@ -63,10 +64,142 @@ function normalizeYm(ym) {
   return `${year}-${month}`;
 }
 
+/* ---------- tiny local components ---------- */
+
+const ACTIVE_BLUE = "#2563EB";
+const INACTIVE_BG = "#F3F4F6";
+const ACTIVE_BG = "#EFF6FF";
+const BORDER_GRAY = "#D1D5DB";
+
+function ModeButton({ label, active, onPress }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        flex: 1.6,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: active ? ACTIVE_BG : INACTIVE_BG,
+        borderWidth: active ? 2 : 1,
+        borderColor: active ? ACTIVE_BLUE : BORDER_GRAY,
+      }}
+    >
+      <Text
+        style={{
+          color: active ? ACTIVE_BLUE : "#111827",
+          fontWeight: "900",
+          fontSize: 12,
+        }}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function TrnsButton({ label, active, onPress }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        paddingVertical: 10,
+        paddingHorizontal: 10,
+        marginHorizontal: 5,
+        borderRadius: 12,
+        alignItems: "center",
+        backgroundColor: active ? "#E5E7EB" : "#F3F4F6",
+        borderWidth: 1,
+        borderColor: "#D1D5DB",
+      }}
+    >
+      <Text style={{ color: "#111827", fontWeight: "800", fontSize: 12 }}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function KpiCard({ title, value }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        padding: 12,
+        borderRadius: 14,
+        backgroundColor: "#F9FAFB",
+        borderWidth: 1,
+        borderColor: "#E5E7EB",
+      }}
+    >
+      <Text style={{ color: "#6B7280", fontSize: 11 }}>{title}</Text>
+      <Text
+        style={{
+          color: "#111827",
+          fontSize: 16,
+          fontWeight: "900",
+          marginTop: 6,
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function MonthModeButton({ active, selectedYm, onPress }) {
+  const label = selectedYm ? ymToLabel(selectedYm) : "Select month";
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        flex: 1,
+        paddingVertical: 10,
+        paddingHorizontal: 10,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: active ? ACTIVE_BG : INACTIVE_BG,
+        borderWidth: active ? 2 : 1,
+        borderColor: active ? ACTIVE_BLUE : BORDER_GRAY,
+      }}
+    >
+      <Text
+        numberOfLines={1}
+        style={{
+          color: active ? ACTIVE_BLUE : "#111827",
+          fontWeight: "900",
+          fontSize: 12,
+        }}
+      >
+        {label}
+      </Text>
+
+      {active ? (
+        <Text
+          style={{
+            marginTop: 2,
+            fontSize: 10,
+            fontWeight: "800",
+            color: "#6B7280",
+          }}
+        >
+          MONTHLY
+        </Text>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
 export default function PrepaidRevenueReportScreen() {
   const [mode, setMode] = useState("MONTHLY"); // "MONTHLY" | "3MONTHLY"
 
   const router = useRouter();
+  const params = useLocalSearchParams();
+  console.log(`params`, params);
   const dispatch = useDispatch();
 
   // Revenue Groups + Search (MONTHLY only)
@@ -80,6 +213,16 @@ export default function PrepaidRevenueReportScreen() {
 
   // ✅ SINGLE MONTH selection
   const [selectedYm, setSelectedYm] = useState(null); // "YYYY-MM" | null
+
+  // 👇 NEW: allow month to come from Sales Sync
+  useEffect(() => {
+    if (!params?.ym) return;
+
+    const normalized = normalizeYm(params.ym);
+    if (!normalized) return;
+
+    setSelectedYm(normalized);
+  }, [params?.ym]);
 
   // USER
   const { activeWorkbaseId, ready } = useAuth();
@@ -134,11 +277,27 @@ export default function PrepaidRevenueReportScreen() {
   const didInitMonthRef = useRef(false);
   useEffect(() => {
     if (didInitMonthRef.current) return;
+
+    const routeYm = normalizeYm(params?.ym);
+    if (routeYm) {
+      didInitMonthRef.current = true;
+      return;
+    }
+
     if (!default1) return;
 
     setSelectedYm(default1);
     didInitMonthRef.current = true;
-  }, [default1]);
+  }, [default1, params?.ym]);
+
+  // const didInitMonthRef = useRef(false);
+  // useEffect(() => {
+  //   if (didInitMonthRef.current) return;
+  //   if (!default1) return;
+
+  //   setSelectedYm(default1);
+  //   didInitMonthRef.current = true;
+  // }, [default1]);
 
   /* =====================================================
      MONTHLY METERS (single month)
@@ -146,10 +305,38 @@ export default function PrepaidRevenueReportScreen() {
   const activeYm = selectedYm || null;
   const ymNormalized = normalizeYm(activeYm);
 
+  // ✅ CACHE CHECK (SOURCE OF TRUTH)
+  const monthCache = useMemo(() => {
+    if (!lmPcode || !ymNormalized) return null;
+    return getMonthlyFromKV(lmPcode, ymNormalized);
+  }, [lmPcode, ymNormalized]);
+
+  const hasMonthCached =
+    Array.isArray(monthCache?.rows) && monthCache.rows.length > 0;
+
   const monthlyMetersArgs =
-    ready && lmPcode && ymNormalized
+    ready && lmPcode && ymNormalized && hasMonthCached
       ? { lmPcode, ym: ymNormalized }
       : skipToken;
+
+  // const monthlyMetersArgs =
+  //   ready && lmPcode && ymNormalized
+  //     ? { lmPcode, ym: ymNormalized }
+  //     : skipToken;
+
+  useEffect(() => {
+    if (!ready || !lmPcode || !ymNormalized) return;
+
+    if (!hasMonthCached) {
+      router.push({
+        pathname: "/(tabs)/admin/storage/sales-sync",
+        params: {
+          lmPcode,
+          ym: ymNormalized,
+        },
+      });
+    }
+  }, [ready, lmPcode, ymNormalized, hasMonthCached]);
 
   const monthlyMeters = useGetSalesMonthlyByLmAndYmQuery(monthlyMetersArgs);
 
@@ -454,6 +641,18 @@ export default function PrepaidRevenueReportScreen() {
                 Not implemented yet. MONTHLY is now the production path.
               </Text>
             </View>
+          ) : !hasMonthCached ? (
+            <View
+              style={{
+                flex: 1,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ fontWeight: "900" }}>
+                Redirecting to Sales Sync...
+              </Text>
+            </View>
           ) : (
             <MonthlyListPanel
               docs={docsForPanel}
@@ -493,135 +692,5 @@ export default function PrepaidRevenueReportScreen() {
         meterNo={atomicMeterNo}
       />
     </>
-  );
-}
-
-/* ---------- tiny local components ---------- */
-
-const ACTIVE_BLUE = "#2563EB";
-const INACTIVE_BG = "#F3F4F6";
-const ACTIVE_BG = "#EFF6FF";
-const BORDER_GRAY = "#D1D5DB";
-
-function ModeButton({ label, active, onPress }) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        flex: 1.6,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-        borderRadius: 12,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: active ? ACTIVE_BG : INACTIVE_BG,
-        borderWidth: active ? 2 : 1,
-        borderColor: active ? ACTIVE_BLUE : BORDER_GRAY,
-      }}
-    >
-      <Text
-        style={{
-          color: active ? ACTIVE_BLUE : "#111827",
-          fontWeight: "900",
-          fontSize: 12,
-        }}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
-function TrnsButton({ label, active, onPress }) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        paddingVertical: 10,
-        paddingHorizontal: 10,
-        marginHorizontal: 5,
-        borderRadius: 12,
-        alignItems: "center",
-        backgroundColor: active ? "#E5E7EB" : "#F3F4F6",
-        borderWidth: 1,
-        borderColor: "#D1D5DB",
-      }}
-    >
-      <Text style={{ color: "#111827", fontWeight: "800", fontSize: 12 }}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
-function KpiCard({ title, value }) {
-  return (
-    <View
-      style={{
-        flex: 1,
-        padding: 12,
-        borderRadius: 14,
-        backgroundColor: "#F9FAFB",
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-      }}
-    >
-      <Text style={{ color: "#6B7280", fontSize: 11 }}>{title}</Text>
-      <Text
-        style={{
-          color: "#111827",
-          fontSize: 16,
-          fontWeight: "900",
-          marginTop: 6,
-        }}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function MonthModeButton({ active, selectedYm, onPress }) {
-  const label = selectedYm ? ymToLabel(selectedYm) : "Select month";
-
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        flex: 1,
-        paddingVertical: 10,
-        paddingHorizontal: 10,
-        borderRadius: 12,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: active ? ACTIVE_BG : INACTIVE_BG,
-        borderWidth: active ? 2 : 1,
-        borderColor: active ? ACTIVE_BLUE : BORDER_GRAY,
-      }}
-    >
-      <Text
-        numberOfLines={1}
-        style={{
-          color: active ? ACTIVE_BLUE : "#111827",
-          fontWeight: "900",
-          fontSize: 12,
-        }}
-      >
-        {label}
-      </Text>
-
-      {active ? (
-        <Text
-          style={{
-            marginTop: 2,
-            fontSize: 10,
-            fontWeight: "800",
-            color: "#6B7280",
-          }}
-        >
-          MONTHLY
-        </Text>
-      ) : null}
-    </TouchableOpacity>
   );
 }

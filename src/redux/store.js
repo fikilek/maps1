@@ -21,9 +21,11 @@ import { premisesApi } from "./premisesApi";
 import { salesApi } from "./salesApi";
 import { settingsApi } from "./settingsApi";
 import { spApi } from "./spApi";
+import { teamsApi } from "./teamsApi";
 import { trnsApi } from "./trnsApi";
 import { usersApi } from "./usersApi";
 
+import { geofenceApi } from "./geofenceApi";
 import newTrnsReducer from "./newTrnsSlice";
 import offlineReducer from "./offlineSlice";
 
@@ -35,12 +37,14 @@ const rootReducer = combineReducers({
   [authApi.reducerPath]: authApi.reducer,
   [usersApi.reducerPath]: usersApi.reducer,
   [spApi.reducerPath]: spApi.reducer,
+  [teamsApi.reducerPath]: teamsApi.reducer,
   [erfsApi.reducerPath]: erfsApi.reducer,
   [premisesApi.reducerPath]: premisesApi.reducer,
   [trnsApi.reducerPath]: trnsApi.reducer,
   [settingsApi.reducerPath]: settingsApi.reducer,
   [astsApi.reducerPath]: astsApi.reducer,
   [salesApi.reducerPath]: salesApi.reducer,
+  [geofenceApi.reducerPath]: geofenceApi.reducer,
 
   offline: offlineReducer,
   newTrns: newTrnsReducer,
@@ -62,6 +66,7 @@ const persistConfig = {
     erfsApi.reducerPath,
     usersApi.reducerPath,
     spApi.reducerPath,
+    teamsApi.reducerPath,
     trnsApi.reducerPath,
     settingsApi.reducerPath,
     astsApi.reducerPath,
@@ -69,6 +74,7 @@ const persistConfig = {
     geoApi.reducerPath,
     premisesApi.reducerPath,
     salesApi.reducerPath,
+    geofenceApi.reducerPath,
     "newTrns",
   ],
 };
@@ -94,12 +100,14 @@ export const store = configureStore({
       authApi.middleware,
       usersApi.middleware,
       spApi.middleware,
+      teamsApi.middleware,
       erfsApi.middleware,
       premisesApi.middleware,
       trnsApi.middleware,
       settingsApi.middleware,
       astsApi.middleware,
       salesApi.middleware,
+      geofenceApi.middleware,
     ),
 });
 

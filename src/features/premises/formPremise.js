@@ -1,8 +1,9 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import { Formik } from "formik";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -23,9 +24,16 @@ import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import { useAuth } from "../../hooks/useAuth";
 import {
-  useAddPremiseMutation,
+  useCreatePremiseMutation,
   useUpdatePremiseMutation,
 } from "../../redux/premisesApi";
+
+import {
+  addPremiseQueueItem,
+  getPremiseQueueItemById,
+  removePremiseQueueItem,
+  updatePremiseQueueItem,
+} from "../../utils/premiseSubmissionQueue";
 import { ForensicFooter } from "../meters/ForensicFooter";
 
 const streetTypeOptions = [
@@ -115,7 +123,7 @@ function requiresUnitNo(type) {
 }
 
 export default function FormPremise() {
-  // console.log(`FormPremise ----mounted`);
+  console.log(`FormPremise ----mounted`);
 
   const [inProgress, setInProgress] = useState(false);
 
@@ -123,7 +131,7 @@ export default function FormPremise() {
 
   const router = useRouter();
 
-  const { id, premiseId, duplicateId } = useLocalSearchParams();
+  const { id, premiseId, duplicateId, queueItemId } = useLocalSearchParams();
 
   const isEdit = !!premiseId;
 
@@ -135,9 +143,32 @@ export default function FormPremise() {
     return all?.prems?.find((p) => p.id === targetId);
   }, [premiseId, duplicateId, all?.prems]);
 
+  const [queueItem, setQueueItem] = useState(null);
+
+  const isQueueEdit = !!queueItemId;
+  const isEditLike = isEdit || isQueueEdit;
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadQueueItem() {
+      if (!queueItemId) {
+        if (mounted) setQueueItem(null);
+        return;
+      }
+
+      const item = await getPremiseQueueItemById(queueItemId);
+      if (mounted) setQueueItem(item || null);
+    }
+
+    loadQueueItem();
+
+    return () => {
+      mounted = false;
+    };
+  }, [queueItemId]);
+
   const { profile, user } = useAuth();
-  // console.log(`profile?.profile?.displayName`, profile?.profile?.displayName);
-  // console.log(`user`, user);
 
   const agentUid = user?.uid || "unknown_uid";
   // console.log(`agentUid`, agentUid);
@@ -152,7 +183,11 @@ export default function FormPremise() {
   const targetGeo =
     all?.geoLibrary?.[id] || all?.geoLibrary?.[selectedErf?.erfId] || null;
 
-  const erfNo = selectedErf?.erfNo || "N/A";
+  const erfNo =
+    queueItem?.payload?.erfNo ||
+    sourcePremise?.erfNo ||
+    selectedErf?.erfNo ||
+    "NAv";
 
   const erfCentroid = useMemo(() => {
     if (targetGeo?.centroid?.lat != null && targetGeo?.centroid?.lng != null) {
@@ -225,7 +260,7 @@ export default function FormPremise() {
             "moved-from-erf-centroid",
             "You must move the GPS pin away from the default ERF position",
             function (value) {
-              if (isEdit) return true;
+              if (isEditLike) return true;
 
               const hasValidPoint =
                 typeof value?.lat === "number" &&
@@ -277,7 +312,7 @@ export default function FormPremise() {
           },
         ),
     });
-  }, [erfCentroid, isEdit]);
+  }, [erfCentroid, isEditLike]);
 
   const initialValues = useMemo(() => {
     const baseGeometry = {
@@ -288,6 +323,43 @@ export default function FormPremise() {
     };
 
     const baseContext = selectedErf?.isTownship ? "Township" : "Suburb";
+
+    // 🟣 DRAFT MODE (highest priority)
+    // QUEUE EDIT
+    if (isQueueEdit && queueItem?.payload) {
+      const payload = queueItem.payload;
+
+      return {
+        context: payload?.context || baseContext,
+
+        address: {
+          strNo: payload?.address?.strNo || "",
+          strName: payload?.address?.strName || "",
+          strType: payload?.address?.strType || "Select...",
+        },
+
+        propertyType: {
+          type: payload?.propertyType?.type || "Select...",
+          name: payload?.propertyType?.name || "",
+          unitNo: payload?.propertyType?.unitNo || "",
+        },
+
+        occupancy: {
+          status: payload?.occupancy?.status || "Occupied",
+        },
+
+        geometry: payload?.geometry?.centroid
+          ? {
+              centroid: {
+                lat: payload.geometry.centroid.lat,
+                lng: payload.geometry.centroid.lng,
+              },
+            }
+          : baseGeometry,
+
+        media: Array.isArray(payload?.media) ? payload.media : [],
+      };
+    }
 
     // EDIT
     if (isEdit && sourcePremise) {
@@ -380,9 +452,12 @@ export default function FormPremise() {
     sourcePremise,
     erfCentroid,
     selectedErf?.isTownship,
+    isQueueEdit,
+    queueItem,
   ]);
 
-  const [addPremise] = useAddPremiseMutation();
+  const [createPremise] = useCreatePremiseMutation();
+  // const [addPremise] = useAddPremiseMutation();
 
   const [updatePremise] = useUpdatePremiseMutation(); // 🎯 Ensure this is in your API slice
 
@@ -406,51 +481,51 @@ export default function FormPremise() {
 
     const generatedId = `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`;
 
-    if (isEdit) {
+    if (isEdit || isQueueEdit) {
+      const sourceData = isQueueEdit ? queueItem?.payload : sourcePremise;
+
       return {
-        id: sourcePremise?.id,
-        schemaVersion: sourcePremise?.schemaVersion || "1.0.0",
-        erfId: sourcePremise?.erfId || id,
-        erfNo: sourcePremise?.erfNo || erfNo,
+        id: sourceData?.id,
+        schemaVersion: sourceData?.schemaVersion || "1.0.0",
+        erfId: sourceData?.erfId || id,
+        erfNo: sourceData?.erfNo || erfNo,
 
         parents: {
           countryPcode:
-            sourcePremise?.parents?.countryPcode || stampedParents.countryPcode,
+            sourceData?.parents?.countryPcode || stampedParents.countryPcode,
           provincePcode:
-            sourcePremise?.parents?.provincePcode ||
-            stampedParents.provincePcode,
-          dmPcode: sourcePremise?.parents?.dmPcode || stampedParents.dmPcode,
-          lmPcode: sourcePremise?.parents?.lmPcode || stampedParents.lmPcode,
-          wardPcode:
-            sourcePremise?.parents?.wardPcode || stampedParents.wardPcode,
+            sourceData?.parents?.provincePcode || stampedParents.provincePcode,
+          dmPcode: sourceData?.parents?.dmPcode || stampedParents.dmPcode,
+          lmPcode: sourceData?.parents?.lmPcode || stampedParents.lmPcode,
+          wardPcode: sourceData?.parents?.wardPcode || stampedParents.wardPcode,
         },
 
         services: {
           electricityMeters: Array.isArray(
-            sourcePremise?.services?.electricityMeters,
+            sourceData?.services?.electricityMeters,
           )
-            ? sourcePremise.services.electricityMeters
+            ? sourceData.services.electricityMeters
             : [],
-          waterMeters: Array.isArray(sourcePremise?.services?.waterMeters)
-            ? sourcePremise.services.waterMeters
+          waterMeters: Array.isArray(sourceData?.services?.waterMeters)
+            ? sourceData.services.waterMeters
             : [],
         },
 
         metadata: {
           createdAt:
-            sourcePremise?.metadata?.createdAt ||
-            sourcePremise?.metadata?.created?.at ||
+            sourceData?.metadata?.createdAt ||
+            sourceData?.metadata?.created?.at ||
             timestamp,
 
           createdByUid:
-            sourcePremise?.metadata?.createdByUid ||
-            sourcePremise?.metadata?.created?.byUid ||
+            sourceData?.metadata?.createdByUid ||
+            sourceData?.metadata?.created?.byUid ||
             agentUid ||
             "unknown_uid",
 
           createdByUser:
-            sourcePremise?.metadata?.createdByUser ||
-            sourcePremise?.metadata?.created?.byUser ||
+            sourceData?.metadata?.createdByUser ||
+            sourceData?.metadata?.created?.byUser ||
             agentName ||
             "Field Agent",
 
@@ -458,8 +533,8 @@ export default function FormPremise() {
           updatedByUid: agentUid || "unknown_uid",
           updatedByUser: agentName || "Field Agent",
 
-          noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
-            ? sourcePremise.metadata.noAccessTrnIds
+          noAccessTrnIds: Array.isArray(sourceData?.metadata?.noAccessTrnIds)
+            ? sourceData.metadata.noAccessTrnIds
             : [],
         },
       };
@@ -489,127 +564,23 @@ export default function FormPremise() {
     };
   }
 
-  // function buildSystemFields() {
-  //   const timestamp = new Date().toISOString();
-
-  //   const agentStamp = {
-  //     at: timestamp,
-  //     byUser: agentName || "Field Agent",
-  //     byUid: agentUid || "unknown_uid",
-  //   };
-
-  //   const stampedParents = {
-  //     countryPcode: admin?.country?.pcode || null,
-  //     provincePcode: admin?.province?.pcode || null,
-  //     dmPcode: admin?.district?.pcode || null,
-  //     lmPcode: admin?.localMunicipality?.pcode || null,
-  //     wardPcode: admin?.ward?.pcode || null,
-  //   };
-
-  //   const wardNo =
-  //     admin?.ward?.name?.match(/\d+/)?.[0] ||
-  //     admin?.ward?.pcode?.slice(-3) ||
-  //     "UNK";
-
-  //   const safeErfNo = String(erfNo || "N-A").replace(/\//g, "-");
-  //   // console.log(`safeErfNo`, safeErfNo);
-  //   // console.log(`wardNo`, wardNo);
-
-  //   const generatedId = `PRM_${Date.now()}_${Math.floor(Math.random() * 1000)}_W${wardNo}_${safeErfNo}`;
-
-  //   if (isEdit) {
-  //     return {
-  //       id: sourcePremise?.id,
-  //       schemaVersion: sourcePremise?.schemaVersion || "1.0.0",
-  //       erfId: sourcePremise?.erfId || id,
-  //       erfNo: sourcePremise?.erfNo || erfNo,
-
-  //       parents: {
-  //         countryPcode:
-  //           sourcePremise?.parents?.countryPcode || stampedParents.countryPcode,
-  //         provincePcode:
-  //           sourcePremise?.parents?.provincePcode ||
-  //           stampedParents.provincePcode,
-  //         dmPcode: sourcePremise?.parents?.dmPcode || stampedParents.dmPcode,
-  //         lmPcode: sourcePremise?.parents?.lmPcode || stampedParents.lmPcode,
-  //         wardPcode:
-  //           sourcePremise?.parents?.wardPcode || stampedParents.wardPcode,
-  //       },
-
-  //       services: {
-  //         electricityMeters: Array.isArray(
-  //           sourcePremise?.services?.electricityMeters,
-  //         )
-  //           ? sourcePremise.services.electricityMeters
-  //           : [],
-  //         waterMeters: Array.isArray(sourcePremise?.services?.waterMeters)
-  //           ? sourcePremise.services.waterMeters
-  //           : [],
-  //       },
-
-  //       metadata: {
-  //         created: sourcePremise?.metadata?.created || agentStamp,
-  //         updated: agentStamp,
-  //         noAccessTrnIds: Array.isArray(sourcePremise?.metadata?.noAccessTrnIds)
-  //           ? sourcePremise.metadata.noAccessTrnIds
-  //           : [],
-  //       },
-  //     };
-  //   }
-
-  //   return {
-  //     id: generatedId,
-  //     schemaVersion: "1.0.0",
-  //     erfId: id,
-  //     erfNo: erfNo,
-  //     parents: stampedParents,
-  //     services: {
-  //       electricityMeters: [],
-  //       waterMeters: [],
-  //     },
-  //     metadata: {
-  //       created: agentStamp,
-  //       updated: agentStamp,
-  //       noAccessTrnIds: [],
-  //     },
-  //   };
-  // }
-
   const handleSubmit = async (values, { setSubmitting }) => {
     setInProgress(true);
+
     try {
-      const storage = getStorage();
       const systemFields = buildSystemFields();
       const premiseDocId = systemFields.id;
 
-      const syncedMedia = await Promise.all(
-        (values?.media || []).map(async (item) => {
-          if (item?.uri && !item?.url) {
-            const fileName = `${premiseDocId}_${item.tag}_${Date.now()}.jpg`;
-            const storageRef = ref(
-              storage,
-              `premises/${premiseDocId}/${fileName}`,
-            );
-
-            const response = await fetch(item.uri);
-            const blob = await response.blob();
-
-            await uploadBytes(storageRef, blob);
-            const downloadUrl = await getDownloadURL(storageRef);
-
-            const { uri, ...cleanItem } = item;
-
-            return {
-              ...cleanItem,
-              url: downloadUrl,
-            };
-          }
-
-          return item;
-        }),
+      const netState = await NetInfo.fetch();
+      const isOnline = Boolean(
+        netState?.isConnected && netState?.isInternetReachable,
       );
 
-      const finalValues = JSON.parse(
+      /* ------------------------------------------------
+       1. BUILD BASE PAYLOAD FIRST
+       This is what we save offline OR sync online
+       ------------------------------------------------ */
+      const basePayload = JSON.parse(
         JSON.stringify(
           {
             ...systemFields,
@@ -639,23 +610,127 @@ export default function FormPremise() {
               },
             },
 
-            media: syncedMedia,
+            // IMPORTANT:
+            // offline queue keeps media uri
+            media: Array.isArray(values?.media) ? values.media : [],
           },
           (key, value) => (value === undefined ? null : value),
         ),
       );
 
+      /* ------------------------------------------------
+       2. OFFLINE -> SAVE / UPDATE QUEUE
+       Same model as FormMeterDiscovery
+       ------------------------------------------------ */
+      if (!isOnline) {
+        if (queueItemId) {
+          await updatePremiseQueueItem(
+            queueItemId,
+            {
+              payload: basePayload,
+              status: "PENDING",
+              result: {
+                success: false,
+                code: "NAv",
+                message: "NAv",
+                premiseId: "NAv",
+              },
+            },
+            agentUid,
+            agentName,
+          );
+        } else {
+          await addPremiseQueueItem({
+            payload: basePayload,
+            createdByUid: agentUid,
+            createdByUser: agentName,
+          });
+        }
+
+        ToastAndroid.show(
+          "No network. Premise saved to offline storage.",
+          ToastAndroid.LONG,
+        );
+
+        router.replace("/(tabs)/admin/storage/premise-offline-storage");
+        return;
+      }
+
+      /* ------------------------------------------------
+       3. ONLINE -> upload any local media first
+       ------------------------------------------------ */
+      const storage = getStorage();
+
+      const syncedMedia = await Promise.all(
+        (basePayload?.media || []).map(async (item) => {
+          if (item?.uri && !item?.url) {
+            const fileName = `${premiseDocId}_${item.tag}_${Date.now()}.jpg`;
+
+            const storageRef = ref(
+              storage,
+              `premises/${premiseDocId}/${fileName}`,
+            );
+
+            const response = await fetch(item.uri);
+            const blob = await response.blob();
+
+            await uploadBytes(storageRef, blob);
+            const downloadUrl = await getDownloadURL(storageRef);
+
+            const { uri, ...cleanItem } = item;
+
+            return {
+              ...cleanItem,
+              url: downloadUrl,
+            };
+          }
+
+          return item;
+        }),
+      );
+
+      const finalValues = {
+        ...basePayload,
+        media: syncedMedia,
+      };
+
+      /* ------------------------------------------------
+       4. ONLINE SUBMIT
+       ------------------------------------------------ */
       if (isEdit) {
         await updatePremise(finalValues).unwrap();
       } else {
-        await addPremise(finalValues).unwrap();
+        const result = await createPremise(finalValues).unwrap();
+
+        if (!result?.success) {
+          ToastAndroid.show(
+            result?.message || "Premise rejected",
+            ToastAndroid.LONG,
+          );
+          return;
+        }
       }
+
+      /* ------------------------------------------------
+       5. CLEANUP
+       If this came from queue, remove successful item
+       ------------------------------------------------ */
+      if (queueItemId) {
+        await removePremiseQueueItem(queueItemId);
+      }
+
       updateGeo({ selectedPremise: null, lastSelectionType: "PREMISE" });
+
       ToastAndroid.show("Premise saved.", ToastAndroid.LONG);
+
       router.replace("/(tabs)/premises");
     } catch (err) {
-      console.warn(`🛰️Could not save premise form: ${err.message}`);
-      ToastAndroid.show("Could not save premise form.", ToastAndroid.LONG);
+      const errorMessage =
+        err?.data?.message || err?.message || "Could not save premise form.";
+
+      console.warn(`🛰️Could not save premise form: ${errorMessage}`);
+
+      ToastAndroid.show(errorMessage, ToastAndroid.LONG);
     } finally {
       setSubmitting(false);
       setInProgress(false);
@@ -675,6 +750,7 @@ export default function FormPremise() {
         validationSchema={premiseSchema}
         validateOnMount={true}
         onSubmit={handleSubmit}
+        enableReinitialize={true}
       >
         {({ setFieldValue, values, isSubmitting, errors }) => {
           // console.log(`FormPremise --errors`, errors);
@@ -683,7 +759,7 @@ export default function FormPremise() {
             <View style={styles.container}>
               <Stack.Screen
                 options={{
-                  title: isEdit ? "Edit Premise" : "New Premise", // Improved UI clarity
+                  title: isEditLike ? "Edit Premise" : "New Premise",
                   headerRight: () => (
                     <View style={styles.headerErfBadge}>
                       <Text style={styles.headerErfText}>ERF: {erfNo}</Text>
@@ -747,15 +823,6 @@ export default function FormPremise() {
                           setFieldValue("context", v ? "Township" : "Suburb")
                         }
                       />
-
-                      {/* <Switch
-                      value={values.isTownship}
-                      color="#059669"
-                      // Keep this for direct toggle hits
-                      onValueChange={(v) => setFieldValue("isTownship", v)}
-                      // 🛡️ Prevent the Switch from blocking the row tap on some Android versions
-                      pointerEvents="none"
-                    /> */}
                     </TouchableOpacity>
                   </Surface>
                   <FormSelect
@@ -863,9 +930,7 @@ export default function FormPremise() {
                 </Surface>
 
                 {/* 🎯 THE SOVEREIGN FOOTER */}
-                {/* <Surface style={styles.card} elevation={1}>
-                <FormFooter />
-              </Surface> */}
+
                 <ForensicFooter />
 
                 <View style={{ height: 40 }} />

@@ -1,11 +1,412 @@
-import { Text, View } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
+import { FlashList } from "@shopify/flash-list";
+import { useRouter } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useDispatch, useSelector } from "react-redux";
 
-const WardErfsSync = () => {
+import { useGeo } from "@/src/context/GeoContext";
+import { erfsApi } from "@/src/redux/erfsApi";
+import { useGetWardsByLocalMunicipalityQuery } from "@/src/redux/geoApi";
+import WardErfSyncLock from "../../../../components/WardErfSyncLock";
+
+/* =====================================================
+   PER-WARD LIVE SUBSCRIPTION REGISTRY
+   Keeps the RTK initiate() handles so we can unsubscribe
+   only the specific ward on DROP.
+===================================================== */
+const wardErfSubscriptions = new Map();
+
+function getWardQueryCacheKey(lmPcode, wardPcode) {
+  return `getErfsByLmPcodeWardPcode(${lmPcode}__${wardPcode})`;
+}
+
+function startWardErfSubscription(dispatch, lmPcode, wardPcode) {
+  const wardKey = `${lmPcode}__${wardPcode}`;
+
+  // already live -> do nothing
+  if (wardErfSubscriptions.has(wardKey)) return;
+
+  const handle = dispatch(
+    erfsApi.endpoints.getErfsByLmPcodeWardPcode.initiate(
+      {
+        lmPcode,
+        wardPcode,
+      },
+      { subscribe: true },
+    ),
+  );
+
+  wardErfSubscriptions.set(wardKey, handle);
+}
+
+function stopWardErfSubscription(dispatch, lmPcode, wardPcode) {
+  const wardKey = `${lmPcode}__${wardPcode}`;
+  const handle = wardErfSubscriptions.get(wardKey);
+
+  // 1. stop only this ward's live listener
+  if (handle?.unsubscribe) {
+    handle.unsubscribe();
+  }
+
+  wardErfSubscriptions.delete(wardKey);
+
+  // 2. remove only this ward's cached query result
+  const queryCacheKey = getWardQueryCacheKey(lmPcode, wardPcode);
+
+  dispatch(
+    erfsApi.internalActions.removeQueryResult({
+      queryCacheKey,
+    }),
+  );
+}
+
+export default function WardErfsSync() {
+  const router = useRouter();
+  const dispatch = useDispatch();
+
+  const { geoState, updateGeo } = useGeo();
+
+  const activeLm = geoState?.selectedLm;
+  const activeWard = geoState?.selectedWard;
+
+  const lmPcode = activeLm?.id;
+
+  const [isOnline, setIsOnline] = useState(false);
+
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      setIsOnline(Boolean(state.isConnected && state.isInternetReachable));
+    });
+    return unsub;
+  }, []);
+
+  const { data: wards = [], isLoading } = useGetWardsByLocalMunicipalityQuery(
+    lmPcode,
+    {
+      skip: !lmPcode,
+    },
+  );
+
+  const erfsQueries = useSelector((state) => state.erfsApi?.queries || {});
+
+  /* ================= GLOBAL SYNC LOCK ================= */
+
+  const isAnySyncing = useMemo(() => {
+    return Object.values(erfsQueries || {}).some(
+      (q) => q?.data?.sync?.status === "syncing",
+    );
+  }, [erfsQueries]);
+
+  /* ================= BUILD ROWS ================= */
+
+  const wardRows = useMemo(() => {
+    if (!lmPcode) return [];
+
+    return (wards || []).map((w) => {
+      const wardKey = `${lmPcode}__${w.id}`;
+      const isActive = activeWard?.id === w.id;
+
+      const queryKey = getWardQueryCacheKey(lmPcode, w.id);
+      const queryState = erfsQueries?.[queryKey];
+
+      let status = "NOT SYNCED";
+      let count = 0;
+
+      if (queryState) {
+        const sync = queryState?.data?.sync;
+
+        if (sync?.status === "syncing") status = "SYNCING";
+        else if (sync?.status === "ready") status = "READY";
+        else if (sync?.status === "error") status = "ERROR";
+
+        count = sync?.size || 0;
+      }
+
+      const canOpen = status === "READY";
+      const canDrop = status !== "NOT SYNCED";
+      const canSync = !canOpen && isOnline && status !== "SYNCING";
+
+      return {
+        id: w.id,
+        name: w.name,
+        code: w.code,
+        wardKey,
+        isActive,
+        status,
+        count,
+        canOpen,
+        canDrop,
+        canSync,
+      };
+    });
+  }, [wards, lmPcode, erfsQueries, activeWard?.id, isOnline]);
+
+  /* ================= STATES ================= */
+
+  if (!lmPcode) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.title}>NO WORKBASE SELECTED</Text>
+      </View>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.title}>LOADING WARDS...</Text>
+      </View>
+    );
+  }
+
+  /* ================= UI ================= */
+
+  const currentLoadedCount = wardRows.reduce(
+    (acc, w) => acc + (w.status === "READY" ? 1 : 0),
+    0,
+  );
+  const currentTotalCount = wardRows.length;
+
   return (
-    <View>
-      <Text>WardErfsSync</Text>
+    <View style={styles.container}>
+      <WardErfSyncLock
+        visible={isAnySyncing}
+        lmName={activeLm?.name}
+        wardName={activeWard?.name || "Selected Ward"}
+        phase="Preparing ward ERF pack for operational use..."
+        loadedCount={currentLoadedCount}
+        totalCount={currentTotalCount}
+        lmStats={{
+          wards: wards?.length || 0,
+          erfs: null,
+          meters: null,
+          trns: null,
+        }}
+      />
+
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>
+          WARD ERF CONTROL • {activeLm?.name}
+        </Text>
+
+        <Text style={styles.headerStatus}>
+          NETWORK:{" "}
+          <Text
+            style={[
+              styles.headerStatusValue,
+              { color: isOnline ? "#166534" : "#B91C1C" },
+            ]}
+          >
+            {isOnline ? "ONLINE" : "OFFLINE"}
+          </Text>
+        </Text>
+      </View>
+
+      <FlashList
+        data={wardRows}
+        keyExtractor={(item) => item.id}
+        estimatedItemSize={80}
+        ListEmptyComponent={
+          <View style={styles.center}>
+            <Text style={styles.title}>NO WARDS FOUND</Text>
+          </View>
+        }
+        renderItem={({ item }) => {
+          return (
+            <View style={[styles.row, item.isActive && styles.rowActive]}>
+              <View style={styles.rowLeft}>
+                <Text style={styles.wardName}>
+                  {item.name}
+                  {item.isActive ? " • ACTIVE" : ""}
+                </Text>
+
+                <Text style={styles.status}>
+                  {item.status} •{" "}
+                  <Text style={styles.countHighlight}>{item.count}</Text> ERFs
+                </Text>
+              </View>
+
+              <View style={styles.rowRight}>
+                {!item.canOpen && (
+                  <TouchableOpacity
+                    style={[
+                      styles.syncBtn,
+                      !item.canSync && styles.syncBtnDisabled,
+                    ]}
+                    disabled={!item.canSync}
+                    onPress={() => {
+                      startWardErfSubscription(dispatch, lmPcode, item.id);
+                    }}
+                  >
+                    <Text style={styles.btnText}>
+                      {item.status === "SYNCING" ? "SYNCING..." : "SYNC"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {item.canOpen && (
+                  <TouchableOpacity
+                    style={styles.openBtn}
+                    onPress={() => {
+                      updateGeo({
+                        selectedWard: {
+                          id: item.id,
+                          name: item.name,
+                        },
+                        lastSelectionType: "WARD",
+                      });
+
+                      router.replace("/(tabs)/erfs");
+                    }}
+                  >
+                    <Text style={styles.btnText}>OPEN</Text>
+                  </TouchableOpacity>
+                )}
+
+                {item.canDrop && (
+                  <TouchableOpacity
+                    style={styles.dropBtn}
+                    onPress={() => {
+                      stopWardErfSubscription(dispatch, lmPcode, item.id);
+
+                      if (activeWard?.id === item.id) {
+                        updateGeo({
+                          selectedWard: null,
+                          selectedErf: null,
+                          lastSelectionType: null,
+                        });
+                      }
+                    }}
+                  >
+                    <Text style={styles.btnText}>DROP</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        }}
+      />
     </View>
   );
-};
+}
 
-export default WardErfsSync;
+/* ================= STYLES ================= */
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+  },
+
+  header: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+  },
+
+  headerTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#0F172A",
+    letterSpacing: 1,
+  },
+
+  headerStatus: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 0.5,
+  },
+
+  headerStatusValue: {
+    fontWeight: "900",
+  },
+
+  row: {
+    flexDirection: "row",
+    padding: 14,
+    borderBottomWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  rowLeft: {
+    flex: 1,
+  },
+
+  wardName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#1E293B",
+  },
+
+  status: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+
+  rowRight: {
+    flexDirection: "row",
+    gap: 6,
+  },
+
+  syncBtn: {
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+
+  syncBtnDisabled: {
+    opacity: 0.45,
+  },
+
+  openBtn: {
+    backgroundColor: "#10B981",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+
+  dropBtn: {
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+
+  btnText: {
+    color: "#FFF",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  title: {
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  rowActive: {
+    backgroundColor: "#F0F9FF",
+    borderLeftWidth: 4,
+    borderLeftColor: "#38BDF8",
+  },
+
+  countHighlight: {
+    color: "#2563EB",
+    fontWeight: "900",
+    fontSize: 12,
+  },
+});

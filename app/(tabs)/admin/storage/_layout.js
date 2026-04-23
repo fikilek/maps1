@@ -4,12 +4,56 @@ export default function StorageLayout() {
   return (
     <Stack
       screenOptions={{
-        headerShown: false,
+        headerShown: true,
+        headerTitleAlign: "center",
+        headerShadowVisible: false,
+        headerStyle: {
+          backgroundColor: "#FFFFFF",
+        },
+        headerTintColor: "#0F172A",
+        headerTitleStyle: {
+          fontSize: 15,
+          fontWeight: "900",
+          color: "#0F172A",
+        },
+        contentStyle: {
+          backgroundColor: "#F8FAFC",
+        },
       }}
     >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="forms-submission-queue" />
-      <Stack.Screen name="ward-erfs-sync" />
+      <Stack.Screen
+        name="index"
+        options={{
+          title: "Storage",
+        }}
+      />
+
+      <Stack.Screen
+        name="forms-submission-queue"
+        options={{
+          title: "Meter Discovery Queue",
+        }}
+      />
+
+      <Stack.Screen
+        name="ward-erfs-sync"
+        options={{
+          title: "Ward ERF Sync",
+        }}
+      />
+
+      <Stack.Screen
+        name="sales-sync"
+        options={{
+          title: "Sales Sync",
+        }}
+      />
+      <Stack.Screen
+        name="premise-offline-storage"
+        options={{
+          title: "Premise Offline Storage",
+        }}
+      />
     </Stack>
   );
 }

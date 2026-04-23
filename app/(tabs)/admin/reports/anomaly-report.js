@@ -4,7 +4,15 @@ import * as Sharing from "expo-sharing";
 
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { BarChart } from "react-native-gifted-charts";
 import { Text } from "react-native-paper";
 import DateRangeModal from "../../../../components/DateRangeModal";
 import { ExportIntelligenceModal } from "../../../../components/ExportModal";
@@ -15,8 +23,10 @@ export default function AnomalyReport() {
   const { geoState } = useGeo();
   const lmPcode = geoState?.selectedLm?.id;
   const lmName = geoState?.selectedLm?.name || "Municipality";
+  const { width: screenWidth } = useWindowDimensions();
+  const chartWidth = Math.max(screenWidth - 80, 260);
 
-  const [activeView, setActiveView] = useState("TABLE");
+  const [activeView, setActiveView] = useState("DAILY");
   const [showDateModal, setShowDateModal] = useState(false);
   const [activeDateRange, setActiveDateRange] = useState({
     label: "ALL TIME",
@@ -100,43 +110,188 @@ export default function AnomalyReport() {
     return true;
   };
 
-  const processedData = useMemo(() => {
-    const filtered = rows.filter((item) =>
+  const shortenLabel = (text = "", max = 24) => {
+    const clean = String(text || "");
+    if (clean.length <= max) return clean;
+    return `${clean.slice(0, max)}...`;
+  };
+
+  const getSafeMaxValue = (items = []) => {
+    const max = Math.max(...items.map((item) => item?.value || 0), 0);
+
+    if (max <= 5) return 5;
+
+    return Math.ceil(max * 1.2);
+  };
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((item) =>
       isWithinDateRange(
         item?.activityDate,
         activeDateRange?.start,
         activeDateRange?.end,
       ),
     );
+  }, [rows, activeDateRange]);
 
-    return [...filtered].sort((a, b) => {
+  const dailyData = useMemo(() => {
+    return [...filteredRows].sort((a, b) => {
+      const dateCompare = String(b?.activityDate || "").localeCompare(
+        String(a?.activityDate || ""),
+      );
+      if (dateCompare !== 0) return dateCompare;
+
+      const updatedCompare = String(b?.updatedAt || "").localeCompare(
+        String(a?.updatedAt || ""),
+      );
+      if (updatedCompare !== 0) return updatedCompare;
+
+      return String(a?.type || "").localeCompare(String(b?.type || ""));
+    });
+  }, [filteredRows]);
+
+  const summaryData = useMemo(() => {
+    const grouped = new Map();
+
+    filteredRows.forEach((item) => {
+      const key = item?.type || "NAv";
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          id: key,
+          type: key,
+          count: 0,
+        });
+      }
+
+      const existing = grouped.get(key);
+      existing.count += item?.count || 0;
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => {
       if ((b?.count || 0) !== (a?.count || 0)) {
         return (b?.count || 0) - (a?.count || 0);
       }
 
-      return (a?.type || "").localeCompare(b?.type || "");
+      return String(a?.type || "").localeCompare(String(b?.type || ""));
     });
-  }, [rows, activeDateRange]);
+  }, [filteredRows]);
+
+  const topCombinationGraphData = useMemo(() => {
+    return (summaryData || []).slice(0, 8).map((item) => ({
+      value: item?.count || 0,
+      label: shortenLabel(item?.type || "NAv", 24),
+      fullLabel: item?.type || "NAv",
+      frontColor: "#2563eb",
+    }));
+  }, [summaryData]);
+
+  const dailyTrendGraphData = useMemo(() => {
+    const grouped = new Map();
+
+    filteredRows.forEach((item) => {
+      const day = item?.activityDate || "NAv";
+
+      if (!grouped.has(day)) {
+        grouped.set(day, {
+          fullDate: day,
+          value: 0,
+        });
+      }
+
+      grouped.get(day).value += item?.count || 0;
+    });
+
+    return Array.from(grouped.values())
+      .sort((a, b) => String(a.fullDate).localeCompare(String(b.fullDate)))
+      .map((item) => ({
+        value: item.value,
+        label:
+          typeof item.fullDate === "string" && item.fullDate.length >= 10
+            ? item.fullDate.slice(5)
+            : "NAv",
+        fullDate: item.fullDate,
+        frontColor: "#0ea5e9",
+      }));
+  }, [filteredRows]);
+
+  const topCombinationMaxValue = useMemo(() => {
+    return getSafeMaxValue(topCombinationGraphData);
+  }, [topCombinationGraphData]);
+
+  const dailyTrendMaxValue = useMemo(() => {
+    return getSafeMaxValue(dailyTrendGraphData);
+  }, [dailyTrendGraphData]);
+
+  const comboChartHeight = Math.max(topCombinationGraphData.length * 42, 220);
+
+  // TEMP:
+  // Until we do the graphs design session, let graphs consume the same
+  // filtered summary universe so the data path stays correct and stable.
+  const graphData = useMemo(() => {
+    return summaryData;
+  }, [summaryData]);
+
+  const visibleData = useMemo(() => {
+    if (activeView === "SUMMARY") return summaryData;
+    if (activeView === "GRAPHS") return graphData;
+    return dailyData;
+  }, [activeView, dailyData, summaryData, graphData]);
+
+  const exportData = useMemo(() => {
+    if (activeView === "SUMMARY") return summaryData;
+    if (activeView === "GRAPHS") return graphData;
+    return dailyData;
+  }, [activeView, dailyData, summaryData, graphData]);
 
   const totalCount = useMemo(() => {
-    return processedData.reduce((sum, item) => sum + (item.count || 0), 0);
-  }, [processedData]);
+    return filteredRows.reduce((sum, item) => sum + (item.count || 0), 0);
+  }, [filteredRows]);
 
   const handleExport = async () => {
     try {
       const timestamp = new Date().toISOString().split("T")[0];
 
-      const exportRows = (processedData || []).map(
-        (item) => `"${item.type}",${item.count}`,
-      );
-      const csvContent = ["ANOMALY TYPE & DETAIL,COUNT", ...exportRows].join(
-        "\n",
-      );
+      let csvContent = "";
+
+      if (activeView === "GRAPHS") {
+        const topRows = (topCombinationGraphData || []).map(
+          (item) => `"${item.fullLabel}",${item.value || 0}`,
+        );
+
+        const trendRows = (dailyTrendGraphData || []).map(
+          (item) => `"${item.fullDate || "NAv"}",${item.value || 0}`,
+        );
+
+        csvContent = [
+          "TOP ANOMALY + DETAIL,COUNT",
+          ...topRows,
+          "",
+          "ACTIVITY DATE,COUNT",
+          ...trendRows,
+        ].join("\n");
+      } else if (activeView === "DAILY") {
+        const exportRows = (dailyData || []).map(
+          (item) =>
+            `"${item.type}","${item.activityDate || "NAv"}",${item.count || 0}`,
+        );
+
+        csvContent = [
+          "ANOMALY + DETAIL,ACTIVITY DATE,COUNT",
+          ...exportRows,
+        ].join("\n");
+      } else {
+        const exportRows = (summaryData || []).map(
+          (item) => `"${item.type}",${item.count || 0}`,
+        );
+
+        csvContent = ["ANOMALY + DETAIL,COUNT", ...exportRows].join("\n");
+      }
 
       const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
       const now = new Date();
       const timeString = `${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
-      const fileName = `Anomaly_Report_${lmName}_${timestamp}_${timeString}.csv`;
+      const fileName = `Anomaly_Report_${lmName}_${activeView}_${timestamp}_${timeString}.csv`;
       const fileUri = `${baseDir}${fileName}`;
 
       await FileSystem.writeAsStringAsync(fileUri, csvContent);
@@ -156,6 +311,48 @@ export default function AnomalyReport() {
     }
   };
 
+  // const handleExport = async () => {
+  //   try {
+  //     const timestamp = new Date().toISOString().split("T")[0];
+
+  //     const exportRows =
+  //       activeView === "DAILY"
+  //         ? (exportData || []).map(
+  //             (item) =>
+  //               `"${item.type}","${item.activityDate || "NAv"}",${item.count || 0}`,
+  //           )
+  //         : (exportData || []).map(
+  //             (item) => `"${item.type}",${item.count || 0}`,
+  //           );
+
+  //     const csvContent =
+  //       activeView === "DAILY"
+  //         ? ["ANOMALY + DETAIL,ACTIVITY DATE,COUNT", ...exportRows].join("\n")
+  //         : ["ANOMALY + DETAIL,COUNT", ...exportRows].join("\n");
+
+  //     const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+  //     const now = new Date();
+  //     const timeString = `${now.getHours()}${now.getMinutes()}${now.getSeconds()}`;
+  //     const fileName = `Anomaly_Report_${lmName}_${activeView}_${timestamp}_${timeString}.csv`;
+  //     const fileUri = `${baseDir}${fileName}`;
+
+  //     await FileSystem.writeAsStringAsync(fileUri, csvContent);
+
+  //     const isAvailable = await Sharing.isAvailableAsync();
+  //     if (isAvailable) {
+  //       await Sharing.shareAsync(fileUri, {
+  //         mimeType: "text/csv",
+  //         dialogTitle: `Export ${lmName} Anomaly Intelligence`,
+  //       });
+  //     }
+
+  //     setIsExportModalVisible(false);
+  //   } catch (error) {
+  //     console.error("❌ ANOMALY_EXPORT_FAILED:", error);
+  //     alert("Export Error: " + error.message);
+  //   }
+  // };
+
   if (isLoading) {
     return <ActivityIndicator style={{ flex: 1 }} color="#2563eb" />;
   }
@@ -168,44 +365,137 @@ export default function AnomalyReport() {
         activeView={activeView}
         selectedDateLabel={activeDateRange.label}
         onOpenDateFilter={() => setShowDateModal(true)}
-        onToggleView={() => setActiveView("TABLE")}
-        onShowGraphs={() => setActiveView("GRAPHS")}
+        onChangeView={setActiveView}
         onDownload={() => setIsExportModalVisible(true)}
       />
 
-      <View style={{ flex: 1 }}>
-        <View style={styles.tableHeader}>
-          <View style={styles.typeHeaderCell}>
-            <Text style={styles.headerText}>ANOMALY IDENTIFIER</Text>
-          </View>
-          <View style={styles.countHeaderCell}>
-            <Text style={styles.headerText}>COUNT</Text>
-          </View>
-        </View>
+      {activeView === "GRAPHS" ? (
+        <ScrollView
+          style={styles.graphScroll}
+          contentContainerStyle={styles.graphScrollContent}
+        >
+          {/* CARD 1 : TOP COMBINATIONS */}
+          <View style={styles.graphCard}>
+            <Text style={styles.graphCardTitle}>
+              Top Anomaly + Detail Combinations
+            </Text>
+            <Text style={styles.graphCardSubTitle}>
+              Most common combinations in selected date range
+            </Text>
 
-        <FlatList
-          data={processedData}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.row}>
-              <View style={styles.typeCell}>
-                <Text style={styles.anomalyName}>{item.type}</Text>
-                <Text style={styles.dateText}>{item.activityDate}</Text>
+            {topCombinationGraphData.length === 0 ? (
+              <View style={styles.graphEmptyWrap}>
+                <Text style={styles.graphEmptyText}>
+                  No anomaly graph data for selected range.
+                </Text>
               </View>
-              <View style={styles.countCell}>
-                <Text style={styles.numCellText}>{item.count}</Text>
+            ) : (
+              <>
+                <BarChart
+                  data={topCombinationGraphData}
+                  horizontal
+                  width={chartWidth}
+                  height={comboChartHeight}
+                  barWidth={16}
+                  spacing={18}
+                  noOfSections={4}
+                  maxValue={topCombinationMaxValue}
+                  disableScroll
+                  rotateYAxisTexts={0}
+                  xAxisColor="#cbd5e1"
+                  yAxisColor="#cbd5e1"
+                  yAxisTextStyle={{ color: "#475569", fontSize: 10 }}
+                  xAxisLabelTextStyle={{ color: "#64748b", fontSize: 9 }}
+                />
+
+                <View style={styles.graphLegendWrap}>
+                  {topCombinationGraphData.map((item, index) => (
+                    <Text
+                      key={`${item.fullLabel}-${index}`}
+                      style={styles.graphLegendText}
+                    >
+                      {index + 1}. {item.fullLabel} ({item.value})
+                    </Text>
+                  ))}
+                </View>
+              </>
+            )}
+          </View>
+
+          {/* CARD 2 : DAILY TREND */}
+          <View style={styles.graphCard}>
+            <Text style={styles.graphCardTitle}>Daily Anomaly Trend</Text>
+            <Text style={styles.graphCardSubTitle}>
+              Total anomaly counts per day in selected date range
+            </Text>
+
+            {dailyTrendGraphData.length === 0 ? (
+              <View style={styles.graphEmptyWrap}>
+                <Text style={styles.graphEmptyText}>
+                  No daily trend data for selected range.
+                </Text>
               </View>
+            ) : (
+              <BarChart
+                data={dailyTrendGraphData}
+                width={chartWidth}
+                height={240}
+                barWidth={22}
+                spacing={18}
+                noOfSections={4}
+                maxValue={dailyTrendMaxValue}
+                disableScroll
+                xAxisColor="#cbd5e1"
+                yAxisColor="#cbd5e1"
+                yAxisTextStyle={{ color: "#475569", fontSize: 10 }}
+                xAxisLabelTextStyle={{ color: "#64748b", fontSize: 9 }}
+              />
+            )}
+          </View>
+        </ScrollView>
+      ) : (
+        <View style={{ flex: 1 }}>
+          <View style={styles.tableHeader}>
+            <View style={styles.typeHeaderCell}>
+              <Text style={styles.headerText}>ANOMALY + DETAIL</Text>
             </View>
-          )}
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>
-                No anomaly groups found for {activeDateRange.label} in {lmName}.
-              </Text>
+            <View style={styles.countHeaderCell}>
+              <Text style={styles.headerText}>COUNT</Text>
             </View>
-          }
-        />
-      </View>
+          </View>
+
+          <FlatList
+            data={visibleData}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <View style={styles.row}>
+                <View style={styles.typeCell}>
+                  <Text style={styles.anomalyName}>{item.type}</Text>
+
+                  {activeView === "DAILY" ? (
+                    <Text style={styles.dateText}>
+                      {item.activityDate || "NAv"}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.countCell}>
+                  <Text style={styles.numCellText}>{item.count || 0}</Text>
+                </View>
+              </View>
+            )}
+            ListEmptyComponent={
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyText}>
+                  {activeView === "SUMMARY"
+                    ? `No anomaly combinations found for ${activeDateRange.label} in ${lmName}.`
+                    : `No daily anomaly groups found for ${activeDateRange.label} in ${lmName}.`}
+                </Text>
+              </View>
+            }
+          />
+        </View>
+      )}
 
       <DateRangeModal
         visible={showDateModal}
@@ -302,5 +592,93 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontWeight: "600",
     textAlign: "center",
+  },
+
+  graphPlaceholder: {
+    flex: 1,
+    margin: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#f8fafc",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+
+  graphTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#0f172a",
+  },
+
+  graphText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: "#475569",
+    textAlign: "center",
+  },
+
+  graphSubText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#64748b",
+    textAlign: "center",
+  },
+
+  graphScroll: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+  },
+
+  graphScrollContent: {
+    padding: 16,
+    paddingBottom: 28,
+    gap: 16,
+  },
+
+  graphCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 16,
+  },
+
+  graphCardTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#0f172a",
+  },
+
+  graphCardSubTitle: {
+    marginTop: 4,
+    marginBottom: 14,
+    fontSize: 11,
+    color: "#64748b",
+  },
+
+  graphEmptyWrap: {
+    paddingVertical: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  graphEmptyText: {
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: "600",
+    textAlign: "center",
+  },
+
+  graphLegendWrap: {
+    marginTop: 14,
+    gap: 6,
+  },
+
+  graphLegendText: {
+    fontSize: 10,
+    color: "#475569",
+    fontWeight: "600",
   },
 });

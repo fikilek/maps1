@@ -1,12 +1,14 @@
 import NetInfo from "@react-native-community/netinfo";
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
+import { functions } from "../firebase";
 
 import {
   getSubmissionQueue,
   markSubmissionQueueItemFailed,
   markSubmissionQueueItemSuccess,
   markSubmissionQueueItemSyncing,
+  updateSubmissionQueueItem,
 } from "../utils/submissionQueue";
 
 let isQueueProcessing = false;
@@ -48,7 +50,6 @@ export const processSubmissionQueue = async ({
     }
 
     const storage = getStorage();
-    const functions = getFunctions();
     const callable = httpsCallable(functions, "onMeterDiscoveryCallable");
 
     for (const item of pendingItems) {
@@ -97,14 +98,37 @@ export const processSubmissionQueue = async ({
         };
 
         const callableResponse = await callable(finalPayload);
-
         const result = callableResponse?.data || {};
 
         if (!result?.success) {
+          const code = result?.code || "SYNC_FAILED";
+
+          // Parent premise not ready yet -> keep retryable
+          if (code === "INVALID_PREMISE_ID" || code === "PREMISE_NOT_FOUND") {
+            await updateSubmissionQueueItem(
+              item.id,
+              {
+                status: "PENDING",
+                result: {
+                  success: false,
+                  code,
+                  message:
+                    result?.message ||
+                    "Parent premise is not ready yet. This draft will retry later.",
+                  trnId: "NAv",
+                },
+              },
+              agentUid,
+              agentName,
+            );
+
+            continue;
+          }
+
           await markSubmissionQueueItemFailed(
             item.id,
             {
-              code: result?.code || "SYNC_FAILED",
+              code,
               message: result?.message || "Submission sync failed",
               trnId: result?.trnId || "NAv",
             },
@@ -128,11 +152,42 @@ export const processSubmissionQueue = async ({
       } catch (error) {
         console.log("processSubmissionQueue -- item failed", item?.id, error);
 
+        const message = error?.message || "";
+        const code = error?.code || "";
+
+        const isPremiseError =
+          message.includes("PREMISE") ||
+          message.includes("premise") ||
+          code === "INVALID_PREMISE_ID" ||
+          code === "PREMISE_NOT_FOUND";
+
+        if (isPremiseError) {
+          console.log("processSubmissionQueue -- catch → keeping PENDING");
+
+          await updateSubmissionQueueItem(
+            item.id,
+            {
+              status: "PENDING",
+              result: {
+                success: false,
+                code: "PREMISE_NOT_READY",
+                message:
+                  "Parent premise is not ready yet. This draft will retry later.",
+                trnId: "NAv",
+              },
+            },
+            agentUid,
+            agentName,
+          );
+
+          continue;
+        }
+
         await markSubmissionQueueItemFailed(
           item.id,
           {
             code: "SYNC_FAILED",
-            message: error?.message || "Sync failed",
+            message: message || "Sync failed",
             trnId: "NAv",
           },
           agentUid,

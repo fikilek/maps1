@@ -99,7 +99,7 @@ const AstItem = ({ item }) => {
     const parentErf = all?.erfs?.find((e) => e.id === erfId);
 
     updateGeo({
-      selectedErf: parentErf || { id: erfId },
+      selectedErf: parentErf || null,
       lastSelectionType: "ERF",
     });
     updateGeo({

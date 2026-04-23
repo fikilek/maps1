@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Stack } from "expo-router";
-import { useCallback, useState } from "react";
+import { Stack, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { ActivityIndicator, Surface, Text } from "react-native-paper";
 import QueueItemCard from "../../../../components/QueueItemCard";
+import { useGeo } from "../../../../src/context/GeoContext";
 import { useAuth } from "../../../../src/hooks/useAuth";
 import { processSubmissionQueue } from "../../../../src/services/processSubmissionQueue";
 import {
@@ -19,8 +20,18 @@ import {
   removeSubmissionQueueItem,
 } from "../../../../src/utils/submissionQueue";
 
+const getQueueUpdatedAtMs = (item) => {
+  const raw = item?.metadata?.updatedAt || item?.metadata?.createdAt || "";
+
+  const ms = new Date(raw).getTime();
+
+  return Number.isNaN(ms) ? 0 : ms;
+};
+
 export default function SubmissionQueueScreen() {
   const { user, profile } = useAuth();
+  const router = useRouter();
+  const { updateGeo } = useGeo();
 
   const [queueItems, setQueueItems] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,7 +43,12 @@ export default function SubmissionQueueScreen() {
   const loadQueue = useCallback(async () => {
     try {
       const queue = await getSubmissionQueue();
-      setQueueItems(Array.isArray(queue) ? queue : []);
+
+      const sortedQueue = (Array.isArray(queue) ? queue : []).sort(
+        (a, b) => getQueueUpdatedAtMs(b) - getQueueUpdatedAtMs(a),
+      );
+
+      setQueueItems(sortedQueue);
     } catch (error) {
       console.log("SubmissionQueueScreen -- loadQueue error", error);
     }
@@ -90,15 +106,101 @@ export default function SubmissionQueueScreen() {
     setBusy(false);
   };
 
-  useState(() => {
+  const handleEditItem = (item) => {
+    const canEdit = item?.status === "PENDING" || item?.status === "FAILED";
+
+    if (!canEdit) {
+      Alert.alert(
+        "Edit Not Allowed",
+        "Only pending or failed queue items can be edited.",
+      );
+      return;
+    }
+
+    const hasAccess =
+      item?.payload?.accessData?.access?.hasAccess === "no" ? "no" : "yes";
+
+    const meterType = hasAccess === "no" ? "" : item?.payload?.meterType || "";
+
+    const premiseId =
+      item?.context?.premiseId ||
+      item?.payload?.accessData?.premise?.id ||
+      "NAv";
+
+    router.push({
+      pathname: "/(tabs)/premises/form",
+      params: {
+        premiseId,
+        action: JSON.stringify({
+          access: hasAccess,
+          meterType,
+        }),
+        queueItemId: item?.id,
+      },
+    });
+  };
+
+  const handleOpenMapItem = (item) => {
+    const gps = item?.payload?.ast?.location?.gps;
+
+    if (typeof gps?.lat !== "number" || typeof gps?.lng !== "number") {
+      Alert.alert(
+        "Map Unavailable",
+        "This draft does not have valid meter GPS coordinates.",
+      );
+      return;
+    }
+
+    const draftMeter = {
+      id: item?.payload?.id || item?.id || "NAv",
+      meterType: item?.payload?.meterType || item?.context?.meterType || "NAv",
+      accessData: {
+        ...(item?.payload?.accessData || {}),
+        erfNo:
+          item?.payload?.accessData?.erfNo || item?.context?.erfNo || "NAv",
+        premise: {
+          ...(item?.payload?.accessData?.premise || {}),
+          address: item?.payload?.accessData?.premise?.address || "NAv",
+        },
+      },
+      ast: {
+        ...(item?.payload?.ast || {}),
+        astData: {
+          ...(item?.payload?.ast?.astData || {}),
+          astNo:
+            item?.payload?.ast?.astData?.astNo ||
+            item?.context?.meterNo ||
+            "NAv",
+        },
+        location: {
+          ...(item?.payload?.ast?.location || {}),
+          gps: {
+            lat: gps.lat,
+            lng: gps.lng,
+          },
+        },
+      },
+    };
+
+    updateGeo({
+      selectedErf: null,
+      selectedPremise: null,
+      selectedMeter: draftMeter,
+      lastSelectionType: "METER",
+    });
+
+    router.push("/(tabs)/maps");
+  };
+
+  useEffect(() => {
     loadQueue();
-  });
+  }, [loadQueue]);
 
   return (
     <>
       <Stack.Screen
         options={{
-          title: "Submission Queue",
+          title: "Meter Discovery Queue",
           headerTitleStyle: { fontSize: 16, fontWeight: "900" },
         }}
       />
@@ -111,7 +213,7 @@ export default function SubmissionQueueScreen() {
         }
       >
         <Surface style={styles.headerCard} elevation={1}>
-          <Text style={styles.headerTitle}>Offline Submission Queue</Text>
+          <Text style={styles.headerTitle}>Offline Metter Discovery Forms</Text>
           <Text style={styles.headerSub}>Total Items: {queueItems.length}</Text>
 
           <View style={styles.actionsRow}>
@@ -164,6 +266,8 @@ export default function SubmissionQueueScreen() {
               item={item}
               busy={busy}
               onRemove={handleRemoveItem}
+              onEdit={handleEditItem}
+              onOpenMap={handleOpenMapItem}
             />
           ))
         )}
@@ -225,61 +329,5 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 14,
     fontWeight: "700",
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-  },
-  rowBetween: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  itemTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#0f172a",
-  },
-  statusBadge: {
-    borderRadius: 20,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "900",
-    color: "#475569",
-    marginTop: 8,
-    textTransform: "uppercase",
-  },
-  value: {
-    fontSize: 13,
-    color: "#0f172a",
-    marginTop: 2,
-  },
-  itemActionsRow: {
-    flexDirection: "row",
-    marginTop: 14,
-  },
-  smallBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-  },
-  smallBtnText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "800",
   },
 });

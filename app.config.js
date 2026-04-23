@@ -1,11 +1,11 @@
 export default {
   expo: {
-    name: "maps1",
+    name: "iREPS",
     slug: "maps1",
     owner: "ireps",
     version: "1.0.0",
     orientation: "portrait",
-    icon: "./assets/images/icon.png",
+    icon: "./assets/images/ireps-logo1.png",
     scheme: "maps1",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
@@ -15,9 +15,7 @@ export default {
     android: {
       adaptiveIcon: {
         backgroundColor: "#E6F4FE",
-        foregroundImage: "./assets/images/android-icon-foreground.png",
-        backgroundImage: "./assets/images/android-icon-background.png",
-        monochromeImage: "./assets/images/android-icon-monochrome.png",
+        foregroundImage: "./assets/images/ireps-logo1.png",
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,

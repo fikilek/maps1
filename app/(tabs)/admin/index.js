@@ -84,10 +84,22 @@ export default function AdminDashboard() {
             onPress={() => router.push("/(tabs)/admin/storage/ward-erfs-sync")}
           />
           <Card
-            title="Forms Storage"
-            subtitle="Offline forms submission queue"
+            title="Meter Discovery Forms Storage"
+            subtitle="Offline Meter Audit forms queue"
             onPress={() =>
               router.push("/(tabs)/admin/storage/forms-submission-queue")
+            }
+          />
+          <Card
+            title="Sales Storage"
+            subtitle="Offline Sales data"
+            onPress={() => router.push("/(tabs)/admin/storage/sales-sync")}
+          />
+          <Card
+            title="Premise Forms Storage"
+            subtitle="Offline Premise submission queue"
+            onPress={() =>
+              router.push("/(tabs)/admin/storage/premise-offline-storage")
             }
           />
         </Section>

@@ -1,37 +1,45 @@
 import { Octicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { useRouter } from "expo-router";
 import { Formik } from "formik";
 import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
+import { object, string } from "yup";
 
-import BtnForm from "../../components/BtnForm";
-import BtnRouting from "../../components/BtnRouting";
-import KeyboardView from "../../components/KeyboardView";
-import FormContainer from "../../components/forms/FormContainer";
-import FormControlWrappper from "../../components/forms/FormControlWrappper";
-import FormErrorText from "../../components/forms/FormErrorText";
-import FormTitle from "../../components/forms/FormTitle";
-
-import { userSigninValidationSchema } from "../../src/features/userHelper";
 import { auth } from "../../src/firebase";
 import { useSigninMutation } from "../../src/redux/authApi";
 
+const initialValues = {
+  email: "",
+  password: "",
+};
+
+const validationSchema = object().shape({
+  email: string().email("Invalid email address").required("Email is required"),
+  password: string().required("Password is required"),
+});
+
 const Signin = () => {
+  const router = useRouter();
   const [signin, { isLoading: isMutationLoading }] = useSigninMutation();
   const [showPassword, setShowPassword] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
+
   const isLoading = isMutationLoading || isRedirecting;
 
-  const handleSubmit = async (values, { resetForm }) => {
-    // console.log("Signin --values", values);
-
+  const handleSignin = async (values, { resetForm }) => {
     try {
       setIsRedirecting(true);
 
@@ -42,7 +50,6 @@ const Signin = () => {
 
       if (result) {
         await auth.currentUser.getIdToken(true);
-        console.log("Signin ---successful, waiting for AuthGate");
         resetForm();
         return;
       }
@@ -50,62 +57,80 @@ const Signin = () => {
       setIsRedirecting(false);
       Alert.alert("Access Denied", "Invalid credentials.");
     } catch (err) {
-      console.log("Signin ---failed", err);
       setIsRedirecting(false);
       Alert.alert("Access Denied", err?.message || "Invalid credentials.");
     }
   };
 
+  const renderError = (touched, error) => {
+    if (!touched || !error) return null;
+    return <Text style={styles.errorText}>{error}</Text>;
+  };
+
   return (
-    <KeyboardView>
-      <FormContainer>
-        <Image
-          source={require("../../assets/images/login.png")}
-          style={styles.heroImage}
-          contentFit="contain"
-        />
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.logoWrap}>
+          <Image
+            source={require("../../assets/images/login.png")}
+            style={styles.heroImage}
+            contentFit="contain"
+          />
+        </View>
 
-        <Formik
-          initialValues={{ email: "spu@smars.co.za", password: "fkpass123" }}
-          validationSchema={userSigninValidationSchema}
-          onSubmit={handleSubmit}
-        >
-          {({
-            values,
-            errors,
-            touched,
-            handleChange,
-            handleBlur,
-            handleSubmit,
-            resetForm,
-          }) => (
-            <View style={styles.formContent}>
-              <FormTitle title="Signin" />
-              <Text style={styles.subtitle}>
-                Secure access to iREPS Command
-              </Text>
+        <View style={styles.card}>
+          <Text style={styles.title}>Signin</Text>
+          <Text style={styles.subtitle}>Secure access to iREPS Command</Text>
 
-              <View style={{ gap: 15 }}>
-                <FormControlWrappper style={styles.inputGroup}>
-                  <Octicons name="mail" size={18} color="#2563eb" />
-                  <TextInput
-                    placeholder="Command Email"
-                    value={values.email}
-                    onChangeText={handleChange("email")}
-                    onBlur={handleBlur("email")}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    editable={!isLoading}
-                    style={styles.textInput}
-                  />
-                  <FormErrorText touched={touched.email} error={errors.email} />
-                </FormControlWrappper>
+          <Formik
+            initialValues={initialValues}
+            validationSchema={validationSchema}
+            onSubmit={handleSignin}
+          >
+            {({
+              values,
+              errors,
+              touched,
+              handleChange,
+              handleBlur,
+              handleSubmit,
+              resetForm,
+            }) => (
+              <>
+                {/* Email */}
+                <View style={styles.fieldBlock}>
+                  <View style={styles.inputWrap}>
+                    <Octicons name="mail" size={18} color="#2563eb" />
+                    <TextInput
+                      placeholder="Email address"
+                      placeholderTextColor="#9ca3af"
+                      value={values.email}
+                      onChangeText={handleChange("email")}
+                      onBlur={handleBlur("email")}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      editable={!isLoading}
+                      style={styles.textInput}
+                    />
+                  </View>
+                  {renderError(touched.email, errors.email)}
+                </View>
 
-                <View>
-                  <FormControlWrappper style={styles.inputGroup}>
+                {/* Password */}
+                <View style={styles.fieldBlock}>
+                  <View style={styles.inputWrap}>
                     <Octicons name="lock" size={18} color="#2563eb" />
                     <TextInput
                       placeholder="Password"
+                      placeholderTextColor="#9ca3af"
                       value={values.password}
                       onChangeText={handleChange("password")}
                       onBlur={handleBlur("password")}
@@ -113,298 +138,192 @@ const Signin = () => {
                       editable={!isLoading}
                       style={styles.textInput}
                     />
-                    <Octicons
-                      name={showPassword ? "eye" : "eye-closed"}
-                      size={20}
-                      color="#94a3b8"
-                      onPress={() => setShowPassword(!showPassword)}
-                    />
-                  </FormControlWrappper>
-                  <FormErrorText
-                    touched={touched.password}
-                    error={errors.password}
-                  />
+                    <Pressable onPress={() => setShowPassword((prev) => !prev)}>
+                      <Octicons
+                        name={showPassword ? "eye" : "eye-closed"}
+                        size={20}
+                        color="#94a3b8"
+                      />
+                    </Pressable>
+                  </View>
+                  {renderError(touched.password, errors.password)}
 
                   <View style={styles.resetContainer}>
-                    <BtnRouting
-                      destinationRoute="/pwdReset"
-                      title="Lost access?"
-                      color="#64748b"
-                    />
+                    <Pressable
+                      onPress={() => router.push("/pwdReset")}
+                      disabled={isLoading}
+                    >
+                      <Text style={styles.lostAccessText}>Lost access?</Text>
+                    </Pressable>
                   </View>
                 </View>
 
+                {/* Buttons */}
                 <View style={styles.actionRow}>
-                  <BtnForm
-                    title="Reset"
-                    handlePress={resetForm}
-                    type="outline"
-                  />
-                  {isLoading ? (
-                    <ActivityIndicator size="small" color="#2563eb" />
-                  ) : (
-                    <BtnForm title="Signin" handlePress={handleSubmit} />
-                  )}
-                </View>
-              </View>
+                  <TouchableOpacity
+                    style={[styles.button, styles.resetButton]}
+                    onPress={resetForm}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.buttonText}>Reset</Text>
+                  </TouchableOpacity>
 
-              <View style={styles.footer}>
-                <Text style={styles.footerText}>New User?</Text>
-                <BtnRouting destinationRoute="/signup" title="Signup" />
-              </View>
-            </View>
-          )}
-        </Formik>
-      </FormContainer>
-    </KeyboardView>
+                  <TouchableOpacity
+                    style={[
+                      styles.button,
+                      styles.signinButton,
+                      isLoading && styles.buttonDisabled,
+                    ]}
+                    onPress={handleSubmit}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.buttonText}>Signin</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {/* Footer */}
+                <View style={styles.footer}>
+                  <Text style={styles.footerText}>New User?</Text>
+                  <Pressable
+                    onPress={() => router.push("/signup")}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.signupText}>Signup</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </Formik>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
+export default Signin;
+
 const styles = StyleSheet.create({
-  heroImage: { height: 180, marginTop: 20 },
-  formContent: { padding: 20 },
+  screen: {
+    flex: 1,
+    backgroundColor: "#ffffff",
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 40,
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  logoWrap: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  heroImage: {
+    width: "100%",
+    height: 170,
+  },
+  card: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+    textAlign: "center",
+    color: "#111827",
+    marginBottom: 6,
+  },
   subtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#64748b",
     textAlign: "center",
-    marginBottom: 25,
+    marginBottom: 22,
     fontWeight: "500",
   },
-  inputGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 12,
-    backgroundColor: "#f8fafc",
+  fieldBlock: {
+    marginBottom: 14,
+  },
+  inputWrap: {
+    minHeight: 52,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
   },
   textInput: {
     flex: 1,
-    height: 48,
+    minHeight: 48,
     fontSize: 15,
     color: "#1e293b",
+    marginLeft: 10,
     fontWeight: "600",
   },
-  resetContainer: { alignItems: "flex-end", marginTop: 4 },
+  errorText: {
+    marginTop: 5,
+    marginLeft: 4,
+    color: "#dc2626",
+    fontSize: 12,
+  },
+  resetContainer: {
+    alignItems: "flex-end",
+    marginTop: 6,
+  },
+  lostAccessText: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: "500",
+  },
   actionRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    marginTop: 18,
+  },
+  button: {
+    flex: 1,
+    height: 50,
+    borderRadius: 10,
+    justifyContent: "center",
     alignItems: "center",
-    marginTop: 20,
+  },
+  resetButton: {
+    backgroundColor: "#64748b",
+    marginRight: 8,
+  },
+  signinButton: {
+    backgroundColor: "#2563eb",
+    marginLeft: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
   },
   footer: {
     flexDirection: "row",
     justifyContent: "center",
-    gap: 8,
-    marginTop: 30,
+    alignItems: "center",
+    gap: 6,
+    marginTop: 24,
   },
-  footerText: { fontSize: 13, color: "#64748b" },
+  footerText: {
+    fontSize: 13,
+    color: "#64748b",
+  },
+  signupText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2563eb",
+  },
 });
-
-export default Signin;
-
-// import { Octicons } from "@expo/vector-icons";
-// import { Image } from "expo-image";
-// import { Formik } from "formik";
-// import { useState } from "react";
-// import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
-
-// import BtnForm from "../../components/BtnForm";
-// import BtnRouting from "../../components/BtnRouting";
-// import KeyboardView from "../../components/KeyboardView";
-// import FormContainer from "../../components/forms/FormContainer";
-// import FormControlWrappper from "../../components/forms/FormControlWrappper";
-// import FormErrorText from "../../components/forms/FormErrorText";
-// import FormTitle from "../../components/forms/FormTitle";
-
-// import { useRouter } from "expo-router";
-// import { userSigninValidationSchema } from "../../src/features/userHelper";
-// import { auth } from "../../src/firebase";
-// import { useSigninMutation } from "../../src/redux/authApi";
-
-// const signinInitialValues = {
-//   email: "spu@smars.co.za",
-//   password: "fkpass123",
-// };
-
-// const Signin = () => {
-//   const [signin, { isLoading: isMutationLoading }] = useSigninMutation();
-//   const [showPassword, setShowPassword] = useState(false);
-//   const [isRedirecting, setIsRedirecting] = useState(false); // New state
-//   // Combine them for the UI
-//   const isLoading = isMutationLoading || isRedirecting;
-
-//   const router = useRouter();
-
-//   const handleSubmit = async (values, { resetForm }) => {
-//     // console.log(`Signin ----handleSubmit ----values`, values);
-//     try {
-//       setIsRedirecting(true); // Start the spinner
-//       const signinResult = await signin({
-//         email: values.email.toLowerCase().trim(),
-//         password: values.password,
-//       });
-//       // console.log(`Signin ----handleSubmit ----signinResult`, signinResult);
-
-//       if (signinResult.data) {
-//         // IMPORTANT: Do NOT set isRedirecting(false) here.
-//         // Let the AuthGate handle the transition while we keep spinning.
-//         await auth.currentUser.getIdToken(true); // 🔑 force refresh
-//         const tokenResult = await auth.currentUser.getIdTokenResult();
-//         // console.log(`Signin ----handleSubmit ----tokenResult`, tokenResult);
-
-//         setIsRedirecting(false);
-//         router.replace("/(tabs)/erfs");
-//         resetForm();
-//       } else {
-//         setIsRedirecting(false); // Only stop spinning if it failed
-//         Alert.alert("Sign In Failed");
-//         router.replace("/(tabs)/erfs");
-//       }
-//     } catch {
-//       setIsRedirecting(false);
-//       Alert.alert("Error");
-//     }
-//   };
-
-//   return (
-//     <KeyboardView>
-//       <FormContainer>
-//         {/* Signin image */}
-//         <Image
-//           source={require("../../assets/images/login.png")}
-//           style={{ height: 200 }}
-//           contentFit="contain"
-//         />
-
-//         <Formik
-//           initialValues={signinInitialValues}
-//           validationSchema={userSigninValidationSchema}
-//           onSubmit={handleSubmit}
-//         >
-//           {({
-//             values,
-//             errors,
-//             touched,
-//             handleChange,
-//             handleBlur,
-//             handleSubmit,
-//             resetForm,
-//           }) => (
-//             <View style={{ margin: 10 }}>
-//               <FormTitle title="Signin" />
-
-//               <View style={{ gap: 20 }}>
-//                 {/* Email */}
-//                 <FormControlWrappper>
-//                   <View
-//                     style={{
-//                       flexDirection: "row",
-//                       alignItems: "center",
-//                       gap: 10,
-//                     }}
-//                   >
-//                     <Octicons name="mail" size={20} color="gray" />
-//                     <TextInput
-//                       placeholder="Email Address"
-//                       placeholderTextColor="gray"
-//                       value={values.email}
-//                       onChangeText={handleChange("email")}
-//                       onBlur={handleBlur("email")}
-//                       autoCapitalize="none"
-//                       keyboardType="email-address"
-//                       editable={!isLoading}
-//                       style={{ flex: 1, fontSize: 14 }}
-//                     />
-//                   </View>
-//                   <FormErrorText touched={touched.email} error={errors.email} />
-//                 </FormControlWrappper>
-
-//                 {/* Password */}
-//                 <View>
-//                   <FormControlWrappper>
-//                     <View
-//                       style={{
-//                         flexDirection: "row",
-//                         alignItems: "center",
-//                         gap: 10,
-//                       }}
-//                     >
-//                       <Octicons name="lock" size={20} color="gray" />
-//                       <TextInput
-//                         placeholder="Password"
-//                         placeholderTextColor="gray"
-//                         value={values.password}
-//                         onChangeText={handleChange("password")}
-//                         onBlur={handleBlur("password")}
-//                         secureTextEntry={!showPassword}
-//                         editable={!isLoading}
-//                         style={{ flex: 1, fontSize: 14 }}
-//                       />
-//                       <Octicons
-//                         name={showPassword ? "eye" : "eye-closed"}
-//                         size={22}
-//                         color="#aaa"
-//                         onPress={() => setShowPassword((prev) => !prev)}
-//                       />
-//                     </View>
-//                     <FormErrorText
-//                       touched={touched.password}
-//                       error={errors.password}
-//                     />
-//                   </FormControlWrappper>
-
-//                   <View style={{ alignItems: "flex-end" }}>
-//                     <BtnRouting
-//                       destinationRoute="/pwdReset"
-//                       title="Password Reset"
-//                     />
-//                   </View>
-//                 </View>
-
-//                 {/* Buttons */}
-//                 <View
-//                   style={{
-//                     flexDirection: "row",
-//                     justifyContent: "space-around",
-//                   }}
-//                 >
-//                   <BtnForm
-//                     title="Reset"
-//                     handlePress={resetForm}
-//                     isLoading={isLoading}
-//                   />
-
-//                   {isLoading ? (
-//                     <ActivityIndicator size="large" color="black" />
-//                   ) : (
-//                     <BtnForm title="Submit" handlePress={handleSubmit} />
-//                   )}
-//                 </View>
-//               </View>
-
-//               {/* Signup link */}
-//               <View
-//                 style={{
-//                   flexDirection: "row",
-//                   gap: 4,
-//                   justifyContent: "center",
-//                   marginTop: 20,
-//                 }}
-//               >
-//                 <Text style={{ fontSize: 12, fontWeight: "500" }}>
-//                   Do NOT have an account?
-//                 </Text>
-//                 <BtnRouting destinationRoute="/signup" title="Signup" />
-//               </View>
-//             </View>
-//           )}
-//         </Formik>
-//       </FormContainer>
-//     </KeyboardView>
-//   );
-// };
-
-// export default Signin;

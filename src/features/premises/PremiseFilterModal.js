@@ -32,6 +32,72 @@ export const PremiseFilterModal = ({
       .sort((a, b) => a.type.localeCompare(b.type));
   }, [allData]);
 
+  const geofenceStats = useMemo(() => {
+    const statsMap = {};
+
+    (allData?.prems || []).forEach((premise) => {
+      const refs = Array.isArray(premise?.geofenceRefs)
+        ? premise.geofenceRefs
+        : [];
+
+      refs.forEach((gf) => {
+        if (!gf?.id) return;
+
+        if (!statsMap[gf.id]) {
+          statsMap[gf.id] = {
+            id: gf.id,
+            name: gf.name || gf.id,
+            count: 0,
+          };
+        }
+
+        statsMap[gf.id].count += 1;
+      });
+    });
+
+    return Object.values(statsMap).sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || "")),
+    );
+  }, [allData?.prems]);
+
+  // const geofenceStats = useMemo(() => {
+  //   const geofenceMap = {};
+  //   const sourceGeofences = allData?.geofences || [];
+
+  //   sourceGeofences.forEach((gf) => {
+  //     if (!gf?.id) return;
+  //     geofenceMap[gf.id] = gf;
+  //   });
+
+  //   const statsMap = {};
+
+  //   (allData?.prems || []).forEach((premise) => {
+  //     const ids = Array.isArray(premise?.geofenceIds)
+  //       ? premise.geofenceIds
+  //       : [];
+
+  //     ids.forEach((geofenceId) => {
+  //       if (!geofenceId) return;
+
+  //       if (!statsMap[geofenceId]) {
+  //         const geofence = geofenceMap[geofenceId];
+
+  //         statsMap[geofenceId] = {
+  //           id: geofenceId,
+  //           name: geofence?.name || geofence?.description,
+  //           count: 0,
+  //         };
+  //       }
+
+  //       statsMap[geofenceId].count += 1;
+  //     });
+  //   });
+
+  //   return Object.values(statsMap).sort((a, b) =>
+  //     String(a.name || "").localeCompare(String(b.name || "")),
+  //   );
+  // }, [allData?.prems, allData?.geofences]);
+
   const toggleType = (type) => {
     setFilterState((prev) => {
       const activeTypes = prev?.propertyTypes || [];
@@ -45,20 +111,30 @@ export const PremiseFilterModal = ({
     });
   };
 
-  // Inside PremiseFilterModal
-  const toggleWard = (wardName) => {
-    const current = filterState.wards || [];
-    const next = current.includes(wardName)
-      ? current.filter((w) => w !== wardName)
-      : [...current, wardName];
+  const toggleGeofence = (geofenceId) => {
+    setFilterState((prev) => {
+      const activeIds = prev?.geofenceIds || [];
+      const isSelected = activeIds.includes(geofenceId);
 
-    setFilterState((prev) => ({
-      ...prev,
-      wards: next,
-    }));
+      return {
+        ...prev,
+        geofenceIds: isSelected
+          ? activeIds.filter((id) => id !== geofenceId)
+          : [...activeIds, geofenceId],
+      };
+    });
   };
 
-  const resetFilters = () => setFilterState({ propertyTypes: [] });
+  const resetFilters = () =>
+    setFilterState({
+      searchQuery: "",
+      propertyTypes: [],
+      occupancyStatuses: [],
+      geofenceIds: [],
+      electricityMeterCounts: [],
+      waterMeterCounts: [],
+      noAccessCounts: [],
+    });
 
   return (
     <Portal>
@@ -114,42 +190,50 @@ export const PremiseFilterModal = ({
             })}
           </List.Section>
 
-          <List.Section title="2. Ward Distribution">
-            {stats.wardFilterList?.map((item, index) => {
-              const isSelected = filterState?.wards?.includes(item.name);
-
-              return (
-                <View key={item.name}>
-                  <List.Item
-                    title={`${index + 1}. ${item.name}`}
-                    titleStyle={[
-                      styles.typeTitle,
-                      isSelected && styles.selectedText,
-                    ]}
-                    right={() => (
-                      <View style={styles.rightContainer}>
-                        <Text
-                          style={[
-                            styles.countBadge,
-                            isSelected && styles.selectedCount,
-                          ]}
-                        >
-                          {item.count}
-                        </Text>
-                        <Checkbox
-                          status={isSelected ? "checked" : "unchecked"}
-                          onPress={() => toggleWard(item.name)}
-                          color="#2563eb"
-                        />
-                      </View>
-                    )}
-                    onPress={() => toggleWard(item.name)}
-                    style={[styles.rowItem, isSelected && styles.selectedRow]}
-                  />
-                  <Divider style={styles.divider} />
-                </View>
-              );
-            })}
+          <List.Section title="2. Geofence Membership">
+            {geofenceStats.length === 0 ? (
+              <View style={styles.emptySectionWrap}>
+                <Text style={styles.emptySectionText}>
+                  No geofence-linked premises found.
+                </Text>
+              </View>
+            ) : (
+              geofenceStats.map((item, index) => {
+                const isSelected = filterState?.geofenceIds?.includes(item.id);
+                console.log(`item`, item);
+                return (
+                  <View key={item.id}>
+                    <List.Item
+                      title={`${index + 1}. ${item.name}`}
+                      titleStyle={[
+                        styles.typeTitle,
+                        isSelected && styles.selectedText,
+                      ]}
+                      right={() => (
+                        <View style={styles.rightContainer}>
+                          <Text
+                            style={[
+                              styles.countBadge,
+                              isSelected && styles.selectedCount,
+                            ]}
+                          >
+                            {item.count}
+                          </Text>
+                          <Checkbox
+                            status={isSelected ? "checked" : "unchecked"}
+                            onPress={() => toggleGeofence(item.id)}
+                            color="#2563eb"
+                          />
+                        </View>
+                      )}
+                      onPress={() => toggleGeofence(item.id)}
+                      style={[styles.rowItem, isSelected && styles.selectedRow]}
+                    />
+                    <Divider style={styles.divider} />
+                  </View>
+                );
+              })
+            )}
           </List.Section>
         </ScrollView>
 
@@ -223,5 +307,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 6,
     backgroundColor: "#2563eb",
+  },
+  rowDescription: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  emptySectionWrap: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+
+  emptySectionText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    fontWeight: "600",
   },
 });

@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -21,6 +22,7 @@ import {
   useGetLmsByCountryQuery,
   useGetWardsByLocalMunicipalityQuery,
 } from "../src/redux/geoApi";
+import ConnectionStatusLine from "./ConnectionStatusLine";
 
 export default function AppHeader({ title }) {
   const [menuVisible, setMenuVisible] = useState(false);
@@ -30,13 +32,26 @@ export default function AppHeader({ title }) {
   const [draftWard, setDraftWard] = useState(null);
   const [switchingScope, setSwitchingScope] = useState(false);
 
+  const [isConnected, setIsConnected] = useState(true);
+
   const { geoState, setActiveWorkbaseWard } = useGeo();
   const { activeWorkbase, profile, user, isSPU } = useAuth();
+
   const [signout] = useSignoutMutation();
   const [updateProfile] = useUpdateProfileMutation();
   const router = useRouter();
 
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const online = !!state.isConnected && !!state.isInternetReachable;
+      setIsConnected(online);
+    });
+
+    return unsubscribe;
+  }, []);
+
   const countryId = "ZA";
+
   const { data: allLms = [] } = useGetLmsByCountryQuery(countryId, {
     skip: !isSPU,
   });
@@ -59,6 +74,7 @@ export default function AppHeader({ title }) {
 
   function normalizeLm(wb) {
     if (!wb) return null;
+
     return {
       id: wb?.id || wb?.pcode || null,
       pcode: wb?.pcode || wb?.id || null,
@@ -69,6 +85,7 @@ export default function AppHeader({ title }) {
 
   function normalizeWard(ward) {
     if (!ward) return null;
+
     return {
       id: ward?.id || ward?.pcode || null,
       pcode: ward?.pcode || ward?.id || null,
@@ -118,6 +135,7 @@ export default function AppHeader({ title }) {
 
   useEffect(() => {
     if (!wbModalVisible) return;
+
     setDraftLm(currentLm || null);
     setDraftWard(currentWard || null);
   }, [wbModalVisible, currentLm?.id, currentWard?.id]);
@@ -136,7 +154,7 @@ export default function AppHeader({ title }) {
     if (draftLm?.id === lm.id) return;
 
     setDraftLm(lm);
-    setDraftWard(null); // critical: ward must be chosen again for the new LM
+    setDraftWard(null);
   };
 
   const handleSelectWard = (ward) => {
@@ -154,19 +172,15 @@ export default function AppHeader({ title }) {
         name: draftLm.name,
       };
 
-      // 1. close modal immediately
       closeWbModal();
 
-      // 2. update GeoContext immediately with complete scope
       setActiveWorkbaseWard({
         lm: draftLm.raw || draftLm,
         ward: draftWard.raw || draftWard,
       });
 
-      // 3. navigate immediately
       router.replace("/(tabs)/erfs");
 
-      // 4. persist active workbase pointer
       await updateProfile({
         uid: user.uid,
         updates: { "access.activeWorkbase": wbPointer },
@@ -180,12 +194,10 @@ export default function AppHeader({ title }) {
 
   return (
     <View style={styles.container}>
-      {/* 🎯 LEFT: TITLE */}
       <View style={styles.leftCol}>
         <Text style={styles.tabTitle}>{title}</Text>
       </View>
 
-      {/* 🎯 CENTER: LM / WARD SELECTOR */}
       <TouchableOpacity
         style={styles.centerCol}
         onPress={() => setWbModalVisible(true)}
@@ -208,7 +220,6 @@ export default function AppHeader({ title }) {
         </View>
       </TouchableOpacity>
 
-      {/* 🎯 RIGHT: PROFILE ANCHOR */}
       <View style={styles.rightCol}>
         <View style={styles.roleBadge}>
           <Text style={styles.roleText}>{role}</Text>
@@ -222,7 +233,6 @@ export default function AppHeader({ title }) {
         </TouchableOpacity>
       </View>
 
-      {/* 🏛️ USER MENU MODAL */}
       <Modal
         visible={menuVisible}
         transparent
@@ -240,7 +250,9 @@ export default function AppHeader({ title }) {
                   router.push("/admin/user/user-settings");
                 }}
               />
+
               <View style={styles.divider} />
+
               <MenuOption
                 icon="logout"
                 label="Sign Out"
@@ -255,7 +267,6 @@ export default function AppHeader({ title }) {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* 🏛️ WORKBASE / WARD SELECTION MODAL */}
       <Modal
         visible={wbModalVisible}
         transparent
@@ -273,7 +284,6 @@ export default function AppHeader({ title }) {
                 </Text>
 
                 <View style={styles.scopeColumns}>
-                  {/* LEFT COLUMN: LMS */}
                   <View style={styles.scopeColLeft}>
                     <Text style={styles.scopeColHeader}>WORKBASES</Text>
 
@@ -312,7 +322,6 @@ export default function AppHeader({ title }) {
                     </ScrollView>
                   </View>
 
-                  {/* RIGHT COLUMN: WARDS */}
                   <View style={styles.scopeColRight}>
                     <Text style={styles.scopeColHeader}>WARDS</Text>
 
@@ -408,6 +417,8 @@ export default function AppHeader({ title }) {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      <ConnectionStatusLine isOnline={isConnected} />
     </View>
   );
 }
@@ -430,10 +441,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: "#e2e8f0",
     zIndex: 10,
+    position: "relative",
   },
+
   leftCol: { flex: 1.2 },
-  tabTitle: { fontSize: 18, fontWeight: "900", color: "#1e293b" },
-  centerCol: { flex: 2, alignItems: "center" },
+
+  tabTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#1e293b",
+  },
+
+  centerCol: {
+    flex: 2,
+    alignItems: "center",
+  },
+
   wbBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -444,7 +467,14 @@ const styles = StyleSheet.create({
     gap: 4,
     maxWidth: "100%",
   },
-  wbText: { fontSize: 14, fontWeight: "800", color: "#2563eb", maxWidth: 170 },
+
+  wbText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#2563eb",
+    maxWidth: 170,
+  },
+
   rightCol: {
     flex: 1.5,
     flexDirection: "row",
@@ -452,6 +482,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: 8,
   },
+
   roleBadge: {
     backgroundColor: "#f1f5f9",
     paddingHorizontal: 6,
@@ -460,12 +491,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
   },
+
   roleText: {
     fontSize: 12,
     fontWeight: "900",
     color: "#64748b",
     letterSpacing: 0.5,
   },
+
   profileBtn: {
     width: 38,
     height: 38,
@@ -474,13 +507,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  initialsText: { color: "#fff", fontSize: 13, fontWeight: "900" },
+
+  initialsText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.4)",
     justifyContent: "center",
     alignItems: "center",
   },
+
   menuBox: {
     position: "absolute",
     top: 90,
@@ -493,6 +533,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#f1f5f9",
   },
+
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -500,8 +541,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
-  menuItemText: { fontSize: 14, fontWeight: "700" },
-  divider: { height: 1, backgroundColor: "#f1f5f9", marginVertical: 4 },
+
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: "#f1f5f9",
+    marginVertical: 4,
+  },
 
   scopeModalBox: {
     backgroundColor: "#fff",
@@ -513,6 +563,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     elevation: 20,
   },
+
   modalHeader: {
     fontSize: 10,
     fontWeight: "900",
@@ -522,12 +573,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: "center",
   },
+
   scopeColumns: {
     flexDirection: "row",
     gap: 12,
     minHeight: 280,
     maxHeight: 360,
   },
+
   scopeColLeft: {
     flex: 1,
     borderWidth: 1,
@@ -536,6 +589,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#fff",
   },
+
   scopeColRight: {
     flex: 1,
     borderWidth: 1,
@@ -544,6 +598,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#fff",
   },
+
   scopeColHeader: {
     fontSize: 10,
     fontWeight: "900",
@@ -555,6 +610,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#e2e8f0",
   },
+
   scopeOption: {
     flexDirection: "row",
     alignItems: "center",
@@ -565,20 +621,29 @@ const styles = StyleSheet.create({
     marginTop: 6,
     gap: 12,
   },
-  scopeOptionActive: { backgroundColor: "#eff6ff" },
+
+  scopeOptionActive: {
+    backgroundColor: "#eff6ff",
+  },
+
   scopeOptionText: {
     fontSize: 15,
     fontWeight: "700",
     color: "#475569",
     flex: 1,
   },
-  scopeOptionTextActive: { color: "#2563eb" },
+
+  scopeOptionTextActive: {
+    color: "#2563eb",
+  },
+
   scopeEmptyBox: {
     padding: 16,
     margin: 10,
     borderRadius: 10,
     backgroundColor: "#f8fafc",
   },
+
   scopeLoadingBox: {
     padding: 16,
     margin: 10,
@@ -588,17 +653,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
+
   scopeEmptyText: {
     fontSize: 13,
     fontWeight: "600",
     color: "#64748b",
   },
+
   scopeFooter: {
     marginTop: 14,
     borderTopWidth: 1,
     borderTopColor: "#f1f5f9",
     paddingTop: 12,
   },
+
   scopeSelectedText: {
     fontSize: 13,
     fontWeight: "800",
@@ -606,10 +674,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 12,
   },
+
   scopeBtnRow: {
     flexDirection: "row",
     gap: 10,
   },
+
   scopeCancelBtn: {
     flex: 1,
     borderWidth: 1,
@@ -620,11 +690,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#fff",
   },
+
   scopeCancelBtnText: {
     fontSize: 14,
     fontWeight: "800",
     color: "#475569",
   },
+
   scopeConfirmBtn: {
     flex: 1,
     borderRadius: 10,
@@ -633,9 +705,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#2563eb",
   },
+
   scopeConfirmBtnDisabled: {
     backgroundColor: "#cbd5e1",
   },
+
   scopeConfirmBtnText: {
     fontSize: 14,
     fontWeight: "900",

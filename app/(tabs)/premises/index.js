@@ -11,9 +11,9 @@ import { useGeo } from "../../../src/context/GeoContext";
 import { usePremiseFilter } from "../../../src/context/PremiseFilterContext";
 import { useWarehouse } from "../../../src/context/WarehouseContext";
 import PremiseCard from "../../../src/features/premises/PremiseCard";
+import { filterPremises } from "../../../src/features/premises/filterPremises";
 
 export default function PremisesScreen() {
-  console.log(`PremisesScreen --mounting`);
   const router = useRouter();
   const { all, loading, scopeState } = useWarehouse();
   // console.log(`all.prems?.length`, all.prems?.length);
@@ -51,34 +51,8 @@ export default function PremisesScreen() {
   // console.log(`basePremises?.length`, basePremises?.length);
 
   const displayPremises = useMemo(() => {
-    let list = [...basePremises];
-
-    if (filterState?.propertyTypes?.length > 0) {
-      list = list.filter((p) =>
-        filterState.propertyTypes.includes(p?.propertyType?.type),
-      );
-    }
-
-    if (filterState?.searchQuery) {
-      const query = String(filterState.searchQuery || "")
-        .toLowerCase()
-        .trim();
-
-      list = list.filter((p) => {
-        const strName = p?.address?.strName?.toLowerCase() || "";
-        const strNo = String(p?.address?.strNo || "").toLowerCase();
-        const erfNo = String(p?.erfNo || "").toLowerCase();
-
-        return (
-          strName.includes(query) ||
-          strNo.includes(query) ||
-          erfNo.includes(query)
-        );
-      });
-    }
-
-    return list;
-  }, [basePremises, filterState?.propertyTypes, filterState?.searchQuery]);
+    return filterPremises(basePremises, filterState);
+  }, [basePremises, filterState]);
 
   const handleMapPress = useCallback(
     (p) => {
@@ -108,11 +82,9 @@ export default function PremisesScreen() {
   const handleDiscover = useCallback(
     (p) => {
       const parentErf = erfById[p?.erfId] || null;
-      console.log(`PremiseCard - parentErf`, parentErf);
-      console.log(`PremiseCard - premise`, p);
 
       updateGeo({
-        selectedErf: parentErf || { id: p?.erfId, erfNo: p?.erfNo },
+        selectedErf: parentErf || null,
         selectedPremise: p,
         lastSelectionType: "PREMISE",
       });

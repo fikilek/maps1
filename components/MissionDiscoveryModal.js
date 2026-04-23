@@ -21,7 +21,7 @@ export default function MissionDiscoveryModal() {
     closeMissionDiscovery();
 
     updateGeo({
-      selectedPremise: mission?.premise || { id: premiseId },
+      selectedPremise: mission?.premise || null,
       lastSelectionType: "PREMISE",
     });
 
@@ -38,7 +38,7 @@ export default function MissionDiscoveryModal() {
     closeMissionDiscovery();
 
     updateGeo({
-      selectedPremise: mission?.premise || { id: premiseId },
+      selectedPremise: mission?.premise || null,
       lastSelectionType: "PREMISE",
     });
 
@@ -55,7 +55,7 @@ export default function MissionDiscoveryModal() {
     closeMissionDiscovery();
 
     updateGeo({
-      selectedPremise: mission?.premise || { id: premiseId },
+      selectedPremise: mission?.premise || null,
       lastSelectionType: "PREMISE",
     });
 

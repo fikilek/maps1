@@ -48,8 +48,6 @@ function MapScopeState({ title, subtitle }) {
 }
 
 export default function MapsScreen() {
-  console.log(`MapsScreen --mounting`);
-
   const { mapRef, flyTo } = useMap();
   const { geoState, updateGeo } = useGeo();
   const { all, sync } = useWarehouse();
@@ -64,6 +62,7 @@ export default function MapsScreen() {
   const [mapType, setMapType] = useState("standard");
 
   const [gcsModalOpen, setGcsModalOpen] = useState(false);
+  const [selectedGeofence, setSelectedGeofence] = useState(null);
 
   const [showLayers, setShowLayers] = useState({
     erfs: true,
@@ -204,6 +203,92 @@ export default function MapsScreen() {
   START - Marker Drag Moodal
   */
 
+  const handleSelectGeofence = useCallback(
+    (gf) => {
+      setSelectedGeofence(gf || null);
+
+      if (!gf) return;
+
+      if (gf?.geometry?.bbox) {
+        const bbox = gf.geometry.bbox;
+
+        flyTo({
+          minLat: bbox.minLatitude,
+          maxLat: bbox.maxLatitude,
+          minLng: bbox.minLongitude,
+          maxLng: bbox.maxLongitude,
+        });
+
+        return;
+      }
+
+      const points = Array.isArray(gf?.geometry?.points)
+        ? [...gf.geometry.points]
+            .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))
+            .map((pt) => ({
+              latitude: pt?.latitude,
+              longitude: pt?.longitude,
+            }))
+            .filter(
+              (pt) =>
+                typeof pt.latitude === "number" &&
+                typeof pt.longitude === "number",
+            )
+        : [];
+
+      if (points.length > 0) {
+        mapRef.current?.fitToCoordinates(points, {
+          edgePadding: { top: 70, right: 70, bottom: 70, left: 70 },
+          animated: true,
+        });
+      }
+    },
+    [flyTo, mapRef],
+  );
+
+  // const handleSelectGeofence = useCallback(
+  //   (gf) => {
+  //     setSelectedGeofence(gf || null);
+
+  //     if (!gf) return;
+
+  //     if (gf?.geometry?.bbox) {
+  //       const bbox = gf.geometry.bbox;
+
+  //       flyTo({
+  //         minLat: bbox.minLatitude,
+  //         maxLat: bbox.maxLatitude,
+  //         minLng: bbox.minLongitude,
+  //         maxLng: bbox.maxLongitude,
+  //       });
+
+  //       return;
+  //     }
+
+  //     const points = Array.isArray(gf?.geometry?.points)
+  //       ? [...gf.geometry.points]
+  //           .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))
+  //           .map((pt) => ({
+  //             latitude: pt?.latitude,
+  //             longitude: pt?.longitude,
+  //           }))
+  //           .filter(
+  //             (pt) =>
+  //               typeof pt.latitude === "number" &&
+  //               typeof pt.longitude === "number",
+  //           )
+  //       : [];
+
+  //     if (points.length > 0) {
+  //       mapRef.current?.fitToCoordinates(points, {
+  //         edgePadding: { top: 70, right: 70, bottom: 70, left: 70 },
+  //         animated: true,
+  //       });
+  //     }
+  //   },
+  //   [flyTo, mapRef],
+  // );
+
   const handleClosePremiseActionModal = useCallback(() => {
     setPremiseActionPrem(null);
   }, []);
@@ -217,7 +302,7 @@ export default function MapsScreen() {
     console.log(`Map - premise`, prem);
 
     updateGeo({
-      selectedErf: parentErf || { id: prem?.erfId, erfNo: prem?.erfNo },
+      selectedErf: parentErf || null,
       selectedPremise: prem,
       lastSelectionType: "PREMISE",
     });
@@ -246,11 +331,6 @@ export default function MapsScreen() {
   const handleSelectedErfPress = useCallback(() => {
     const selectedErf = geoState?.selectedErf;
     if (!selectedErf?.id) return;
-
-    // updateGeo({
-    //   selectedErf,
-    //   lastSelectionType: "ERF",
-    // });
 
     router.push({
       pathname: "/(tabs)/premises/formPremise",
@@ -475,6 +555,34 @@ export default function MapsScreen() {
     });
   };
 
+  const renderSelectedGeofence = () => {
+    if (!selectedGeofence?.geometry?.points?.length) return null;
+
+    const coords = [...selectedGeofence.geometry.points]
+      .sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))
+      .map((pt) => ({
+        latitude: pt?.latitude,
+        longitude: pt?.longitude,
+      }))
+      .filter(
+        (pt) =>
+          typeof pt.latitude === "number" && typeof pt.longitude === "number",
+      );
+
+    if (coords.length < 3) return null;
+
+    return (
+      <Polygon
+        key={`selected-geofence-${selectedGeofence?.id}`}
+        coordinates={coords}
+        strokeColor="#dc2626"
+        fillColor="rgba(239, 68, 68, 0.12)"
+        strokeWidth={3}
+        zIndex={950}
+      />
+    );
+  };
+
   const renderSelectedErf = () => {
     const selectedId = geoState?.selectedErf?.id;
     if (!selectedId) return null;
@@ -605,12 +713,6 @@ export default function MapsScreen() {
               onPress={(e) => {
                 // e?.stopPropagation?.();
                 updateGeo({ selectedErf: erf, lastSelectionType: "ERF" });
-                // router.push({
-                //   pathname: "/premises/formPremise",
-                //   params: {
-                //     id: erf?.id,
-                //   },
-                // });
               }}
             />
           </React.Fragment>
@@ -833,6 +935,7 @@ export default function MapsScreen() {
       >
         {renderLM()}
         {renderWards()}
+        {renderSelectedGeofence()}
         {renderSelectedErf()}
         {renderAssetLink()}
         {renderSelectedPremise()}
@@ -860,9 +963,15 @@ export default function MapsScreen() {
         />
       ) : null}
 
-      <View style={styles.gcsOverlay}>
+      <GeoCascadingSelector
+        onModalStateChange={setGcsModalOpen}
+        onSelectGeofence={handleSelectGeofence}
+        selectedGeofence={selectedGeofence}
+      />
+
+      {/* <View style={styles.gcsOverlay}>
         <GeoCascadingSelector onModalStateChange={setGcsModalOpen} />
-      </View>
+      </View> */}
 
       <View style={styles.layerControl}>
         <TouchableOpacity

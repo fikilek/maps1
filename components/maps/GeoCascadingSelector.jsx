@@ -13,8 +13,13 @@ import { Button, Modal, Portal, Searchbar, Surface } from "react-native-paper";
 import { useGeo } from "../../src/context/GeoContext";
 import { useMap } from "../../src/context/MapContext";
 import { useWarehouse } from "../../src/context/WarehouseContext";
+import { useGetGeoFencesByLmPcodeWardPcodeQuery } from "../../src/redux/geofenceApi";
 
-export default function GeoCascadingSelector({ onModalStateChange }) {
+export default function GeoCascadingSelector({
+  onModalStateChange,
+  onSelectGeofence,
+  selectedGeofence,
+}) {
   console.log(``);
   console.log(``);
   console.log(``);
@@ -25,6 +30,8 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
   //   `GeoCascadingSelector all?.meters.slice(0,2)`,
   //   all?.meters.slice(0, 2),
   // );
+  // const { profile } = useAuth();
+  // console.log(`profile`, profile);
 
   const erfById = useMemo(() => {
     return new Map((all?.erfs || []).map((e) => [e.id, e]));
@@ -38,7 +45,10 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
   const [showErfs, setShowErfs] = useState(false);
   const [showPrems, setShowPrems] = useState(false);
   const [showMeters, setShowMeters] = useState(false);
-  const anyModalOpen = showWards || showErfs || showPrems || showMeters;
+  const [showGeofences, setShowGeofences] = useState(false);
+  const anyModalOpen =
+    showWards || showGeofences || showErfs || showPrems || showMeters;
+  // const anyModalOpen = showWards || showErfs || showPrems || showMeters;
 
   const [erfSearchQuery, setErfSearchQuery] = useState("");
   const [premSearchQuery, setPremSearchQuery] = useState("");
@@ -51,6 +61,14 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
     selectedPremise,
     selectedMeter,
   } = geoState;
+
+  const lmPcode = selectedLm?.id || null;
+  const wardPcode = selectedWard?.id || null;
+
+  const { data: wardGeofences = [] } = useGetGeoFencesByLmPcodeWardPcodeQuery(
+    { lmPcode, wardPcode },
+    { skip: !lmPcode || !wardPcode },
+  );
 
   const canOpenWardSelector = !!selectedLm?.id;
 
@@ -76,6 +94,16 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
       );
     });
   }, [all?.wards]);
+
+  const geofenceOptions = useMemo(() => {
+    return [...wardGeofences]
+      .filter((gf) => gf?.status === "ACTIVE")
+      .sort((a, b) =>
+        String(a?.description || a?.name || a?.id || "").localeCompare(
+          String(b?.description || b?.name || b?.id || ""),
+        ),
+      );
+  }, [wardGeofences]);
 
   const erfOptions = useMemo(() => {
     let base = [...(all?.erfs || [])];
@@ -181,6 +209,7 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
   // -----------------------------
 
   const handleLmReset = () => {
+    console.log(`handleLmReset --selectedLm`, selectedLm);
     if (!selectedLm?.id) return;
 
     updateGeo({
@@ -200,6 +229,11 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
       lastSelectionType: "WARD",
     });
     setShowWards(false);
+  };
+
+  const selectGeofence = (gf) => {
+    onSelectGeofence?.(gf || null);
+    setShowGeofences(false);
   };
 
   const selectErf = (erf) => {
@@ -295,6 +329,8 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 
   const erfLabelStr = selectedErf?.erfNo ? `Erf ${selectedErf?.erfNo}` : "Erf";
 
+  const geofenceLabelStr = selectedGeofence?.name || "GF";
+
   return (
     <>
       <Portal>
@@ -362,6 +398,75 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
                 );
               })}
             </ScrollView>
+          </Surface>
+        </Modal>
+
+        {/* GEOFENCE MODAL */}
+        <Modal
+          visible={showGeofences}
+          onDismiss={() => setShowGeofences(false)}
+          contentContainerStyle={styles.modalContainer}
+        >
+          <Surface style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              {`Geofences (${geofenceOptions?.length})`}
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.wardItem,
+                !selectedGeofence && { backgroundColor: "#f1f5f9" },
+              ]}
+              onPress={() => {
+                onSelectGeofence?.(null);
+                setShowGeofences(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.wardText,
+                  { fontWeight: "800", color: "#6366f1" },
+                ]}
+              >
+                All Geofences (Clear Boundary)
+              </Text>
+            </TouchableOpacity>
+
+            <FlatList
+              data={geofenceOptions}
+              keyExtractor={(item) => item?.id}
+              style={{ maxHeight: 400 }}
+              renderItem={({ item: gf }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.wardItem,
+                    selectedGeofence?.id === gf?.id && {
+                      backgroundColor: "#eff6ff",
+                    },
+                  ]}
+                  onPress={() => selectGeofence(gf)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.wardText,
+                        selectedGeofence?.id === gf?.id && {
+                          fontWeight: "bold",
+                          color: "#2563eb",
+                        },
+                      ]}
+                    >
+                      {`${gf?.name} ${gf?.description ? `- ${gf?.description}` : ""}` ||
+                        "NAv"}
+                    </Text>
+
+                    <Text style={styles.subLabel}>
+                      {`ERFs: ${gf?.counts?.erfs || 0} | Premises: ${gf?.counts?.premises || 0} | Meters: ${gf?.counts?.meters || 0}`}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
           </Surface>
         </Modal>
 
@@ -626,6 +731,7 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 
       <View style={styles.container}>
         <View style={styles.buttonRow}>
+          {/* LM BTN */}
           <Button
             mode="contained"
             icon="city"
@@ -639,6 +745,7 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 
           <View style={{ width: 6 }} />
 
+          {/* WARD BTN */}
           <Button
             mode="contained"
             icon="layers-outline"
@@ -653,6 +760,22 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 
           <View style={{ width: 6 }} />
 
+          {/* GEOFENCE BTN */}
+          <Button
+            mode="contained"
+            icon="vector-polygon"
+            onPress={() => canOpenWardSelector && setShowGeofences(true)}
+            style={styles.pill}
+            labelStyle={styles.labelText}
+            contentStyle={styles.buttonContent}
+            disabled={!canOpenWardSelector}
+          >
+            {geofenceLabelStr}
+          </Button>
+
+          <View style={{ width: 6 }} />
+
+          {/* ME BTN */}
           <TouchableOpacity
             style={[styles.pill, styles.locationButtonRowVersion]}
             onPress={handleCenterOnMe}
@@ -664,12 +787,13 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
                 size={20}
                 color="white"
               />
-              <Text style={styles.locationTextSmall}>ME</Text>
+              {/* <Text style={styles.locationTextSmall}>ME</Text> */}
             </View>
           </TouchableOpacity>
         </View>
 
         <View style={[styles.buttonRow, { marginTop: 8 }]}>
+          {/* ERF BTN */}
           <Button
             mode="contained"
             icon="map-marker-path"
@@ -683,6 +807,7 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 
           <View style={{ width: 6 }} />
 
+          {/* PREMISE BTN */}
           <Button
             mode="contained"
             icon="home-city"
@@ -696,6 +821,7 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 
           <View style={{ width: 6 }} />
 
+          {/* AST / METER BTN  */}
           <Button
             mode="contained"
             icon="counter"
@@ -715,18 +841,20 @@ export default function GeoCascadingSelector({ onModalStateChange }) {
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    bottom: -15,
+    bottom: 10,
     left: 10,
     right: 10,
     zIndex: 100,
   },
   buttonRow: { flexDirection: "row", alignItems: "center" },
+
   labelText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "800",
     color: "#334155",
     letterSpacing: 0.1,
   },
+
   modalContainer: { padding: 10, justifyContent: "center" },
   modalContent: {
     backgroundColor: "white",

@@ -10,7 +10,10 @@ export default function OperationsLayout() {
     >
       <Stack.Screen name="index" options={{ title: "Operations Center" }} />
       <Stack.Screen name="teams" options={{ title: "Operational Teams" }} />
-      <Stack.Screen name="geo-fences" options={{ title: "Geo-Fencing" }} />
+      <Stack.Screen
+        name="geo-fences"
+        options={{ title: "Geo-Fencing", headerTitle: "" }}
+      />
       <Stack.Screen name="workorders" options={{ title: "Workorders" }} />
       <Stack.Screen
         name="field-analytics"

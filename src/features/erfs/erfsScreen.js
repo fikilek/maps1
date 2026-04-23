@@ -1,184 +1,63 @@
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useSelector } from "react-redux";
 
-import HydrationActivityIndicator from "../../../components/HydrationActivityIndicator";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 import ErfFilterHeader from "./erfFilterHeader";
 import { ErfItem } from "./erfItem";
 import ErfsBottomSearch from "./ErfsBottomSearch";
 
+/* ================= STATES ================= */
+
 function EmptyScopeState({ title = "SCOPE NOT READY", message }) {
   return (
-    <View
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 22,
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: "900",
-          color: "#0F172A",
-          letterSpacing: 1,
-        }}
-      >
-        {title}
-      </Text>
-
-      <Text
-        style={{
-          marginTop: 10,
-          fontSize: 12,
-          color: "#64748B",
-          textAlign: "center",
-        }}
-      >
-        {message}
-      </Text>
+    <View style={styles.center}>
+      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.message}>{message}</Text>
     </View>
   );
 }
 
 function AwaitWardState({ lmName, wardsCount }) {
   return (
-    <View
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 22,
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: "900",
-          color: "#0F172A",
-          letterSpacing: 1,
-        }}
-      >
-        SELECT A WARD
-      </Text>
+    <View style={styles.center}>
+      <Text style={styles.title}>SELECT A WARD</Text>
 
-      <Text
-        style={{
-          marginTop: 10,
-          fontSize: 12,
-          color: "#64748B",
-          textAlign: "center",
-        }}
-      >
+      <Text style={styles.message}>
         You are currently viewing the LM overview for:
       </Text>
 
-      <Text
-        style={{
-          marginTop: 6,
-          fontSize: 12,
-          fontWeight: "800",
-          color: "#334155",
-          textAlign: "center",
-        }}
-      >
-        {lmName}
-      </Text>
+      <Text style={styles.strong}>{lmName}</Text>
 
-      <Text
-        style={{
-          marginTop: 12,
-          fontSize: 11,
-          color: "#94A3B8",
-          textAlign: "center",
-        }}
-      >
+      <Text style={styles.hint}>
         {wardsCount > 0
-          ? "Choose a ward from the ward selector above to load ERFs."
-          : "No wards are currently available for this LM."}
+          ? "Choose a ward from the selector above to load ERFs."
+          : "No wards available for this LM."}
       </Text>
     </View>
   );
 }
 
-function NoErfsState({ lmName, wardName, onRetry }) {
+function NoErfsState({ lmName, wardName }) {
   return (
-    <View
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 22,
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: "900",
-          color: "#0F172A",
-          letterSpacing: 1,
-        }}
-      >
-        NO ERFs FOUND
-      </Text>
+    <View style={styles.center}>
+      <Text style={styles.title}>NO ERFs FOUND</Text>
 
-      <Text
-        style={{
-          marginTop: 10,
-          fontSize: 12,
-          color: "#64748B",
-          textAlign: "center",
-        }}
-      >
-        There are currently no ERFs loaded for:
-      </Text>
+      <Text style={styles.message}>There are currently no ERFs for:</Text>
 
-      <Text
-        style={{
-          marginTop: 6,
-          fontSize: 12,
-          fontWeight: "800",
-          color: "#334155",
-          textAlign: "center",
-        }}
-      >
+      <Text style={styles.strong}>
         {lmName} • {wardName}
       </Text>
-
-      <Text
-        style={{
-          marginTop: 12,
-          fontSize: 11,
-          color: "#94A3B8",
-          textAlign: "center",
-        }}
-      >
-        If this is unexpected, check your ward selection or data pipeline.
-      </Text>
-
-      {!!onRetry && (
-        <Text
-          onPress={onRetry}
-          style={{
-            marginTop: 18,
-            fontSize: 11,
-            fontWeight: "900",
-            color: "#00BFFF",
-          }}
-        >
-          TAP TO RETRY
-        </Text>
-      )}
     </View>
   );
 }
 
+/* ================= SCREEN ================= */
+
 export default function ErfsScreen() {
-  console.log(`ErfsScreen --mounting`);
   const router = useRouter();
 
   const { geoState, updateGeo } = useGeo();
@@ -187,7 +66,6 @@ export default function ErfsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const scopeSync = sync?.scope ?? { status: "idle" };
-  const wardErfsSync = sync?.erfs ?? { status: "idle" };
 
   const lmName = geoState?.selectedLm?.name ?? "LOCAL MUNICIPALITY";
   const wardName = geoState?.selectedWard?.name ?? "WARD";
@@ -197,37 +75,79 @@ export default function ErfsScreen() {
 
   const wardsCount = all?.wards?.length ?? 0;
   const erfsCount = all?.erfs?.length ?? 0;
-  const loadedCount = erfsCount;
-  const totalCount = wardErfsSync?.size ?? null;
 
-  const expectedPackKey =
+  /* ================= RTK CACHE ================= */
+
+  const erfsQueries = useSelector((state) => state.erfsApi?.queries || {});
+
+  const wardCacheKey =
     hasLm && hasWard
       ? `${geoState.selectedLm.id}__${geoState.selectedWard.id}`
       : null;
 
-  const packKeyMatches =
-    !!expectedPackKey && wardErfsSync?.wardCacheKey === expectedPackKey;
+  const wardQuery = wardCacheKey
+    ? erfsQueries[`getErfsByLmPcodeWardPcode(${wardCacheKey})`]
+    : null;
 
-  const isScopeReady = scopeSync?.status === "ready";
-  const isLmOnly = scopeSync?.status === "lm-only";
+  const rawWardStatus = wardQuery?.data?.sync?.status || null;
+  const wardSize = wardQuery?.data?.sync?.size ?? null;
 
-  const isErfDatasetReady =
-    isScopeReady &&
-    hasLm &&
-    hasWard &&
-    packKeyMatches &&
-    wardErfsSync?.status === "ready";
+  const wardStatus =
+    rawWardStatus === "syncing"
+      ? "SYNCING"
+      : rawWardStatus === "ready"
+        ? "READY"
+        : rawWardStatus === "error"
+          ? "ERROR"
+          : "MISSING";
 
-  const showHydrationSpinner =
-    isScopeReady &&
-    hasLm &&
-    hasWard &&
-    (!packKeyMatches ||
-      wardErfsSync?.status === "idle" ||
-      wardErfsSync?.status === "syncing");
+  /* ================= HEADER WARD SELECT ================= */
 
-  const showSyncingBanner =
-    isErfDatasetReady && erfsCount > 0 && wardErfsSync?.status === "syncing";
+  const handleWardSelectionFromHeader = (ward) => {
+    if (!ward?.id) {
+      updateGeo({ selectedWard: null, lastSelectionType: "WARD" });
+      return;
+    }
+
+    const nextWardCacheKey =
+      geoState?.selectedLm?.id && ward?.id
+        ? `${geoState.selectedLm.id}__${ward.id}`
+        : null;
+
+    const nextWardQuery = nextWardCacheKey
+      ? erfsQueries[`getErfsByLmPcodeWardPcode(${nextWardCacheKey})`]
+      : null;
+
+    const rawNextWardStatus = nextWardQuery?.data?.sync?.status || null;
+
+    const nextWardStatus =
+      rawNextWardStatus === "syncing"
+        ? "SYNCING"
+        : rawNextWardStatus === "ready"
+          ? "READY"
+          : rawNextWardStatus === "error"
+            ? "ERROR"
+            : "MISSING";
+
+    if (nextWardStatus === "READY") {
+      updateGeo({ selectedWard: ward, lastSelectionType: "WARD" });
+      return;
+    }
+
+    router.replace("/(tabs)/admin/storage/ward-erfs-sync");
+  };
+
+  /* ================= REDIRECT ================= */
+
+  useEffect(() => {
+    if (!hasLm || !hasWard) return;
+
+    if (wardStatus === "MISSING") {
+      router.replace("/(tabs)/admin/storage/ward-erfs-sync");
+    }
+  }, [hasLm, hasWard, wardStatus, router]);
+
+  /* ================= FILTER ================= */
 
   const visibleErfs = useMemo(() => {
     let list = [...(filtered?.erfs || [])];
@@ -244,24 +164,24 @@ export default function ErfsScreen() {
     return list;
   }, [searchQuery, filtered?.erfs]);
 
+  /* ================= GUARDS ================= */
+
   if (!hasLm) {
-    return <EmptyScopeState message="No active workbase is selected." />;
+    return <EmptyScopeState message="No active workbase selected." />;
   }
 
   if (scopeSync?.status === "invalid-ward") {
     return (
-      <EmptyScopeState message="The selected ward does not belong to the active workbase." />
+      <EmptyScopeState message="Selected ward is not valid for this workbase." />
     );
   }
 
-  if (isLmOnly || !hasWard) {
+  if (!hasWard) {
     return (
       <View style={styles.container}>
         <ErfFilterHeader
           selectedWard={geoState.selectedWard}
-          setSelectedWard={(w) =>
-            updateGeo({ selectedWard: w, lastSelectionType: "WARD" })
-          }
+          setSelectedWard={handleWardSelectionFromHeader}
           filteredCount={0}
         />
 
@@ -276,34 +196,37 @@ export default function ErfsScreen() {
     );
   }
 
-  if (showHydrationSpinner) {
+  /* 🚨 NOT LOADED → SAFE FALLBACK */
+
+  if (wardStatus === "MISSING") {
     return (
-      <HydrationActivityIndicator
-        status={wardErfsSync?.status}
-        title="HYDRATING SOVEREIGN VAULT..."
-        subtitle={`LOADING ${lmName} • ${wardName}`}
-        showOnceHint
-        errorText={wardErfsSync?.lastError || null}
-        loadedCount={loadedCount}
-        totalCount={totalCount}
+      <EmptyScopeState
+        title="WARD NOT LOADED"
+        message={`Please sync ERFs for ${lmName} • ${wardName}`}
       />
     );
   }
 
+  /* 🚨 NO ERFs */
+
+  if (wardStatus === "READY" && wardSize === 0) {
+    return <NoErfsState lmName={lmName} wardName={wardName} />;
+  }
+
+  /* ================= MAIN ================= */
+
   return (
     <View style={styles.container}>
-      {showSyncingBanner && (
+      {wardStatus === "SYNCING" && (
         <View style={styles.syncingBanner}>
           <ActivityIndicator size="small" />
-          <Text style={styles.syncingText}>SYNCING LATEST UPDATES...</Text>
+          <Text style={styles.syncingText}>SYNCING WARD ERFs...</Text>
         </View>
       )}
 
       <ErfFilterHeader
         selectedWard={geoState.selectedWard}
-        setSelectedWard={(w) =>
-          updateGeo({ selectedWard: w, lastSelectionType: "WARD" })
-        }
+        setSelectedWard={handleWardSelectionFromHeader}
         filteredCount={visibleErfs.length}
       />
 
@@ -335,20 +258,6 @@ export default function ErfsScreen() {
             }}
           />
         )}
-        ListEmptyComponent={
-          isErfDatasetReady ? (
-            <NoErfsState
-              lmName={lmName}
-              wardName={wardName}
-              onRetry={() =>
-                updateGeo(
-                  { flightSignal: geoState.flightSignal + 1 },
-                  { silent: true },
-                )
-              }
-            />
-          ) : null
-        }
       />
 
       <ErfsBottomSearch
@@ -360,8 +269,45 @@ export default function ErfsScreen() {
   );
 }
 
+/* ================= STYLES ================= */
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8f9fa" },
+
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 22,
+  },
+
+  title: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+
+  message: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#64748B",
+    textAlign: "center",
+  },
+
+  strong: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#334155",
+  },
+
+  hint: {
+    marginTop: 12,
+    fontSize: 11,
+    color: "#94A3B8",
+    textAlign: "center",
+  },
+
   syncingBanner: {
     backgroundColor: "#e3f2fd",
     paddingVertical: 4,
@@ -369,5 +315,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  syncingText: { fontSize: 10, color: "#1976d2", fontWeight: "bold" },
+
+  syncingText: {
+    fontSize: 10,
+    color: "#1976d2",
+    fontWeight: "bold",
+  },
 });

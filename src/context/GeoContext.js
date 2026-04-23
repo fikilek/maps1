@@ -105,6 +105,7 @@ export const GeoProvider = ({ children }) => {
    * updateGeo(updates, options)
    * options.silent === true => does NOT bump flightSignal
    */
+
   const updateGeo = useCallback((updates, options = {}) => {
     setGeoState((prev) => {
       const silent = !!options.silent;
@@ -113,7 +114,14 @@ export const GeoProvider = ({ children }) => {
 
       // cascade clears
       if ("selectedLm" in updates) {
-        next.selectedWard = null;
+        const prevLmId = prev?.selectedLm?.id || null;
+        const nextLmId = updates?.selectedLm?.id || null;
+        const lmChanged = prevLmId !== nextLmId;
+
+        if (lmChanged) {
+          next.selectedWard = null;
+        }
+
         next.selectedErf = null;
         next.selectedPremise = null;
         next.selectedMeter = null;
@@ -135,6 +143,37 @@ export const GeoProvider = ({ children }) => {
       return next;
     });
   }, []);
+
+  // const updateGeo = useCallback((updates, options = {}) => {
+  //   setGeoState((prev) => {
+  //     const silent = !!options.silent;
+
+  //     let next = { ...prev, ...updates };
+
+  //     // cascade clears
+  //     if ("selectedLm" in updates) {
+  //       next.selectedWard = null;
+  //       next.selectedErf = null;
+  //       next.selectedPremise = null;
+  //       next.selectedMeter = null;
+  //     } else if ("selectedWard" in updates) {
+  //       next.selectedErf = null;
+  //       next.selectedPremise = null;
+  //       next.selectedMeter = null;
+  //     } else if ("selectedErf" in updates) {
+  //       next.selectedPremise = null;
+  //       next.selectedMeter = null;
+  //     } else if ("selectedPremise" in updates) {
+  //       next.selectedMeter = null;
+  //     }
+
+  //     if (!silent) {
+  //       next.flightSignal = prev.flightSignal + 1;
+  //     }
+
+  //     return next;
+  //   });
+  // }, []);
 
   /**
    * setActiveWorkbaseWard({ lm, ward })

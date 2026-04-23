@@ -59,19 +59,27 @@ export default function LocalStorageScreen() {
           </View>
 
           <Text style={styles.heroSubtitle}>
-            Manage offline ward ERFs availability and queued form submissions.
+            Manage offline ward ERFs availability, prepaid sales sync, and
+            queued form submissions.
           </Text>
         </Surface>
 
         {canViewStorage ? (
           <View style={styles.cardsWrap}>
             <StorageCard
-              title="Ward ERFs Storage"
-              subtitle="Ward ERFs sync & management"
+              title="Manage Ward ERFs"
+              subtitle="Ward ERFs sync & control"
               icon="map-search-outline"
               onPress={() =>
                 router.push("/(tabs)/admin/storage/ward-erfs-sync")
               }
+            />
+
+            <StorageCard
+              title="Sales Sync"
+              // subtitle="Download monthly prepaid sales to this device"
+              icon="database-arrow-down-outline"
+              onPress={() => router.push("/(tabs)/admin/storage/sales-sync")}
             />
 
             <StorageCard
