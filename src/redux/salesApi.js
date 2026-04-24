@@ -29,6 +29,13 @@ import {
  * - Monthly aggregates are small => realtime snapshot is OK and offline-friendly.
  */
 
+function normalizeYm(ym) {
+  const s = String(ym || "").trim();
+  const m = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (!m) return s;
+  return `${m[1]}-${m[2].padStart(2, "0")}`;
+}
+
 export const salesApi = createApi({
   reducerPath: "salesApi",
   baseQuery: fakeBaseQuery(),
@@ -123,23 +130,34 @@ export const salesApi = createApi({
         async queryFn(rawArgs, api) {
           try {
             const lmPcode = String(rawArgs?.lmPcode ?? "").trim();
-            const ym = String(rawArgs?.ym ?? "").trim();
+            const ym = normalizeYm(rawArgs?.ym);
+
             if (!lmPcode || !ym) return { data: [] };
 
-            // 1) Cache first (MMKV)
+            // 1) MMKV first
             const cached = getMonthlyFromKV(lmPcode, ym);
-            const cachedRows = cached?.rows || [];
+            const cachedRows = Array.isArray(cached?.rows) ? cached.rows : [];
 
-            // ✅ If cache exists, we are DONE. No Firestore reads.
-            if (cachedRows.length) {
+            if (cachedRows.length > 0) {
+              console.log("📦 MONTHLY CACHE HIT", {
+                lmPcode,
+                ym,
+                size: cachedRows.length,
+              });
               return { data: cachedRows };
             }
 
-            // 2) If offline and no cache
+            // 2) Only block when online state is explicitly false
             const isOnline = api.getState()?.offline?.isOnline;
-            if (!isOnline) return { data: [] };
+            if (isOnline === false) {
+              console.log("⚠️ MONTHLY FETCH SKIPPED (offline)", {
+                lmPcode,
+                ym,
+              });
+              return { data: [] };
+            }
 
-            // 3) Cache miss + online => Firestore fetch ONCE
+            // 3) Firestore fetch
             console.log("🚀 MONTHLY FIRESTORE FETCH (cache-miss)", {
               lmPcode,
               ym,
@@ -174,25 +192,110 @@ export const salesApi = createApi({
               };
             });
 
-            // 4) Save only if non-empty (avoid poisoning cache)
-            if (rows.length > 0) setMonthlyToKV(lmPcode, ym, rows);
+            if (rows.length > 0) {
+              setMonthlyToKV(lmPcode, ym, rows);
+            }
 
             return { data: rows };
           } catch (e) {
             console.log("❌ getSalesMonthlyByLmAndYm error:", e);
 
-            // fallback to cache if any
             const lmPcode = String(rawArgs?.lmPcode ?? "").trim();
-            const ym = String(rawArgs?.ym ?? "").trim();
+            const ym = normalizeYm(rawArgs?.ym);
+
             const cached = getMonthlyFromKV(lmPcode, ym);
-            if (cached?.rows?.length) return { data: cached.rows };
+            if (Array.isArray(cached?.rows) && cached.rows.length > 0) {
+              return { data: cached.rows };
+            }
 
             return { error: { message: e?.message ?? String(e) } };
           }
         },
 
+        serializeQueryArgs: ({ endpointName, queryArgs }) => {
+          const lmPcode = String(queryArgs?.lmPcode ?? "").trim();
+          const ym = normalizeYm(queryArgs?.ym);
+          return `${endpointName}_${lmPcode}_${ym}`;
+        },
+
         keepUnusedDataFor: 60 * 60 * 24 * 30,
       }),
+
+      // getSalesMonthlyByLmAndYm: builder.query({
+      //   async queryFn(rawArgs, api) {
+      //     try {
+      //       const lmPcode = String(rawArgs?.lmPcode ?? "").trim();
+      //       const ym = String(rawArgs?.ym ?? "").trim();
+      //       if (!lmPcode || !ym) return { data: [] };
+
+      //       // 1) Cache first (MMKV)
+      //       const cached = getMonthlyFromKV(lmPcode, ym);
+      //       const cachedRows = cached?.rows || [];
+
+      //       // ✅ If cache exists, we are DONE. No Firestore reads.
+      //       if (cachedRows.length) {
+      //         return { data: cachedRows };
+      //       }
+
+      //       // 2) If offline and no cache
+      //       const isOnline = api.getState()?.offline?.isOnline;
+      //       // if (!isOnline) return { data: [] };
+      //       if (isOnline === false) return { data: [] };
+
+      //       // 3) Cache miss + online => Firestore fetch ONCE
+      //       console.log("🚀 MONTHLY FIRESTORE FETCH (cache-miss)", {
+      //         lmPcode,
+      //         ym,
+      //       });
+
+      //       const colRef = collection(db, "conlog_sales_monthly");
+      //       const q = query(
+      //         colRef,
+      //         where("lmPcode", "==", lmPcode),
+      //         where("ym", "==", ym),
+      //         orderBy("amountTotalC", "asc"),
+      //       );
+
+      //       const snap = await getDocs(q);
+
+      //       console.log("✅ MONTHLY FIRESTORE DONE (cache-miss)", {
+      //         lmPcode,
+      //         ym,
+      //         size: snap.size,
+      //       });
+
+      //       const rows = snap.docs.map((d) => {
+      //         const x = d.data();
+      //         return {
+      //           id: d.id,
+      //           meterNo: x.meterNo,
+      //           ym: x.ym,
+      //           lmPcode: x.lmPcode,
+      //           amountTotalC: x.amountTotalC,
+      //           purchasesCount: x.purchasesCount,
+      //           salesGroupId: x.salesGroupId,
+      //         };
+      //       });
+
+      //       // 4) Save only if non-empty (avoid poisoning cache)
+      //       if (rows.length > 0) setMonthlyToKV(lmPcode, ym, rows);
+
+      //       return { data: rows };
+      //     } catch (e) {
+      //       console.log("❌ getSalesMonthlyByLmAndYm error:", e);
+
+      //       // fallback to cache if any
+      //       const lmPcode = String(rawArgs?.lmPcode ?? "").trim();
+      //       const ym = String(rawArgs?.ym ?? "").trim();
+      //       const cached = getMonthlyFromKV(lmPcode, ym);
+      //       if (cached?.rows?.length) return { data: cached.rows };
+
+      //       return { error: { message: e?.message ?? String(e) } };
+      //     }
+      //   },
+
+      //   keepUnusedDataFor: 60 * 60 * 24 * 30,
+      // }),
 
       getSalesMonthlyLmByLmAndYms: builder.query({
         async queryFn({ lmPcode, yms }, api) {
@@ -482,8 +585,6 @@ export const salesApi = createApi({
 
         keepUnusedDataFor: 60,
       }),
-
-      // inside endpoints: (builder) => { return { ... } }
 
       getSalesMonthlyByLmAndMeterNo: builder.query({
         async queryFn({ lmPcode, meterNo }) {

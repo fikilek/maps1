@@ -16,7 +16,6 @@ import MapView, { Polygon, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import GeoStatusHUD from "../../../components/GeoStatusHUD";
 import GeoCascadingSelector from "../../../components/maps/GeoCascadingSelector";
 import NeighbourhoodErfMarker from "../../../components/maps/NeighbourhoodErfMarker";
 import NeighbourhoodMeterMarker from "../../../components/maps/NeighbourhoodMeterMarker";
@@ -920,9 +919,9 @@ export default function MapsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.hudOverlay}>
+      {/* <View style={styles.hudOverlay}>
         <GeoStatusHUD />
-      </View>
+      </View> */}
 
       <MapView
         ref={mapRef}
@@ -968,10 +967,6 @@ export default function MapsScreen() {
         onSelectGeofence={handleSelectGeofence}
         selectedGeofence={selectedGeofence}
       />
-
-      {/* <View style={styles.gcsOverlay}>
-        <GeoCascadingSelector onModalStateChange={setGcsModalOpen} />
-      </View> */}
 
       <View style={styles.layerControl}>
         <TouchableOpacity
@@ -1138,8 +1133,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   layerControl: {
+    // flexDirection: "row",
+    gap: 6,
     position: "absolute",
-    top: 80,
+    top: 8,
+    // left: 10,
     right: 10,
     backgroundColor: "rgba(255, 255, 255, 0.9)",
     borderRadius: 8,

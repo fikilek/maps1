@@ -62,9 +62,10 @@ export default function AppHeader({ title }) {
   const initials =
     `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase() || "??";
 
-  const availableJurisdictions = isSPU
-    ? allLms
-    : profile?.access?.workbases || [];
+  const availableJurisdictions = useMemo(() => {
+    if (isSPU) return allLms || [];
+    return profile?.access?.workbases || [];
+  }, [isSPU, allLms, profile?.access?.workbases]);
 
   const closeMenu = () => setMenuVisible(false);
 

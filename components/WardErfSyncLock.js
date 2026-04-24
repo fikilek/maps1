@@ -98,7 +98,7 @@ function SyncStoryContent({ lmStats, currentTip }) {
         </Text>
       </View>
 
-      <View style={styles.statsCard}>
+      {/* <View style={styles.statsCard}>
         <Text style={styles.cardTitle}>LM OPERATIONAL SNAPSHOT</Text>
         <View style={styles.statsGrid}>
           <View style={styles.statBox}>
@@ -129,7 +129,7 @@ function SyncStoryContent({ lmStats, currentTip }) {
             </Text>
           </View>
         </View>
-      </View>
+      </View> */}
 
       <View style={styles.tipCard}>
         <Text style={styles.cardTitle}>iREPS INSIGHT</Text>
@@ -286,9 +286,7 @@ export default function WardErfSyncLock({
               )}
             </Text>
 
-            <Text style={styles.elapsedText}>
-              Elapsed: {formatMs(elapsedMs)} • Please keep the app open
-            </Text>
+            <Text style={styles.elapsedText}>Please keep the app open</Text>
 
             <Text
               style={[

@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -12,6 +13,25 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function OperationsHub() {
   const router = useRouter();
 
+  const isNavigatingRef = useRef(false);
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      isNavigatingRef.current = false;
+      setIsNavigating(false);
+    }, []),
+  );
+
+  const handleNavigate = (href) => {
+    if (isNavigatingRef.current) return;
+
+    isNavigatingRef.current = true;
+    setIsNavigating(true);
+
+    router.push(href);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["left", "right"]}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -21,16 +41,19 @@ export default function OperationsHub() {
             subtitle="Personnel deployment & allocation"
             icon="account-group"
             color="#2563eb"
-            onPress={() => router.push("/admin/operations/teams")}
+            disabled={isNavigating}
+            onPress={() => handleNavigate("/admin/operations/teams")}
           />
 
-          {/* 🎯 THE FINANCIAL STRIKE: Revenue Analytics */}
           <OpCard
             title="Revenue Analytics"
             subtitle="Analysis of LM Prepaid Revenues"
             icon="currency-usd"
-            color="#0891b2" // Cyan/Deep Blue for Financials
-            onPress={() => router.push("/admin/operations/revenue-analytics")}
+            color="#0891b2"
+            disabled={isNavigating}
+            onPress={() =>
+              handleNavigate("/admin/operations/revenue-analytics")
+            }
           />
 
           <OpCard
@@ -38,7 +61,8 @@ export default function OperationsHub() {
             subtitle="Geospatial work jurisdictions"
             icon="vector-polygon"
             color="#8b5cf6"
-            onPress={() => router.push("/admin/operations/geo-fences")}
+            disabled={isNavigating}
+            onPress={() => handleNavigate("/admin/operations/geo-fences")}
           />
 
           <OpCard
@@ -46,7 +70,8 @@ export default function OperationsHub() {
             subtitle="Queue management & monitoring"
             icon="clipboard-list"
             color="#059669"
-            onPress={() => router.push("/admin/operations/workorders")}
+            disabled={isNavigating}
+            onPress={() => handleNavigate("/admin/operations/workorders")}
           />
 
           <OpCard
@@ -54,15 +79,19 @@ export default function OperationsHub() {
             subtitle="Deployment performance"
             icon="trending-up"
             color="#ea580c"
-            onPress={() => router.push("/admin/operations/field-analytics")}
+            disabled={isNavigating}
+            onPress={() => handleNavigate("/admin/operations/field-analytics")}
           />
 
           <OpCard
             title="Quality Assurance"
             subtitle="Review & approve discovery docs"
             icon="shield-check"
-            color="#ef4444" // Switched to Red for "The Auditor"
-            onPress={() => router.push("/admin/operations/quality-assurance")}
+            color="#ef4444"
+            disabled={isNavigating}
+            onPress={() =>
+              handleNavigate("/admin/operations/quality-assurance")
+            }
           />
         </View>
       </ScrollView>
@@ -70,11 +99,17 @@ export default function OperationsHub() {
   );
 }
 
-const OpCard = ({ title, subtitle, icon, color, onPress }) => (
-  <TouchableOpacity style={styles.card} onPress={onPress}>
+const OpCard = ({ title, subtitle, icon, color, onPress, disabled }) => (
+  <TouchableOpacity
+    style={[styles.card, disabled && styles.cardDisabled]}
+    onPress={onPress}
+    disabled={disabled}
+    activeOpacity={0.75}
+  >
     <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
       <MaterialCommunityIcons name={icon} size={28} color={color} />
     </View>
+
     <Text style={styles.cardTitle}>{title}</Text>
     <Text style={styles.cardSubtitle}>{subtitle}</Text>
   </TouchableOpacity>
@@ -93,7 +128,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   card: {
     backgroundColor: "#fff",
-    width: "48%", // Grid of 2
+    width: "48%",
     padding: 16,
     borderRadius: 20,
     borderWidth: 1,
@@ -102,6 +137,9 @@ const styles = StyleSheet.create({
     shadowColor: "#000",
     shadowOpacity: 0.05,
     shadowRadius: 10,
+  },
+  cardDisabled: {
+    opacity: 0.5,
   },
   iconContainer: {
     width: 48,

@@ -199,7 +199,6 @@ export default function PrepaidRevenueReportScreen() {
 
   const router = useRouter();
   const params = useLocalSearchParams();
-  console.log(`params`, params);
   const dispatch = useDispatch();
 
   // Revenue Groups + Search (MONTHLY only)

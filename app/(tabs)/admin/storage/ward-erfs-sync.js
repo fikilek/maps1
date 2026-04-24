@@ -9,6 +9,7 @@ import { useGeo } from "@/src/context/GeoContext";
 import { erfsApi } from "@/src/redux/erfsApi";
 import { useGetWardsByLocalMunicipalityQuery } from "@/src/redux/geoApi";
 import WardErfSyncLock from "../../../../components/WardErfSyncLock";
+import WardErfsSyncDoneModal from "../../../../components/WardErfsSyncDoneModal";
 
 /* =====================================================
    PER-WARD LIVE SUBSCRIPTION REGISTRY
@@ -73,6 +74,9 @@ export default function WardErfsSync() {
   const lmPcode = activeLm?.id;
 
   const [isOnline, setIsOnline] = useState(false);
+
+  const [syncStory, setSyncStory] = useState(null);
+  const [doneModalVisible, setDoneModalVisible] = useState(false);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
@@ -142,6 +146,46 @@ export default function WardErfsSync() {
     });
   }, [wards, lmPcode, erfsQueries, activeWard?.id, isOnline]);
 
+  /* ================= TRACK CURRENT SYNC STORY ================= */
+
+  const trackedWardQuery = useMemo(() => {
+    if (!lmPcode || !syncStory?.wardId) return null;
+
+    const queryKey = getWardQueryCacheKey(lmPcode, syncStory.wardId);
+    return erfsQueries?.[queryKey] || null;
+  }, [lmPcode, syncStory?.wardId, erfsQueries]);
+
+  useEffect(() => {
+    if (!lmPcode || !syncStory?.wardId || !trackedWardQuery) return;
+
+    const sync = trackedWardQuery?.data?.sync;
+
+    if (sync?.status === "ready" && !syncStory?.finished) {
+      const durationMs = syncStory?.startedAt
+        ? Date.now() - syncStory.startedAt
+        : 0;
+
+      const totalDownloaded = Number(sync?.size || 0);
+      const ratePerSecond =
+        durationMs > 0 ? totalDownloaded / (durationMs / 1000) : 0;
+
+      setDoneModalVisible(true);
+      setSyncStory((prev) => ({
+        ...prev,
+        finished: true,
+        durationMs,
+        totalDownloaded,
+        ratePerSecond,
+      }));
+    }
+  }, [
+    lmPcode,
+    syncStory?.wardId,
+    syncStory?.startedAt,
+    syncStory?.finished,
+    trackedWardQuery,
+  ]);
+
   /* ================= STATES ================= */
 
   if (!lmPcode) {
@@ -182,6 +226,35 @@ export default function WardErfsSync() {
           erfs: null,
           meters: null,
           trns: null,
+        }}
+      />
+
+      <WardErfsSyncDoneModal
+        visible={doneModalVisible}
+        lmName={activeLm?.name || "LOCAL MUNICIPALITY"}
+        wardName={syncStory?.wardName || "WARD"}
+        durationMs={syncStory?.durationMs || 0}
+        totalDownloaded={syncStory?.totalDownloaded || 0}
+        ratePerSecond={syncStory?.ratePerSecond || 0}
+        onClose={() => {
+          setDoneModalVisible(false);
+        }}
+        onOpenWard={() => {
+          if (!syncStory?.wardId) {
+            setDoneModalVisible(false);
+            return;
+          }
+
+          updateGeo({
+            selectedWard: {
+              id: syncStory.wardId,
+              name: syncStory.wardName,
+            },
+            lastSelectionType: "WARD",
+          });
+
+          setDoneModalVisible(false);
+          router.replace("/(tabs)/erfs");
         }}
       />
 
@@ -236,6 +309,18 @@ export default function WardErfsSync() {
                     ]}
                     disabled={!item.canSync}
                     onPress={() => {
+                      setDoneModalVisible(false);
+                      setSyncStory({
+                        wardId: item.id,
+                        wardName: item.name,
+                        wardCode: item.code,
+                        startedAt: Date.now(),
+                        finished: false,
+                        durationMs: 0,
+                        totalDownloaded: 0,
+                        ratePerSecond: 0,
+                      });
+
                       startWardErfSubscription(dispatch, lmPcode, item.id);
                     }}
                   >

@@ -5,6 +5,7 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import SalesMonthlySyncDoneModal from "../../../../components/SalesMonthlySyncDoneModal";
 import SalesMonthlySyncLock from "../../../../components/SalesMonthlySyncLock";
 import { ymToLabel } from "../../../../src/features/reports/prepaidRevenue/months/monthUtils";
 import { useAuth } from "../../../../src/hooks/useAuth";
@@ -33,12 +34,27 @@ export default function SalesSyncScreen() {
 
   const [isOnline, setIsOnline] = useState(false);
   const [syncingYm, setSyncingYm] = useState(null);
+  const [syncStartedAt, setSyncStartedAt] = useState(null);
+
+  const [showDoneModal, setShowDoneModal] = useState(false);
+  const [doneInfo, setDoneInfo] = useState(null);
 
   useEffect(() => {
+    let mounted = true;
+
+    NetInfo.fetch().then((state) => {
+      if (!mounted) return;
+      setIsOnline(Boolean(state.isConnected && state.isInternetReachable));
+    });
+
     const unsub = NetInfo.addEventListener((state) => {
       setIsOnline(Boolean(state.isConnected && state.isInternetReachable));
     });
-    return unsub;
+
+    return () => {
+      mounted = false;
+      unsub();
+    };
   }, []);
 
   const monthlyLmArgs = ready && lmPcode ? { lmPcode, yms: null } : skipToken;
@@ -57,17 +73,6 @@ export default function SalesSyncScreen() {
       ? { lmPcode, ym: activeSyncYm }
       : skipToken,
   );
-
-  useEffect(() => {
-    if (!lmPcode || !activeSyncYm) return;
-
-    const cached = getMonthlyFromKV(lmPcode, activeSyncYm);
-    const hasCache = Array.isArray(cached?.rows) && cached.rows.length > 0;
-
-    if (hasCache) {
-      setSyncingYm(null);
-    }
-  }, [lmPcode, activeSyncYm, monthlySyncQuery.data]);
 
   const monthRows = useMemo(() => {
     return availableYms.map((ym) => {
@@ -99,8 +104,15 @@ export default function SalesSyncScreen() {
 
   const currentLoadedCount = useMemo(() => {
     if (!lmPcode || !syncingYm) return 0;
+
+    const rowsFromHook = Array.isArray(monthlySyncQuery.data)
+      ? monthlySyncQuery.data.length
+      : 0;
+
     const cached = getMonthlyFromKV(lmPcode, syncingYm);
-    return Array.isArray(cached?.rows) ? cached.rows.length : 0;
+    const cachedCount = Array.isArray(cached?.rows) ? cached.rows.length : 0;
+
+    return Math.max(rowsFromHook, cachedCount);
   }, [lmPcode, syncingYm, monthlySyncQuery.data]);
 
   const requestedMonthDoc = useMemo(() => {
@@ -114,6 +126,71 @@ export default function SalesSyncScreen() {
     typeof requestedMonthDoc?.metersCount === "number"
       ? requestedMonthDoc.metersCount
       : null;
+
+  useEffect(() => {
+    if (!lmPcode || !syncingYm) return;
+
+    const cached = getMonthlyFromKV(lmPcode, syncingYm);
+    const cachedRows = Array.isArray(cached?.rows) ? cached.rows : [];
+    const cachedCount = cachedRows.length;
+
+    // 1) success via KV
+    if (cachedCount > 0) {
+      const durationMs = syncStartedAt ? Date.now() - syncStartedAt : 0;
+      const ratePerSecond =
+        durationMs > 0 ? cachedCount / (durationMs / 1000) : 0;
+
+      setDoneInfo({
+        ym: syncingYm,
+        monthLabel: ymToLabel(syncingYm),
+        durationMs,
+        totalDownloaded: cachedCount,
+        ratePerSecond,
+      });
+
+      setSyncingYm(null);
+      setShowDoneModal(true);
+      return;
+    }
+
+    // 2) hard fail
+    if (monthlySyncQuery.isError) {
+      console.log("❌ Sales sync failed", monthlySyncQuery.error);
+      setSyncingYm(null);
+      return;
+    }
+
+    // 3) success but zero rows
+    if (monthlySyncQuery.isSuccess) {
+      const rows = Array.isArray(monthlySyncQuery.data)
+        ? monthlySyncQuery.data
+        : [];
+
+      const totalDownloaded = rows.length;
+      const durationMs = syncStartedAt ? Date.now() - syncStartedAt : 0;
+      const ratePerSecond =
+        durationMs > 0 ? totalDownloaded / (durationMs / 1000) : 0;
+
+      setDoneInfo({
+        ym: syncingYm,
+        monthLabel: ymToLabel(syncingYm),
+        durationMs,
+        totalDownloaded,
+        ratePerSecond,
+      });
+
+      setSyncingYm(null);
+      setShowDoneModal(true);
+    }
+  }, [
+    lmPcode,
+    syncingYm,
+    syncStartedAt,
+    monthlySyncQuery.isSuccess,
+    monthlySyncQuery.isError,
+    monthlySyncQuery.error,
+    monthlySyncQuery.data,
+  ]);
 
   const isAnySyncing = !!syncingYm;
 
@@ -192,6 +269,9 @@ export default function SalesSyncScreen() {
                       ]}
                       disabled={!item.canSync || item.isSyncing}
                       onPress={() => {
+                        setDoneInfo(null);
+                        setShowDoneModal(false);
+                        setSyncStartedAt(Date.now());
                         setSyncingYm(item.ym);
                       }}
                     >
@@ -228,6 +308,29 @@ export default function SalesSyncScreen() {
           phase="Preparing prepaid monthly sales for local report use..."
           loadedCount={currentLoadedCount}
           totalCount={currentTotalCount}
+        />
+
+        <SalesMonthlySyncDoneModal
+          visible={showDoneModal}
+          lmName={lmPcode || "LOCAL MUNICIPALITY"}
+          monthLabel={doneInfo?.monthLabel || "Selected Month"}
+          durationMs={doneInfo?.durationMs || 0}
+          totalDownloaded={doneInfo?.totalDownloaded || 0}
+          ratePerSecond={doneInfo?.ratePerSecond || 0}
+          onClose={() => {
+            setShowDoneModal(false);
+          }}
+          onOpenMonth={() => {
+            const ym = doneInfo?.ym;
+            setShowDoneModal(false);
+
+            if (!ym) return;
+
+            router.replace({
+              pathname: "/(tabs)/admin/reports/prepaid-revenue-report",
+              params: { ym },
+            });
+          }}
         />
       </View>
     </>

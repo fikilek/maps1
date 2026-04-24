@@ -3,6 +3,7 @@ import { Pressable, Text } from "react-native";
 
 export default function BtnRouting({ destinationRoute, title }) {
   const router = useRouter();
+  console.log(`BtnRouting --destinationRoute`, destinationRoute);
 
   return (
     <Pressable

@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { Button, Modal, Portal, Searchbar, Surface } from "react-native-paper";
+import { useSelector } from "react-redux";
 import { useGeo } from "../../src/context/GeoContext";
 import { useMap } from "../../src/context/MapContext";
 import { useWarehouse } from "../../src/context/WarehouseContext";
@@ -20,9 +21,6 @@ export default function GeoCascadingSelector({
   onSelectGeofence,
   selectedGeofence,
 }) {
-  console.log(``);
-  console.log(``);
-  console.log(``);
   // console.log(`GeoCascadingSelector mounting`);
   const { geoState, updateGeo } = useGeo();
   const { all } = useWarehouse();
@@ -202,6 +200,30 @@ export default function GeoCascadingSelector({
     meterSearchQuery,
   ]);
 
+  // Get ward erfs count from storrage
+
+  function getWardQueryCacheKey(lmPcode, wardPcode) {
+    return `getErfsByLmPcodeWardPcode(${lmPcode}__${wardPcode})`;
+  }
+
+  const erfsQueries = useSelector((state) => state.erfsApi?.queries || {});
+
+  const wardSyncedCountsByPcode = useMemo(() => {
+    if (!lmPcode) return new Map();
+
+    const counts = new Map();
+
+    (availableWards || []).forEach((ward) => {
+      const queryKey = getWardQueryCacheKey(lmPcode, ward?.id);
+      const queryState = erfsQueries?.[queryKey];
+      const sync = queryState?.data?.sync;
+
+      counts.set(ward?.id, sync?.size || 0);
+    });
+
+    return counts;
+  }, [availableWards, erfsQueries, lmPcode]);
+
   // -----------------------------
   // HIERARCHY ACTIONS
   // GCS updates state only.
@@ -209,7 +231,6 @@ export default function GeoCascadingSelector({
   // -----------------------------
 
   const handleLmReset = () => {
-    console.log(`handleLmReset --selectedLm`, selectedLm);
     if (!selectedLm?.id) return;
 
     updateGeo({
@@ -372,6 +393,8 @@ export default function GeoCascadingSelector({
               {availableWards.map((ward, index) => {
                 // console.log(` `);
                 // console.log(`ward`, ward);
+                const syncedErfCount =
+                  wardSyncedCountsByPcode.get(ward?.id) || 0;
                 return (
                   <TouchableOpacity
                     key={ward?.id || index}
@@ -383,17 +406,29 @@ export default function GeoCascadingSelector({
                     ]}
                     onPress={() => selectWard(ward)}
                   >
-                    <Text
-                      style={[
-                        styles.wardText,
-                        selectedWard?.id === ward?.id && {
-                          fontWeight: "bold",
-                          color: "#2563eb",
-                        },
-                      ]}
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
                     >
-                      {ward?.name || ward?.code || `Ward ${index + 1}`}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.wardText,
+                          selectedWard?.id === ward?.id && {
+                            fontWeight: "bold",
+                            color: "#2563eb",
+                          },
+                        ]}
+                      >
+                        {ward?.name || ward?.code || `Ward ${index + 1}`}
+                      </Text>
+
+                      <Text style={styles.wardMetaDot}>•</Text>
+
+                      <Text style={styles.wardCountText}>{syncedErfCount}</Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -841,10 +876,14 @@ export default function GeoCascadingSelector({
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    bottom: 10,
-    left: 10,
-    right: 10,
+    bottom: 0,
+    left: 0,
+    right: 0,
     zIndex: 100,
+    backgroundColor: "lightgray",
+    padding: 10,
+    borderBlockColor: "gray",
+    borderBottomWidth: 1,
   },
   buttonRow: { flexDirection: "row", alignItems: "center" },
 
@@ -912,5 +951,22 @@ const styles = StyleSheet.create({
 
   buttonContent: {
     height: 52,
+  },
+  // wardCountText: {
+  //   fontSize: 12,
+  //   fontWeight: "900",
+  //   color: "#2563eb",
+  // },
+
+  wardMetaDot: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#94a3b8",
+  },
+
+  wardCountText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#106ae9",
   },
 });

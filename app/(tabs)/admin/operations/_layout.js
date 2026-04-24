@@ -8,7 +8,7 @@ export default function OperationsLayout() {
         animation: "slide_from_bottom",
       }}
     >
-      <Stack.Screen name="index" options={{ title: "Operations Center" }} />
+      <Stack.Screen name="index" options={{ title: "Ops Management Center" }} />
       <Stack.Screen name="teams" options={{ title: "Operational Teams" }} />
       <Stack.Screen
         name="geo-fences"

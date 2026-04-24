@@ -159,9 +159,7 @@ export default function SalesMonthlySyncLock({
               )}
             </Text>
 
-            <Text style={styles.elapsedText}>
-              Elapsed: {formatMs(elapsedMs)} • Please keep the app open
-            </Text>
+            <Text style={styles.elapsedText}>Please keep the app open</Text>
 
             <Text
               style={[

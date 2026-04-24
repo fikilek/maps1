@@ -128,8 +128,6 @@ export default function FormMeterDiscovery() {
     ? queueItemIdRaw[0]
     : queueItemIdRaw;
 
-  // const { premiseId, action: actionRaw } = useLocalSearchParams();
-
   const [editQueueItem, setEditQueueItem] = useState(undefined);
 
   const action = (() => {
@@ -441,6 +439,12 @@ export default function FormMeterDiscovery() {
         let queueResult = null;
 
         if (queueItemId) {
+          const existingSync = editQueueItem?.sync || {
+            attempts: 0,
+            lastAttemptAt: "NAv",
+            nextRetryAt: "NAv",
+          };
+
           queueResult = await updateSubmissionQueueItem(
             queueItemId,
             {
@@ -454,8 +458,7 @@ export default function FormMeterDiscovery() {
                 trnId: "NAv",
               },
               sync: {
-                attempts: 0,
-                lastAttemptAt: "NAv",
+                ...existingSync,
                 nextRetryAt: "NAv",
               },
             },

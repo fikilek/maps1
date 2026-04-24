@@ -1,31 +1,228 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Stack, useRouter } from "expo-router";
+import NetInfo from "@react-native-community/netinfo";
+import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { httpsCallable } from "firebase/functions";
+import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
 import { ActivityIndicator, Surface, Text } from "react-native-paper";
 import QueueItemCard from "../../../../components/QueueItemCard";
 import { useGeo } from "../../../../src/context/GeoContext";
+import { functions } from "../../../../src/firebase";
 import { useAuth } from "../../../../src/hooks/useAuth";
 import { processSubmissionQueue } from "../../../../src/services/processSubmissionQueue";
 import {
   clearSubmissionQueue,
   getSubmissionQueue,
+  getSubmissionQueueItemById,
+  markSubmissionQueueItemFailed,
+  markSubmissionQueueItemSuccess,
+  markSubmissionQueueItemSyncing,
   removeSubmissionQueueItem,
+  updateSubmissionQueueItem,
 } from "../../../../src/utils/submissionQueue";
 
 const getQueueUpdatedAtMs = (item) => {
   const raw = item?.metadata?.updatedAt || item?.metadata?.createdAt || "";
-
   const ms = new Date(raw).getTime();
-
   return Number.isNaN(ms) ? 0 : ms;
+};
+
+const processSingleSubmissionQueueItem = async (
+  queueItemId,
+  { agentUid = "SYSTEM", agentName = "SYSTEM" } = {},
+) => {
+  try {
+    const netState = await NetInfo.fetch();
+    const isOnline = Boolean(
+      netState.isConnected && netState.isInternetReachable,
+    );
+
+    if (!isOnline) {
+      return {
+        success: false,
+        message: "Device offline",
+      };
+    }
+
+    const item = await getSubmissionQueueItemById(queueItemId);
+
+    if (!item?.id) {
+      return {
+        success: false,
+        message: "Queue item not found",
+      };
+    }
+
+    const payload = item?.payload || {};
+    const originalMedia = Array.isArray(payload?.media) ? payload.media : [];
+
+    const storage = getStorage();
+    const callable = httpsCallable(functions, "onMeterDiscoveryCallable");
+
+    const syncedMedia = await Promise.all(
+      originalMedia.map(async (mediaItem) => {
+        if (mediaItem?.uri && !mediaItem?.url) {
+          const folder =
+            payload?.accessData?.access?.hasAccess === "yes"
+              ? `${payload?.meterType}_meters`
+              : "no_access";
+
+          const fileName = `${payload?.accessData?.erfId}_${mediaItem?.tag}_${Date.now()}.jpg`;
+
+          const storageRef = ref(storage, `meters/${folder}/${fileName}`);
+
+          const response = await fetch(mediaItem.uri);
+          const blob = await response.blob();
+
+          await uploadBytes(storageRef, blob);
+
+          const downloadUrl = await getDownloadURL(storageRef);
+
+          const { uri, ...cleanItem } = mediaItem;
+
+          return {
+            ...cleanItem,
+            url: downloadUrl,
+          };
+        }
+
+        return mediaItem;
+      }),
+    );
+
+    const finalPayload = {
+      ...payload,
+      media: syncedMedia,
+    };
+
+    const callableResponse = await callable(finalPayload);
+    const result = callableResponse?.data || {};
+
+    if (!result?.success) {
+      const code = result?.code || "SYNC_FAILED";
+
+      if (code === "INVALID_PREMISE_ID" || code === "PREMISE_NOT_FOUND") {
+        await updateSubmissionQueueItem(
+          queueItemId,
+          {
+            status: "PENDING",
+            result: {
+              success: false,
+              code,
+              message:
+                result?.message ||
+                "Parent premise is not ready yet. This draft will retry later.",
+              trnId: "NAv",
+            },
+          },
+          agentUid,
+          agentName,
+        );
+
+        return {
+          success: false,
+          message:
+            result?.message ||
+            "Parent premise is not ready yet. This draft will retry later.",
+        };
+      }
+
+      await markSubmissionQueueItemFailed(
+        queueItemId,
+        {
+          code,
+          message: result?.message || "Submission sync failed",
+          trnId: result?.trnId || "NAv",
+        },
+        agentUid,
+        agentName,
+      );
+
+      return {
+        success: false,
+        message: result?.message || "Submission sync failed",
+      };
+    }
+
+    await markSubmissionQueueItemSuccess(
+      queueItemId,
+      {
+        code: result?.code || "SUCCESS",
+        message: result?.message || "Synced successfully",
+        trnId: result?.trnId || finalPayload?.id || "NAv",
+      },
+      agentUid,
+      agentName,
+    );
+
+    return {
+      success: true,
+      message: result?.message || "Queue item synced successfully",
+    };
+  } catch (error) {
+    console.log(
+      "SubmissionQueueScreen -- processSingleSubmissionQueueItem error",
+      error,
+    );
+
+    const message = error?.message || "";
+    const code = error?.code || "";
+
+    const isPremiseError =
+      message.includes("PREMISE") ||
+      message.includes("premise") ||
+      code === "INVALID_PREMISE_ID" ||
+      code === "PREMISE_NOT_FOUND";
+
+    if (isPremiseError) {
+      await updateSubmissionQueueItem(
+        queueItemId,
+        {
+          status: "PENDING",
+          result: {
+            success: false,
+            code: "PREMISE_NOT_READY",
+            message:
+              "Parent premise is not ready yet. This draft will retry later.",
+            trnId: "NAv",
+          },
+        },
+        agentUid,
+        agentName,
+      );
+
+      return {
+        success: false,
+        message:
+          "Parent premise is not ready yet. This draft will retry later.",
+      };
+    }
+
+    await markSubmissionQueueItemFailed(
+      queueItemId,
+      {
+        code: "SYNC_FAILED",
+        message: message || "Sync failed",
+        trnId: "NAv",
+      },
+      agentUid,
+      agentName,
+    );
+
+    return {
+      success: false,
+      message: message || "Sync failed",
+    };
+  }
 };
 
 export default function SubmissionQueueScreen() {
@@ -33,6 +230,7 @@ export default function SubmissionQueueScreen() {
   const router = useRouter();
   const { updateGeo } = useGeo();
 
+  const [isOnline, setIsOnline] = useState(true);
   const [queueItems, setQueueItems] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -53,6 +251,21 @@ export default function SubmissionQueueScreen() {
       console.log("SubmissionQueueScreen -- loadQueue error", error);
     }
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const online = Boolean(state.isConnected && state.isInternetReachable);
+      setIsOnline(online);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadQueue();
+    }, [loadQueue]),
+  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -97,13 +310,87 @@ export default function SubmissionQueueScreen() {
   };
 
   const handleProcessQueue = async () => {
-    setBusy(true);
-    await processSubmissionQueue({
-      agentUid,
-      agentName,
-    });
-    await loadQueue();
-    setBusy(false);
+    if (!isOnline) {
+      ToastAndroid.show(
+        "You are offline. Sync is unavailable.",
+        ToastAndroid.SHORT,
+      );
+      return;
+    }
+
+    try {
+      setBusy(true);
+
+      const result = await processSubmissionQueue({
+        agentUid,
+        agentName,
+      });
+
+      await loadQueue();
+
+      if (result?.success) {
+        ToastAndroid.show(
+          result?.message || "Queue processed",
+          ToastAndroid.SHORT,
+        );
+      } else {
+        ToastAndroid.show(result?.message || "Sync failed", ToastAndroid.LONG);
+      }
+    } catch (error) {
+      console.log("SubmissionQueueScreen -- handleProcessQueue error", error);
+      ToastAndroid.show("Sync failed", ToastAndroid.LONG);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSyncItem = async (item) => {
+    if (!isOnline) {
+      ToastAndroid.show(
+        "You are offline. Sync is unavailable.",
+        ToastAndroid.SHORT,
+      );
+      return;
+    }
+
+    if (!item?.id) return;
+
+    if (item?.status !== "PENDING") {
+      ToastAndroid.show(
+        "Only pending drafts can be synced.",
+        ToastAndroid.SHORT,
+      );
+      return;
+    }
+
+    try {
+      setBusy(true);
+
+      await markSubmissionQueueItemSyncing(item.id, agentUid, agentName);
+      await loadQueue();
+
+      const result = await processSingleSubmissionQueueItem(item.id, {
+        agentUid,
+        agentName,
+      });
+
+      await loadQueue();
+
+      if (result?.success) {
+        ToastAndroid.show(
+          result?.message || "Queue item synced",
+          ToastAndroid.SHORT,
+        );
+      } else {
+        ToastAndroid.show(result?.message || "Sync failed", ToastAndroid.LONG);
+      }
+    } catch (error) {
+      console.log("SubmissionQueueScreen -- handleSyncItem error", error);
+      await loadQueue();
+      ToastAndroid.show("Sync failed", ToastAndroid.LONG);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleEditItem = (item) => {
@@ -120,7 +407,9 @@ export default function SubmissionQueueScreen() {
     const hasAccess =
       item?.payload?.accessData?.access?.hasAccess === "no" ? "no" : "yes";
 
-    const meterType = hasAccess === "no" ? "" : item?.payload?.meterType || "";
+    // const meterType = hasAccess === "no" ? "" : item?.payload?.meterType || "";
+    const meterType =
+      hasAccess === "no" ? "NA" : item?.payload?.meterType || "";
 
     const premiseId =
       item?.context?.premiseId ||
@@ -192,10 +481,6 @@ export default function SubmissionQueueScreen() {
     router.push("/(tabs)/maps");
   };
 
-  useEffect(() => {
-    loadQueue();
-  }, [loadQueue]);
-
   return (
     <>
       <Stack.Screen
@@ -213,7 +498,7 @@ export default function SubmissionQueueScreen() {
         }
       >
         <Surface style={styles.headerCard} elevation={1}>
-          <Text style={styles.headerTitle}>Offline Metter Discovery Forms</Text>
+          <Text style={styles.headerTitle}>Offline Meter Discovery Forms</Text>
           <Text style={styles.headerSub}>Total Items: {queueItems.length}</Text>
 
           <View style={styles.actionsRow}>
@@ -229,10 +514,13 @@ export default function SubmissionQueueScreen() {
             <TouchableOpacity
               style={[
                 styles.actionBtn,
-                { backgroundColor: "#2563eb", opacity: busy ? 0.7 : 1 },
+                {
+                  backgroundColor: !isOnline ? "#94a3b8" : "#2563eb",
+                  opacity: busy || !isOnline ? 0.7 : 1,
+                },
               ]}
               onPress={handleProcessQueue}
-              disabled={busy}
+              disabled={busy || !isOnline}
             >
               {busy ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -240,7 +528,7 @@ export default function SubmissionQueueScreen() {
                 <MaterialCommunityIcons name="sync" size={18} color="#fff" />
               )}
               <Text style={styles.actionBtnText}>
-                {busy ? "Syncing..." : "Sync Now"}
+                {!isOnline ? "Offline" : busy ? "Syncing..." : "Sync Now"}
               </Text>
             </TouchableOpacity>
 
@@ -265,9 +553,11 @@ export default function SubmissionQueueScreen() {
               key={item.id}
               item={item}
               busy={busy}
+              isOnline={isOnline}
               onRemove={handleRemoveItem}
               onEdit={handleEditItem}
               onOpenMap={handleOpenMapItem}
+              handleSyncItem={handleSyncItem}
             />
           ))
         )}

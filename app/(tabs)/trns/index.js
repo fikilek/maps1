@@ -192,7 +192,6 @@ export default function TrnsScreen() {
   const { filtered, sync } = useWarehouse();
 
   const trns = filtered?.trns || [];
-  console.log(`trns`, trns);
 
   const trnsSync = sync?.trns || {};
   const scopeSync = sync?.scope || {};

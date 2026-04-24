@@ -1,5 +1,10 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { StyleSheet, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Surface, Text } from "react-native-paper";
 
 const getStatusColor = (status) => {
@@ -25,11 +30,13 @@ const formatDateTime = (value) => {
 export default function QueueItemCard({
   item,
   busy = false,
+  isOnline = true,
   onRemove,
   onEdit,
   onOpenMap,
+  handleSyncItem,
 }) {
-  console.log(`QueueItemCard --item`, item);
+  // console.log(`item `, item);
   const statusColor = getStatusColor(item?.status);
 
   const premiseId = item?.context?.premiseId || "NAv";
@@ -41,6 +48,13 @@ export default function QueueItemCard({
     item?.payload?.accessData?.premise?.location?.address ||
     "NAv";
 
+  const premisePropertyLine = [
+    item?.payload?.accessData?.premise?.propertyType?.name,
+    item?.payload?.accessData?.premise?.propertyType?.unitNo,
+  ]
+    .filter((value) => value && value !== "NAv")
+    .join(" • ");
+
   const updatedAtText = formatDateTime(
     item?.metadata?.updatedAt || item?.metadata?.createdAt || "NAv",
   );
@@ -49,14 +63,14 @@ export default function QueueItemCard({
     if (item?.status === "PENDING") {
       return {
         code: "PENDING",
-        message: "Draft saved locally. Waiting to sync.",
+        message: "Draft saved locally",
       };
     }
 
     if (item?.status === "SYNCING") {
       return {
         code: "SYNCING",
-        message: "Submission is currently being synced.",
+        message: "Submission is currently being synced",
       };
     }
 
@@ -83,6 +97,26 @@ export default function QueueItemCard({
   const meterGps = item?.payload?.ast?.location?.gps;
   const canOpenMap =
     typeof meterGps?.lat === "number" && typeof meterGps?.lng === "number";
+
+  const syncLabel = !isOnline
+    ? "Offline"
+    : item?.status === "SYNCING"
+      ? "Syncing..."
+      : item?.status === "SUCCESS"
+        ? "Synced"
+        : item?.status === "PENDING"
+          ? "Sync"
+          : "Pending Only";
+
+  const syncDisabled = busy || !isOnline || item?.status !== "PENDING";
+
+  const syncBackgroundColor = !isOnline
+    ? "#94a3b8"
+    : item?.status === "SYNCING"
+      ? "#0f172a"
+      : item?.status === "SUCCESS"
+        ? "#94a3b8"
+        : "#2563eb";
 
   return (
     <Surface style={styles.card} elevation={1}>
@@ -133,22 +167,18 @@ export default function QueueItemCard({
             <Text style={styles.label}>Premise Address</Text>
 
             <View style={styles.addressRow}>
-              <Text style={styles.addressValue} numberOfLines={3}>
-                {premiseAddress}
-              </Text>
+              <View style={styles.addressTextWrap}>
+                <Text style={styles.addressValue} numberOfLines={3}>
+                  {premiseAddress}
+                </Text>
 
-              {/* <MaterialCommunityIcons
-                name="map-marker-radius-outline"
-                size={20}
-                color={canOpenMap ? "#2563eb" : "#94a3b8"}
-              /> */}
+                {premisePropertyLine ? (
+                  <Text style={styles.addressSubValue} numberOfLines={2}>
+                    {premisePropertyLine}
+                  </Text>
+                ) : null}
+              </View>
             </View>
-
-            {/* <Text style={styles.mapHint} numberOfLines={1}>
-              {canOpenMap
-                ? "Tap to view draft meter on map"
-                : "No GPS available"}
-            </Text> */}
           </TouchableOpacity>
 
           <View style={styles.rightCol}>
@@ -174,44 +204,71 @@ export default function QueueItemCard({
         </View>
       </View>
 
-      {/* BOTTOM ROW */}
-      <View style={styles.bottomRow}>
-        <View style={styles.resultBlock}>
-          <Text style={styles.resultCode} numberOfLines={1}>
-            {displayResult.code}
-          </Text>
-          <Text style={styles.resultMessage} numberOfLines={2}>
-            {displayResult.message}
-          </Text>
-        </View>
+      {/* STATUS MESSAGE ROW */}
+      <View style={styles.statusInfoRow}>
+        <Text style={styles.statusInfoCode} numberOfLines={1}>
+          {displayResult.code}
+        </Text>
 
-        <View style={styles.actionsRight}>
-          <TouchableOpacity
-            style={[styles.editBtn, { opacity: busy || !canEdit ? 0.5 : 1 }]}
-            onPress={() => onEdit?.(item)}
-            disabled={busy || !canEdit}
-          >
-            <MaterialCommunityIcons
-              name="pencil-outline"
-              size={16}
-              color="#fff"
-            />
-            <Text style={styles.editBtnText}>Edit</Text>
-          </TouchableOpacity>
+        <Text style={styles.statusInfoMessage} numberOfLines={2}>
+          {displayResult.message}
+        </Text>
+      </View>
 
-          <TouchableOpacity
-            style={[styles.removeBtn, { opacity: busy ? 0.6 : 1 }]}
-            onPress={() => onRemove?.(item?.id)}
-            disabled={busy}
-          >
-            <MaterialCommunityIcons
-              name="trash-can-outline"
-              size={16}
-              color="#fff"
-            />
-            <Text style={styles.removeBtnText}>Remove</Text>
-          </TouchableOpacity>
-        </View>
+      {/* ACTIONS ROW */}
+      <View style={styles.actionsRow}>
+        <TouchableOpacity
+          style={[
+            styles.actionBtn,
+            {
+              backgroundColor: syncBackgroundColor,
+              opacity: syncDisabled ? 0.7 : 1,
+            },
+          ]}
+          onPress={() => handleSyncItem?.(item)}
+          disabled={syncDisabled}
+        >
+          {item?.status === "SYNCING" ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialCommunityIcons name="sync" size={16} color="#fff" />
+          )}
+          <Text style={styles.actionBtnText}>{syncLabel}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.actionBtn,
+            styles.editBtn,
+            { opacity: busy || !canEdit ? 0.5 : 1 },
+          ]}
+          onPress={() => onEdit?.(item)}
+          disabled={busy || !canEdit}
+        >
+          <MaterialCommunityIcons
+            name="pencil-outline"
+            size={16}
+            color="#fff"
+          />
+          <Text style={styles.actionBtnText}>Edit</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.actionBtn,
+            styles.removeBtn,
+            { opacity: busy ? 0.6 : 1 },
+          ]}
+          onPress={() => onRemove?.(item?.id)}
+          disabled={busy}
+        >
+          <MaterialCommunityIcons
+            name="trash-can-outline"
+            size={16}
+            color="#fff"
+          />
+          <Text style={styles.actionBtnText}>Remove</Text>
+        </TouchableOpacity>
       </View>
     </Surface>
   );
@@ -318,73 +375,72 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  mapHint: {
-    marginTop: 4,
-    fontSize: 11,
-    color: "#2563eb",
-    fontWeight: "700",
-  },
-
-  bottomRow: {
+  statusInfoRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#e2e8f0",
   },
 
-  resultBlock: {
-    flex: 1,
-  },
-
-  resultCode: {
+  statusInfoCode: {
     fontSize: 11,
     fontWeight: "900",
     color: "#334155",
-    marginBottom: 4,
     textTransform: "uppercase",
   },
 
-  resultMessage: {
+  statusInfoMessage: {
+    flex: 1,
+    textAlign: "right",
     fontSize: 12,
     color: "#64748b",
     lineHeight: 16,
+    fontWeight: "700",
   },
 
-  actionsRight: {
+  actionsRow: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 8,
   },
 
-  editBtn: {
+  actionBtn: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    backgroundColor: "#2563eb",
     borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
   },
 
-  editBtnText: {
+  actionBtnText: {
     color: "#fff",
     fontSize: 12,
     fontWeight: "800",
+  },
+
+  editBtn: {
+    backgroundColor: "#2563eb",
   },
 
   removeBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
     backgroundColor: "#dc2626",
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+  },
+  addressTextWrap: {
+    flex: 1,
   },
 
-  removeBtnText: {
-    color: "#fff",
+  addressSubValue: {
+    marginTop: 4,
     fontSize: 12,
-    fontWeight: "800",
+    color: "#64748b",
+    fontWeight: "700",
+    lineHeight: 16,
   },
 });

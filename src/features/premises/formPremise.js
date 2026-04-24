@@ -123,7 +123,7 @@ function requiresUnitNo(type) {
 }
 
 export default function FormPremise() {
-  console.log(`FormPremise ----mounted`);
+  // console.log(`FormPremise ----mounted`);
 
   const [inProgress, setInProgress] = useState(false);
 
@@ -205,6 +205,7 @@ export default function FormPremise() {
   const premiseSchema = useMemo(() => {
     return Yup.object().shape({
       address: Yup.object().shape({
+        suburbName: Yup.string().trim().required("Mandatory"),
         strNo: Yup.string().trim().required("Mandatory"),
         strName: Yup.string().trim().required("Mandatory"),
         strType: Yup.string()
@@ -333,6 +334,7 @@ export default function FormPremise() {
         context: payload?.context || baseContext,
 
         address: {
+          suburbName: payload?.address?.suburbName || "",
           strNo: payload?.address?.strNo || "",
           strName: payload?.address?.strName || "",
           strType: payload?.address?.strType || "Select...",
@@ -367,6 +369,7 @@ export default function FormPremise() {
         context: sourcePremise?.context || baseContext,
 
         address: {
+          suburbName: sourcePremise?.address?.suburbName || "",
           strNo: sourcePremise?.address?.strNo || "",
           strName: sourcePremise?.address?.strName || "",
           strType: sourcePremise?.address?.strType || "Select...",
@@ -401,6 +404,7 @@ export default function FormPremise() {
         context: sourcePremise?.context || baseContext,
 
         address: {
+          suburbName: sourcePremise?.address?.suburbName || "",
           strNo: sourcePremise?.address?.strNo || "",
           strName: sourcePremise?.address?.strName || "",
           strType: sourcePremise?.address?.strType || "Select...",
@@ -427,6 +431,7 @@ export default function FormPremise() {
       context: baseContext,
 
       address: {
+        suburbName: "",
         strNo: "",
         strName: "",
         strType: "Select...",
@@ -588,6 +593,7 @@ export default function FormPremise() {
             context: values.context,
 
             address: {
+              suburbName: String(values?.address?.suburbName || "").trim(),
               strNo: String(values?.address?.strNo || "").trim(),
               strName: String(values?.address?.strName || "").trim(),
               strType: values?.address?.strType || "Select...",
@@ -885,6 +891,17 @@ export default function FormPremise() {
                   <Text style={styles.sectionTitle}>STREET ADDRESS</Text>
                 </View>
                 <Surface style={styles.card} elevation={1}>
+                  <Surface style={styles.card} elevation={1}>
+                    <View style={{ flex: 1 }}>
+                      <FormInput
+                        label="SUBURB NAME"
+                        name="address.suburbName"
+                        placeholder="Suburb Name"
+                        keyboardType="default"
+                      />
+                    </View>
+                  </Surface>
+
                   <Surface style={styles.card} elevation={1}>
                     <View style={{ flexDirection: "row" }}>
                       <View style={{ flex: 1 }}>
