@@ -1,5 +1,12 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
 
@@ -19,23 +26,15 @@ function toMillis(value) {
 }
 
 function getAstUpdatedAt(ast) {
-  return (
-    ast?.metadata?.updatedAt ||
-    ast?.accessData?.metadata?.updatedAt ||
-    ast?.metadata?.createdAt ||
-    ast?.accessData?.metadata?.createdAt ||
-    null
-  );
+  return ast?.metadata?.updatedAt || ast?.metadata?.createdAt || null;
+}
+
+function getAstUpdatedByUid(ast) {
+  return ast?.metadata?.updatedByUid || ast?.metadata?.createdByUid || "NAv";
 }
 
 function getAstUpdatedByUser(ast) {
-  return (
-    ast?.metadata?.updatedByUser ||
-    ast?.metadata?.createdByUser ||
-    ast?.accessData?.metadata?.updatedByUser ||
-    ast?.accessData?.metadata?.createdByUser ||
-    "Agent"
-  );
+  return ast?.metadata?.updatedByUser || ast?.metadata?.createdByUser || "NAv";
 }
 
 function sortAstsByUpdatedAtDesc(list) {
@@ -81,6 +80,7 @@ export const astsApi = createApi({
           const q = query(
             collection(db, "asts"),
             where("accessData.parents.lmPcode", "==", lmPcode),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(
@@ -123,7 +123,12 @@ export const astsApi = createApi({
                 const erfId = astData?.accessData?.erfId || null;
                 const wardPcode =
                   astData?.accessData?.parents?.wardPcode || null;
-                const agentName = getAstUpdatedByUser(astData);
+
+                const astUpdatedAt = getAstUpdatedAt(astData);
+                const updatedByUid = getAstUpdatedByUid(astData);
+                const updatedByUser = getAstUpdatedByUser(astData);
+
+                if (!astUpdatedAt) return;
 
                 if (premiseId) {
                   try {
@@ -138,9 +143,10 @@ export const astsApi = createApi({
 
                           if (targetPrem) {
                             if (!targetPrem.metadata) targetPrem.metadata = {};
-                            targetPrem.metadata.updatedAt =
-                              new Date().toISOString();
-                            targetPrem.metadata.updatedBy = agentName;
+
+                            targetPrem.metadata.updatedAt = astUpdatedAt;
+                            targetPrem.metadata.updatedByUid = updatedByUid;
+                            targetPrem.metadata.updatedByUser = updatedByUser;
                           }
                         },
                       ),
@@ -166,9 +172,10 @@ export const astsApi = createApi({
 
                           if (targetErf) {
                             if (!targetErf.metadata) targetErf.metadata = {};
-                            targetErf.metadata.updatedAt =
-                              new Date().toISOString();
-                            targetErf.metadata.updatedBy = agentName;
+
+                            targetErf.metadata.updatedAt = astUpdatedAt;
+                            targetErf.metadata.updatedByUid = updatedByUid;
+                            targetErf.metadata.updatedByUser = updatedByUser;
                           }
                         },
                       ),
@@ -212,6 +219,7 @@ export const astsApi = createApi({
           const q = query(
             collection(db, "asts"),
             where("accessData.parents.countryPcode", "==", id),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(
@@ -313,6 +321,7 @@ export const astsApi = createApi({
             collection(db, "asts"),
             where("accessData.parents.lmPcode", "==", lmPcode),
             where("accessData.parents.wardPcode", "==", wardPcode),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(
