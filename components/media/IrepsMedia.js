@@ -35,6 +35,7 @@ export const IrepsMedia = ({
     (tag === "anomalyPhoto" && normalizedError.includes("anomaly")) ||
     (tag === "noAccessPhoto" && normalizedError.includes("no access")) ||
     (tag === "keypadPhoto" && normalizedError.includes("keypad")) ||
+    (tag === "sealPhoto" && normalizedError.includes("seal")) ||
     (tag === "astCbPhoto" && normalizedError.includes("circuit breaker")) ||
     (tag === "ogsPhoto" && normalizedError.includes("off-grid supply")) ||
     (tag === "normalisationPhoto" &&

@@ -8,6 +8,7 @@ import { Provider } from "react-redux";
 import { PersistGate } from "redux-persist/integration/react";
 import { DiscoveryProvider } from "../src/context/DiscoveryContext";
 import { GeoProvider } from "../src/context/GeoContext";
+import { InstallationProvider } from "../src/context/InstallationContext";
 import { MapProvider } from "../src/context/MapContext";
 import { WarehouseProvider } from "../src/context/WarehouseContext";
 import { auth } from "../src/firebase";
@@ -142,14 +143,16 @@ export default function RootLayout() {
               <PaperProvider>
                 <SafeAreaProvider>
                   <DiscoveryProvider>
-                    {/* 1. Bootstrap the Firebase Listeners */}
-                    <AuthBootstrap />
+                    <InstallationProvider>
+                      {/* 1. Bootstrap the Firebase Listeners */}
+                      <AuthBootstrap />
 
-                    {/* 2. Place the Guard below the listeners */}
-                    <AuthGate />
+                      {/* 2. Place the Guard below the listeners */}
+                      <AuthGate />
 
-                    {/* 3. Render the Screens */}
-                    <Slot />
+                      {/* 3. Render the Screens */}
+                      <Slot />
+                    </InstallationProvider>
                   </DiscoveryProvider>
                 </SafeAreaProvider>
               </PaperProvider>

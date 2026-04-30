@@ -36,11 +36,7 @@ const getTrnMeterNo = (trn) =>
   );
 
 const getTrnUpdatedAt = (trn) =>
-  trn?.metadata?.updatedAt ||
-  trn?.metadata?.createdAt ||
-  trn?.accessData?.metadata?.updatedAt ||
-  trn?.accessData?.metadata?.createdAt ||
-  "NAv";
+  trn?.metadata?.updatedAt || trn?.metadata?.createdAt || "NAv";
 
 const getSaleUpdatedAt = (sale) =>
   sale?.txAtISO || sale?.ingestedAtISO || sale?.updatedAt || "NAv";

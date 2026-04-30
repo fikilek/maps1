@@ -8,12 +8,22 @@ export default function AstsScreen() {
   console.log("AstsScreen --mounting");
 
   const { filtered, sync, loading } = useWarehouse();
+  // console.log(`AstsScreen -- filtered`, filtered);
 
   const asts = filtered?.meters || [];
   const scopeSync = sync?.scope || {};
 
   const isLoading = loading;
   const noWard = scopeSync?.status === "awaiting-ward";
+
+  console.log("AstsScreen -- debug", {
+    loading,
+    scopeStatus: scopeSync?.status,
+    astsCount: asts.length,
+    firstAst: asts?.[0],
+    firstAstWardTop: asts?.[0]?.parents?.wardPcode,
+    firstAstWardAccessData: asts?.[0]?.accessData?.parents?.wardPcode,
+  });
 
   if (noWard) {
     return (

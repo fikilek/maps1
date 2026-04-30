@@ -53,8 +53,6 @@ export default function UserStatsReport() {
 
     const getTrnDate = (t) => {
       return (
-        parseDateValue(t?.accessData?.metadata?.updatedAt) ||
-        parseDateValue(t?.accessData?.metadata?.createdAt) ||
         parseDateValue(t?.metadata?.updatedAt) ||
         parseDateValue(t?.metadata?.createdAt) ||
         null
@@ -62,13 +60,7 @@ export default function UserStatsReport() {
     };
 
     const getOwnerUid = (t) => {
-      return (
-        t?.accessData?.metadata?.updatedByUid ||
-        t?.accessData?.metadata?.createdByUid ||
-        t?.metadata?.updatedByUid ||
-        t?.metadata?.createdByUid ||
-        null
-      );
+      return t?.metadata?.updatedByUid || t?.metadata?.createdByUid || null;
     };
 
     const checkNoAccess = (t) => {

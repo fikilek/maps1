@@ -27,18 +27,10 @@ const getTrnMeterNo = (trn) =>
   );
 
 const getTrnUpdatedAt = (trn) =>
-  trn?.metadata?.updatedAt ||
-  trn?.metadata?.createdAt ||
-  trn?.accessData?.metadata?.updatedAt ||
-  trn?.accessData?.metadata?.createdAt ||
-  "NAv";
+  trn?.metadata?.updatedAt || trn?.metadata?.createdAt || "NAv";
 
 const getTrnCreatedByUser = (trn) =>
-  trn?.metadata?.updatedByUser ||
-  trn?.metadata?.createdByUser ||
-  trn?.accessData?.metadata?.updatedByUser ||
-  trn?.accessData?.metadata?.created?.byUser ||
-  "NAv";
+  trn?.metadata?.updatedByUser || trn?.metadata?.createdByUser || "NAv";
 
 const getTrnTypeLabel = (trn) => {
   const raw =
@@ -60,11 +52,7 @@ const getTrnDetails = (trn) =>
 const getAstVisibility = (ast) => ast?.master?.visibility || "NAv";
 
 const getAstUpdatedAt = (ast) =>
-  ast?.accessData?.metadata?.updatedAt ||
-  ast?.metadata?.updatedAt ||
-  ast?.metadata?.createdAt ||
-  ast?.accessData?.metadata?.createdAt ||
-  "NAv";
+  ast?.metadata?.updatedAt || ast?.metadata?.createdAt || "NAv";
 
 const getSaleUpdatedAt = (sale) =>
   sale?.txAtISO || sale?.ingestedAtISO || sale?.updatedAt || "NAv";

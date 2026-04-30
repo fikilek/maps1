@@ -1,5 +1,5 @@
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Checkbox } from "react-native-paper";
+import { Checkbox, Surface } from "react-native-paper";
 import FormInputMeterNo from "../../src/features/meters/FormInputMeterNo";
 import SovereignLocationPicker from "../maps/SovereignLocationPicker";
 import { IrepsMedia } from "../media/IrepsMedia";
@@ -25,6 +25,11 @@ export const ElectricitySections = ({
   nearbyPremises = [],
   nearbyMeters = [],
 }) => {
+  const trnId = values?.id || "";
+  const isInstallation = trnId.startsWith("TRN_MINST_");
+  const showNormalisation = !isInstallation;
+  const isDiscovery = trnId.startsWith("TRN_MDIS_");
+
   // 🛰️ TRANSFORMING SETTINGS FOR MULTI-SELECT
   // We take the raw strings from Firestore and turn them into {label, value} objects
   const normalizationOptions = (getOptions("norm_actions") || []).map(
@@ -75,101 +80,140 @@ export const ElectricitySections = ({
   return (
     <View style={disabled && { opacity: 0.7 }}>
       {/* ⚡ SECTION 1: CORE METER DATA */}
-      <FormSection title="Electricity Meter Details">
-        <FormInputMeterNo
-          label="Meter Number"
-          name="ast.astData.astNo"
-          disabled={disabled}
-        />
-        <IrepsMedia
-          tag={"astNoPhoto"}
-          agentName={agentName}
-          agentUid={agentUid}
-          fallbackGps={values?.geometry?.centroid}
-        />
+      <FormSection
+        title={`${isInstallation ? "INSTALLTION" : "DISCOVERY"} - Electricity Meter Details`}
+      >
+        <Surface style={styles.section} elevation={2}>
+          <FormInputMeterNo
+            label="Meter Number"
+            name="ast.astData.astNo"
+            disabled={disabled}
+          />
+          <IrepsMedia
+            tag={"astNoPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+            fallbackGps={values?.geometry?.centroid}
+          />
+        </Surface>
 
-        <FormSelect
-          label="MANUFACTURER"
-          name="ast.astData.astManufacturer"
-          options={getOptions("elec_manufacturers")}
-          disabled={disabled}
-        />
-        <FormInput
-          label="MODEL (NAME)"
-          name="ast.astData.astName"
-          disabled={disabled}
-        />
+        <Surface style={styles.section} elevation={2}>
+          <FormSelect
+            label="MANUFACTURER"
+            name="ast.astData.astManufacturer"
+            options={getOptions("elec_manufacturers")}
+            disabled={disabled}
+          />
+          <FormInput
+            label="MODEL (NAME)"
+            name="ast.astData.astName"
+            disabled={disabled}
+          />
 
-        <View style={styles.row}>
-          <View style={styles.flexHalf}>
-            <FormSelect
-              label="PHASE"
-              name="ast.astData.meter.phase"
-              options={["single", "three"]}
-              disabled={disabled}
-            />
+          <View style={styles.row}>
+            <View style={styles.flexHalf}>
+              <FormSelect
+                label="PHASE"
+                name="ast.astData.meter.phase"
+                options={["single", "three"]}
+                disabled={disabled}
+              />
+            </View>
+
+            <View style={styles.flexHalf}>
+              <FormSelect
+                label="TYPE"
+                name="ast.astData.meter.type"
+                options={["prepaid", "conventional"]}
+                disabled={disabled}
+              />
+            </View>
           </View>
 
-          <View style={styles.flexHalf}>
-            <FormSelect
-              label="TYPE"
-              name="ast.astData.meter.type"
-              options={["prepaid", "conventional"]}
-              disabled={disabled}
-            />
-          </View>
-        </View>
-
-        <FormSelect
-          label="CATEGORY"
-          name="ast.astData.meter.category"
-          options={["Normal", "Bulk"]}
-          disabled={disabled}
-        />
+          <FormSelect
+            label="CATEGORY"
+            name="ast.astData.meter.category"
+            options={["Normal", "Bulk"]}
+            disabled={disabled}
+          />
+        </Surface>
       </FormSection>
 
       {/* ⌨️ SECTION 2: INFRASTRUCTURE */}
       <FormSection title="Infrastructure">
-        <FormInput
-          label="KEYPAD SERIAL NO"
-          name="ast.astData.meter.keypad.serialNo"
-          disabled={disabled}
-        />
-        {/* 🛡️ Reactive Logic: Required if Serial is missing */}
-        {!values?.ast?.astData?.meter?.keypad?.serialNo && (
+        {/* SEAL */}
+
+        <Surface style={styles.section} elevation={2}>
           <FormInput
-            label="KEYPAD COMMENT (REQUIRED)"
-            name="ast.astData.meter.keypad.comment"
-            placeholder="Why is there no serial?"
+            label="SEAL NO"
+            name="ast.astData.meter.seal.sealNo"
             disabled={disabled}
           />
-        )}
-        <IrepsMedia
-          tag={"keypadPhoto"}
-          agentName={agentName}
-          agentUid={agentUid}
-          fallbackGps={values?.geometry?.centroid}
-        />
-        <FormInput
-          label="CB SIZE (AMPS)"
-          name="ast.astData.meter.cb.size"
-          keyboardType="numeric"
-          disabled={disabled}
-        />
-        {!values?.ast?.astData?.meter?.cb?.size && (
+          {/* 🛡️ Reactive Logic: Required if Serial is missing */}
+          {!values?.ast?.astData?.meter?.seal?.sealNo && (
+            <FormInput
+              label="SEAL COMMENT (REQUIRED)"
+              name="ast.astData.meter.seal.comment"
+              placeholder="Why is there no seal?"
+              disabled={disabled}
+            />
+          )}
+          <IrepsMedia
+            tag={"sealPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+            fallbackGps={values?.geometry?.centroid}
+          />
+        </Surface>
+
+        {/* KEYPAD */}
+
+        <Surface style={styles.section} elevation={2}>
           <FormInput
-            label="CB COMMENT (REQUIRED)"
-            name="ast.astData.meter.cb.comment"
-            placeholder="Why is the CB size missing?"
+            label="KEYPAD SERIAL NO"
+            name="ast.astData.meter.keypad.serialNo"
             disabled={disabled}
           />
-        )}
-        <IrepsMedia
-          tag={"astCbPhoto"}
-          agentName={agentName}
-          agentUid={agentUid}
-          fallbackGps={values?.geometry?.centroid}
-        />
+          {/* 🛡️ Reactive Logic: Required if Serial is missing */}
+          {!values?.ast?.astData?.meter?.keypad?.serialNo && (
+            <FormInput
+              label="KEYPAD COMMENT (REQUIRED)"
+              name="ast.astData.meter.keypad.comment"
+              placeholder="Why is there no serial?"
+              disabled={disabled}
+            />
+          )}
+          <IrepsMedia
+            tag={"keypadPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+            fallbackGps={values?.geometry?.centroid}
+          />
+        </Surface>
+
+        <Surface style={styles.section} elevation={2}>
+          {/* CB */}
+          <FormInput
+            label="CB SIZE (AMPS)"
+            name="ast.astData.meter.cb.size"
+            keyboardType="numeric"
+            disabled={disabled}
+          />
+          {!values?.ast?.astData?.meter?.cb?.size && (
+            <FormInput
+              label="CB COMMENT (REQUIRED)"
+              name="ast.astData.meter.cb.comment"
+              placeholder="Why is the CB size missing?"
+              disabled={disabled}
+            />
+          )}
+          <IrepsMedia
+            tag={"astCbPhoto"}
+            agentName={agentName}
+            agentUid={agentUid}
+            fallbackGps={values?.geometry?.centroid}
+          />
+        </Surface>
       </FormSection>
 
       {/* 📍 SECTION 3: LOCATION (The Sovereign Anchor) */}
@@ -196,12 +240,14 @@ export const ElectricitySections = ({
 
       {/* 🔒 SECTION 4: CONNECTION & STATUS */}
       <FormSection title="Status & Supply">
-        <FormSelect
-          label="SERVICE CONNECTION (SC)"
-          name="ast.sc.status"
-          options={["Connected", "Disconnected", "Not In Use"]}
-          disabled={disabled}
-        />
+        {isDiscovery && (
+          <FormSelect
+            label="METER STATUS"
+            name="status.state"
+            options={["CONNECTED", "DISCONNECTED"]}
+            disabled={disabled}
+          />
+        )}
         <FormSelect
           label="OFF-GRID SUPPLY?"
           name="ast.ogs.hasOffGridSupply"
@@ -229,46 +275,49 @@ export const ElectricitySections = ({
       />
 
       {/* 🏛️ REPAIRED SECTION 4: NORMALISATION */}
-      <FormSection title="Normalisation">
-        <View style={styles.checkboxGroup}>
-          {normalizationOptions.map((opt) => {
-            const isChecked = values?.ast?.normalisation?.actionTaken?.includes(
-              opt.value,
-            );
-            return (
-              <TouchableOpacity
-                key={opt.value}
-                style={[styles.checkRow, isChecked && styles.checkRowActive]}
-                onPress={() => handleToggle(opt.value)}
-                disabled={disabled}
-              >
-                <Checkbox.Android
-                  status={isChecked ? "checked" : "unchecked"}
-                  color="#2563eb"
-                />
-                <Text
-                  style={[
-                    styles.checkLabel,
-                    isChecked && styles.checkLabelActive,
-                  ]}
+      {showNormalisation && (
+        <FormSection title="Normalisation">
+          <View style={styles.checkboxGroup}>
+            {normalizationOptions.map((opt) => {
+              const isChecked =
+                values?.ast?.normalisation?.actionTaken?.includes(opt.value);
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.checkRow, isChecked && styles.checkRowActive]}
+                  onPress={() => handleToggle(opt.value)}
+                  disabled={disabled}
                 >
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                  <Checkbox.Android
+                    status={isChecked ? "checked" : "unchecked"}
+                    color="#2563eb"
+                  />
+                  <Text
+                    style={[
+                      styles.checkLabel,
+                      isChecked && styles.checkLabelActive,
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
-        {/* 📸 Evidence Logic: Show only if actions > "none" */}
-        {values?.ast?.normalisation?.actionTaken?.some((a) => a !== "none") && (
-          <IrepsMedia
-            tag="normalisationPhoto"
-            agentName={agentName}
-            agentUid={agentUid}
-            fallbackGps={landingPoint}
-          />
-        )}
-      </FormSection>
+          {/* 📸 Evidence Logic: Show only if actions > "none" */}
+          {values?.ast?.normalisation?.actionTaken?.some(
+            (a) => a !== "none",
+          ) && (
+            <IrepsMedia
+              tag="normalisationPhoto"
+              agentName={agentName}
+              agentUid={agentUid}
+              fallbackGps={landingPoint}
+            />
+          )}
+        </FormSection>
+      )}
     </View>
   );
 };
@@ -675,5 +724,13 @@ const styles = StyleSheet.create({
     color: "#DC2626",
     marginBottom: 10,
     textTransform: "uppercase",
+  },
+  section: {
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#f6fffe",
+    marginBottom: 16,
   },
 });

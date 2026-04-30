@@ -23,6 +23,8 @@ export const WaterSections = ({
   nearbyPremises = [],
   nearbyMeters = [],
 }) => {
+  const trnId = values?.id || "";
+  const isDiscovery = trnId.startsWith("TRN_MDIS_");
   return (
     <View style={disabled && { opacity: 0.7 }}>
       <FormSection title="Water Meter Description">
@@ -72,6 +74,17 @@ export const WaterSections = ({
             agentName={agentName}
             agentUid={agentUid}
             fallbackGps={landingPoint}
+          />
+        )}
+      </FormSection>
+
+      <FormSection title="Meter Status">
+        {isDiscovery && (
+          <FormSelect
+            label="METER STATUS"
+            name="status.state"
+            options={["CONNECTED", "DISCONNECTED"]}
+            disabled={disabled}
           />
         )}
       </FormSection>

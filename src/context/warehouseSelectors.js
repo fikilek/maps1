@@ -73,6 +73,7 @@ export const selectFilteredMeters = ({
   selectedPremiseId = null,
   selectedMeterId = null,
 }) => {
+  console.log(`selectFilteredMeters --meters`, meters);
   const metersArr = Array.isArray(meters) ? meters : [];
 
   if (selectedMeterId) {
@@ -100,6 +101,7 @@ export const selectFilteredTrns = ({
   selectedPremiseId = null,
   selectedMeterId = null,
 }) => {
+  console.log(`selectFilteredTrns --trns`, trns);
   const trnsArr = Array.isArray(trns) ? trns : [];
 
   if (selectedMeterId) {

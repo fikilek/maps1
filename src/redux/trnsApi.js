@@ -13,8 +13,8 @@ import { db } from "../firebase";
 
 function sortTrnsByUpdatedAtDesc(list) {
   list.sort((a, b) => {
-    const aAt = a?.accessData?.metadata?.updatedAt || "";
-    const bAt = b?.accessData?.metadata?.updatedAt || "";
+    const aAt = a?.metadata?.updatedAt || "";
+    const bAt = b?.metadata?.updatedAt || "";
 
     return String(bAt).localeCompare(String(aAt));
   });
@@ -378,7 +378,7 @@ export const trnsApi = createApi({
             collection(db, "trns"),
             where("accessData.parents.lmPcode", "==", lmPcode),
             where("accessData.parents.wardPcode", "==", wardPcode),
-            orderBy("accessData.metadata.updatedAt", "desc"),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(

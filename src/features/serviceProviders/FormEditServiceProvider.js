@@ -107,7 +107,6 @@ export default function FormEditServiceProvider() {
       updaterName: profile?.profile?.displayName || "NAv",
       updaterRoleCode,
     });
-    console.log(`updatePayload`, updatePayload);
 
     if (!updatePayload?.patch?.profile?.tradingName?.trim()) {
       Alert.alert("Incomplete Form", "Trading Name is required.");

@@ -47,5 +47,4 @@ app-example
 .env.*.local
 
 # firebase 
-# /src/firebase
 /src/firebase/index.js

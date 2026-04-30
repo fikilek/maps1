@@ -41,6 +41,7 @@ export default {
     plugins: [
       "expo-router",
       "expo-camera",
+      "expo-web-browser",
       [
         "expo-splash-screen",
         {

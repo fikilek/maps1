@@ -22,8 +22,8 @@ import { auth } from "../../src/firebase";
 import { useSigninMutation } from "../../src/redux/authApi";
 
 const initialValues = {
-  email: "",
-  password: "",
+  email: "spu@smars.co.za",
+  password: "fkpass123",
 };
 
 const validationSchema = object().shape({

@@ -48,7 +48,7 @@ const TrnItem = ({ item }) => {
     ? item.ast?.astData?.astNo || "NO METER"
     : "NO METER NUMBER";
 
-  const dateAt = item.accessData?.metadata?.updatedAt;
+  const dateAt = item.metadata?.updatedAt;
 
   const rawDate = dateAt?.__time__ || dateAt;
 

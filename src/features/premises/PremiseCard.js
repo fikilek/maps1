@@ -469,6 +469,7 @@ const PremiseCard = memo(
                 <Text style={styles.compactBtnSubText}>Meter Audit</Text>
               </View>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.compactBtn, styles.btnInstall]}
               onPress={() => onInstall?.(item)}

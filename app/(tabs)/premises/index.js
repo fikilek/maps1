@@ -6,8 +6,10 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ActivityIndicator, Surface } from "react-native-paper";
 
 import MissionDiscoveryModal from "../../../components/MissionDiscoveryModal";
+import MissionInstallationModal from "../../../components/MissionInstallationModal";
 import { useDiscovery } from "../../../src/context/DiscoveryContext";
 import { useGeo } from "../../../src/context/GeoContext";
+import { useInstallation } from "../../../src/context/InstallationContext";
 import { usePremiseFilter } from "../../../src/context/PremiseFilterContext";
 import { useWarehouse } from "../../../src/context/WarehouseContext";
 import PremiseCard from "../../../src/features/premises/PremiseCard";
@@ -19,6 +21,7 @@ export default function PremisesScreen() {
   // console.log(`all.prems?.length`, all.prems?.length);
 
   const { openMissionDiscovery } = useDiscovery();
+  const { openMissionInstallation } = useInstallation();
 
   const { geoState, updateGeo } = useGeo();
   // console.log(`geoState`, geoState);
@@ -79,6 +82,24 @@ export default function PremisesScreen() {
     [router],
   );
 
+  const handleInstall = useCallback(
+    (p) => {
+      const parentErf = erfById[p?.erfId] || null;
+
+      updateGeo({
+        selectedErf: parentErf || null,
+        selectedPremise: p,
+        lastSelectionType: "PREMISE",
+      });
+
+      openMissionInstallation({
+        premiseId: p?.id,
+        premise: p,
+      });
+    },
+    [erfById, updateGeo, openMissionInstallation],
+  );
+
   const handleDiscover = useCallback(
     (p) => {
       const parentErf = erfById[p?.erfId] || null;
@@ -136,6 +157,7 @@ export default function PremisesScreen() {
             wardNo={wardNo}
             onMapPress={handleMapPress}
             onDiscover={handleDiscover}
+            onInstall={handleInstall}
             onEditPress={handleEditPremise}
             onNaPress={handleNaPress}
             onDuplicate={handleDuplicate}
@@ -337,6 +359,7 @@ export default function PremisesScreen() {
       />
 
       <MissionDiscoveryModal />
+      <MissionInstallationModal />
     </View>
   );
 }

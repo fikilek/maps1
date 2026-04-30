@@ -569,9 +569,21 @@ export default function FormPremise() {
     };
   }
 
+  function withSubmitTimeout(promise, timeoutMs = 10000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => {
+          reject(new Error("SUBMISSION_TIMEOUT"));
+        }, timeoutMs),
+      ),
+    ]);
+  }
+
   const handleSubmit = async (values, { setSubmitting }) => {
     setInProgress(true);
 
+    console.log(`FormPremise handleSubmit --values`, values);
     try {
       const systemFields = buildSystemFields();
       const premiseDocId = systemFields.id;
@@ -694,28 +706,95 @@ export default function FormPremise() {
           return item;
         }),
       );
+      console.log(`FormPremise handleSubmit --syncedMedia`, syncedMedia);
 
       const finalValues = {
         ...basePayload,
         media: syncedMedia,
       };
+      console.log(`FormPremise handleSubmit --finalValues`, finalValues);
+
+      /* ------------------------------------------------
+        4. ONLINE SUBMIT WITH 20 SECOND TIMEOUT
+        ------------------------------------------------ */
+      let result = null;
+      console.log(`FormPremise handleSubmit --isEdit`, isEdit);
+
+      try {
+        if (isEdit) {
+          result = await withSubmitTimeout(
+            updatePremise(finalValues).unwrap(),
+            10000,
+          );
+        } else {
+          result = await withSubmitTimeout(
+            createPremise(finalValues).unwrap(),
+            10000,
+          );
+        }
+      } catch (error) {
+        console.log(`FormPremise handleSubmit --error`, error);
+        if (error?.message === "SUBMISSION_TIMEOUT") {
+          if (queueItemId) {
+            await updatePremiseQueueItem(
+              queueItemId,
+              {
+                payload: finalValues,
+                status: "PENDING",
+                result: {
+                  success: false,
+                  code: "NAv",
+                  message: "NAv",
+                  premiseId: "NAv",
+                },
+              },
+              agentUid,
+              agentName,
+            );
+          } else {
+            await addPremiseQueueItem({
+              payload: finalValues,
+              createdByUid: agentUid,
+              createdByUser: agentName,
+            });
+          }
+
+          ToastAndroid.show(
+            "Premise submission is taking too long. Saved locally.",
+            ToastAndroid.LONG,
+          );
+
+          router.replace("/(tabs)/admin/storage/premise-offline-storage");
+          return;
+        }
+
+        throw error;
+      }
+
+      if (!isEdit && !result?.success) {
+        ToastAndroid.show(
+          result?.message || "Premise rejected",
+          ToastAndroid.LONG,
+        );
+        return;
+      }
 
       /* ------------------------------------------------
        4. ONLINE SUBMIT
        ------------------------------------------------ */
-      if (isEdit) {
-        await updatePremise(finalValues).unwrap();
-      } else {
-        const result = await createPremise(finalValues).unwrap();
+      // if (isEdit) {
+      //   await updatePremise(finalValues).unwrap();
+      // } else {
+      //   const result = await createPremise(finalValues).unwrap();
 
-        if (!result?.success) {
-          ToastAndroid.show(
-            result?.message || "Premise rejected",
-            ToastAndroid.LONG,
-          );
-          return;
-        }
-      }
+      //   if (!result?.success) {
+      //     ToastAndroid.show(
+      //       result?.message || "Premise rejected",
+      //       ToastAndroid.LONG,
+      //     );
+      //     return;
+      //   }
+      // }
 
       /* ------------------------------------------------
        5. CLEANUP

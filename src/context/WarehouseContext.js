@@ -62,6 +62,7 @@ export const WarehouseProvider = ({ children }) => {
   const activeWard = selectedWardIsValid ? selectedWard : null;
   const wardPcode = activeWard?.pcode || activeWard?.id || null;
   const scopeReady = !!lmPcode && !!wardPcode;
+  console.log(`scopeReady`, scopeReady);
 
   const { data: wardErfs, isLoading: erfsLoading } =
     useGetErfsByLmPcodeWardPcodeQuery(
@@ -80,6 +81,7 @@ export const WarehouseProvider = ({ children }) => {
       { lmPcode, wardPcode },
       { skip: !lmPcode || !wardPcode },
     );
+  console.log(`cloudMeters`, cloudMeters);
 
   const { data: cloudTrns = [], isLoading: trnsLoading } =
     useGetTrnsByLmPcodeWardPcodeQuery(

@@ -58,7 +58,7 @@ const NA_REASONS = [
   "Property Vacant",
 ];
 
-function buildMeterDiscoveryTrnId({ wardPcode, erfNo, meterType }) {
+function buildMeterInstallationTrnId({ wardPcode, erfNo, meterType }) {
   const ts = Date.now();
 
   const safeWardPcode = String(wardPcode || "NAv")
@@ -72,7 +72,7 @@ function buildMeterDiscoveryTrnId({ wardPcode, erfNo, meterType }) {
   const typeCode =
     meterType === "water" ? "WTR" : meterType === "electricity" ? "ELC" : "NA";
 
-  return `TRN_MDIS_${ts}_${typeCode}_${safeWardPcode}_${safeErfNo}`;
+  return `TRN_MINST_${ts}_${typeCode}_${safeWardPcode}_${safeErfNo}`;
 }
 
 function toLatLng(value) {
@@ -118,14 +118,12 @@ function getDistanceMeters(pointA, pointB) {
 }
 
 // --- MAIN FORM COMPONENT ---
-export default function FormMeterDiscovery() {
+export default function FormMeterInstallation() {
   const {
     premiseId,
     action: actionRaw,
     queueItemId: queueItemIdRaw,
   } = useLocalSearchParams();
-  console.log(` `);
-  console.log(`FormMeterDiscovery --munting`);
 
   const queueItemId = Array.isArray(queueItemIdRaw)
     ? queueItemIdRaw[0]
@@ -170,6 +168,7 @@ export default function FormMeterDiscovery() {
   GET PREMISE DOC 
   */
   //  First check the warehouse
+
   const [draftPremise, setDraftPremise] = useState(null);
 
   const warehousePremise = useMemo(
@@ -253,10 +252,10 @@ export default function FormMeterDiscovery() {
   const [modalVisible, setModalVisible] = useState(false);
 
   const [showSuccess, setShowSuccess] = useState(false);
-  // console.log(`FormMeterDiscovery ----showSuccess`, showSuccess);
+  // console.log(`FormMeterInstallation ----showSuccess`, showSuccess);
 
   const finalErfNo = premise?.erfNo || "NAv";
-  // console.log(`FormMeterDiscovery ----finalErfNo`, finalErfNo);
+  // console.log(`FormMeterInstallation ----finalErfNo`, finalErfNo);
 
   const getOptions = (name) =>
     settings?.find((s) => s.name === name)?.options || [];
@@ -270,7 +269,7 @@ export default function FormMeterDiscovery() {
 
   const trnId = useMemo(
     () =>
-      buildMeterDiscoveryTrnId({
+      buildMeterInstallationTrnId({
         wardPcode,
         erfNo: premise?.erfNo,
         meterType: currentMissionType,
@@ -332,12 +331,10 @@ export default function FormMeterDiscovery() {
   }
 
   function buildTrnSystemFields(resolvedPremiseId = null) {
-    const timestamp = new Date().toISOString();
-
     return {
       erfId: premise?.erfId || "",
       erfNo: premise?.erfNo || "",
-      trnType: "METER_DISCOVERY",
+      trnType: "METER_INSTALLATION",
 
       parents: {
         countryPcode,
@@ -425,7 +422,7 @@ export default function FormMeterDiscovery() {
       }),
   });
 
-  const WaterDiscoverySchema = object().shape({
+  const WaterInstallationSchema = object().shape({
     // --- SECTION 1: ADMINISTRATIVE ---
     accessData: accessSchema.fields.accessData, // Reusing your locked-in base schema
 
@@ -505,15 +502,9 @@ export default function FormMeterDiscovery() {
 
         return true;
       }),
-
-    status: object().shape({
-      state: string()
-        .oneOf(["CONNECTED", "DISCONNECTED"])
-        .required("Meter status is required"),
-    }),
   });
 
-  const ElecDiscoverySchema = object().shape({
+  const ElecInstallationSchema = object().shape({
     accessData: accessSchema.fields.accessData,
 
     ast: object().shape({
@@ -585,10 +576,6 @@ export default function FormMeterDiscovery() {
         hasOffGridSupply: string().required("Off Grid Status Required"),
       }),
 
-      normalisation: object().shape({
-        actionTaken: array().of(string()).required("Required"),
-      }),
-
       location: object().shape({
         placement: string().required("Placement Required"),
         gps: object().nullable().required("GPS pin required on map"),
@@ -612,7 +599,6 @@ export default function FormMeterDiscovery() {
           const cbSize = ast?.astData?.meter?.cb?.size;
           const hasOffGrid = ast?.ogs?.hasOffGridSupply;
           const anomaly = ast?.anomalies?.anomaly;
-          const normalisationActions = ast?.normalisation?.actionTaken;
 
           if (hasAccess === "no") {
             return value?.some((m) => m.tag === "noAccessPhoto")
@@ -660,28 +646,9 @@ export default function FormMeterDiscovery() {
             return this.createError({ message: "Anomaly photo required" });
           }
 
-          const hasIntervention = Array.isArray(normalisationActions)
-            ? normalisationActions.some((a) => a !== "none")
-            : false;
-
-          if (
-            hasIntervention &&
-            !value?.some((m) => m.tag === "normalisationPhoto")
-          ) {
-            return this.createError({
-              message: "Photo proof of Normalisation required",
-            });
-          }
-
           return true;
         },
       ),
-
-    status: object().shape({
-      state: string()
-        .oneOf(["CONNECTED", "DISCONNECTED"])
-        .required("Meter status is required"),
-    }),
   });
 
   const getInitialValues = () => {
@@ -704,13 +671,13 @@ export default function FormMeterDiscovery() {
       if (editMeterType === "water") {
         return {
           initValues: editPayload,
-          schema: WaterDiscoverySchema,
+          schema: WaterInstallationSchema,
         };
       }
 
       return {
         initValues: editPayload,
-        schema: ElecDiscoverySchema,
+        schema: ElecInstallationSchema,
       };
     }
 
@@ -736,7 +703,7 @@ export default function FormMeterDiscovery() {
       };
     }
 
-    // --- STEP 2: WATER DISCOVERY ---
+    // --- STEP 2: WATER Installation ---
     if (action?.meterType === "water") {
       return {
         initValues: {
@@ -769,11 +736,11 @@ export default function FormMeterDiscovery() {
             detail: null,
           },
         },
-        schema: WaterDiscoverySchema,
+        schema: WaterInstallationSchema,
       };
     }
 
-    // --- STEP 3: ELECTRICITY DISCOVERY (The Default) ---
+    // --- STEP 3: ELECTRICITY Installation (The Default) ---
     return {
       initValues: {
         id: trnId,
@@ -783,28 +750,27 @@ export default function FormMeterDiscovery() {
         },
         ast: {
           astData: {
-            astNo: "",
-            astManufacturer: "",
-            astName: "",
+            astNo: "04085348",
+            astManufacturer: "Conlog",
+            astName: "BEC66",
             meter: {
-              phase: "",
-              type: "",
-              category: "",
-              seal: { sealNo: "", comment: "" }, // 🎯 Initialized
-              keypad: { serialNo: "", comment: "" }, // 🎯 Initialized
-              cb: { size: "", comment: "" }, // 🎯 Initialized
+              phase: "Single",
+              type: "Pre-paid",
+              category: "Normal",
+              seal: { sealNo: "Seal No", comment: "" }, // 🎯 Initialized
+              keypad: { serialNo: "Keypad Serial No", comment: "" }, // 🎯 Initialized
+              cb: { size: "60", comment: "" }, // 🎯 Initialized
             },
           },
           anomalies: {
-            anomaly: "",
-            anomalyDetail: "",
+            anomaly: "Meter Ok",
+            anomalyDetail: "Operationally Ok",
           },
           location: {
             gps: null, // 🛰️ Will be an Object {lat, lng} via the Picker
-            placement: "",
+            placement: "Top Pole",
           },
           ogs: { hasOffGridSupply: "no" },
-          normalisation: { actionTaken: ["none"] },
         },
         meterType: "electricity",
         media: [],
@@ -814,7 +780,7 @@ export default function FormMeterDiscovery() {
           detail: null,
         },
       },
-      schema: ElecDiscoverySchema,
+      schema: ElecInstallationSchema,
     };
   };
 
@@ -829,7 +795,7 @@ export default function FormMeterDiscovery() {
     ]);
   }
 
-  const handleSubmitDiscovery = async (values) => {
+  const handleSubmitInstallation = async (values) => {
     if (!premise?.id) {
       Alert.alert("Error", "Premise data not found.");
       return;
@@ -981,7 +947,7 @@ export default function FormMeterDiscovery() {
           );
         } else {
           queueResult = await addSubmissionQueueItem({
-            formType: "METER_DISCOVERY",
+            formType: "METER_INSTALLATION",
             payload: cleanPayload,
             context: nextContext,
             createdByUid: agentUid,
@@ -992,7 +958,7 @@ export default function FormMeterDiscovery() {
         if (!queueResult?.success) {
           Alert.alert(
             "Draft Save Failed",
-            "Failed to save meter discovery draft locally.",
+            "Failed to save meter Installation draft locally.",
           );
           return false;
         }
@@ -1072,16 +1038,16 @@ export default function FormMeterDiscovery() {
 
       cleanPayload.media = syncedMedia;
 
-      const onMeterDiscoveryCallable = httpsCallable(
+      const onMeterInstallationCallable = httpsCallable(
         functions,
-        "onMeterDiscoveryCallable",
+        "onMeterInstallationCallable",
       );
 
       // const test = true;
       // if (test) {
       //   return;
       // }
-      console.log(`handleSubmitDiscovery --cleanPayload`, cleanPayload);
+      console.log(`handleSubmitInstallation --cleanPayload`, cleanPayload);
 
       /*  
         START TIMEOUT WINDOW
@@ -1097,7 +1063,7 @@ export default function FormMeterDiscovery() {
         → success = success
         → error = show error, do not queue
 
-      4. 30 seconds passes with no response
+      4. 15 seconds passes with no response
         → save locally, regardless of reason
 
       */
@@ -1106,10 +1072,11 @@ export default function FormMeterDiscovery() {
 
       try {
         const callableResult = await withSubmitTimeout(
-          onMeterDiscoveryCallable(cleanPayload),
+          onMeterInstallationCallable(cleanPayload),
           15000,
         );
         result = callableResult?.data || {};
+        console.log(`handleSubmitInstallation --result`, result);
       } catch (error) {
         if (error?.message === "SUBMISSION_TIMEOUT") {
           await saveMeterDraftToQueue(
@@ -1135,8 +1102,9 @@ export default function FormMeterDiscovery() {
         END TIMEOUT WINDOW
       */
 
-      // const callableResult = await onMeterDiscoveryCallable(cleanPayload);
+      // const callableResult = await onMeterInstallationCallable(cleanPayload);
       // const result = callableResult?.data || {};
+      // console.log(`handleSubmitInstallation --result`, result);
 
       if (!result?.success) {
         setInProgress(false);
@@ -1145,7 +1113,7 @@ export default function FormMeterDiscovery() {
           result?.code === "DUPLICATE_METER"
             ? "Duplicate Meter"
             : "Submission Failed",
-          result?.message || "Meter discovery submission failed.",
+          result?.message || "Meter Installation submission failed.",
         );
 
         return;
@@ -1163,7 +1131,7 @@ export default function FormMeterDiscovery() {
         setInProgress(false);
       }, 2000);
     } catch (error) {
-      console.error("Submission Error:", error);
+      console.log("Submission Error:", error);
       Alert.alert("Error", error?.message || "Submission failed");
       setInProgress(false);
     }
@@ -1213,6 +1181,8 @@ export default function FormMeterDiscovery() {
   }, []);
 
   const selectedErfId = activeErf?.id;
+  // console.log(`WaterSections ----selectedErfId`, selectedErfId);
+  // console.log(`WaterSections ----selectedErfId`, selectedErfId);
   const erfGeo =
     all?.geoLibrary?.[selectedErfId] || all?.geoEntries?.[selectedErfId];
   const erfBoundary = getSafeCoords(erfGeo?.geometry);
@@ -1350,7 +1320,7 @@ export default function FormMeterDiscovery() {
       />
       <Formik
         initialValues={actionInit.initValues}
-        onSubmit={handleSubmitDiscovery}
+        onSubmit={handleSubmitInstallation}
         validationSchema={actionInit.schema}
         enableReinitialize={true}
         validateOnMount={true}
@@ -1360,24 +1330,27 @@ export default function FormMeterDiscovery() {
         {({ values, setFieldValue, errors }) => {
           // console.log(` `);
           // console.log(
-          //   `handleSubmitDiscovery values`,
+          //   `handleSubmitInstallation values`,
           //   JSON.stringify(values, null, 2),
           // );
           // console.log(` `);
-          // console.log(`handleSubmitDiscovery --values`, values);
+          // console.log(`handleSubmitInstallation --values`, values);
           // console.log(
-          //   `handleSubmitDiscovery --values?.ast?.normalisation?.actionTaken`,
+          //   `handleSubmitInstallation --values?.ast?.normalisation?.actionTaken`,
           //   values?.ast?.normalisation?.actionTaken,
           // );
           // console.log(
-          //   `FormMeterDiscovery --values`,
+          //   `FormMeterInstallation --values`,
           //   JSON.stringify(values, null, 2),
           // );
 
-          // console.log(`FormMeterDiscovery --values`, values);
+          // console.log(
+          //   `FormMeterInstallation --values?.accessData`,
+          //   values?.accessData,
+          // );
           // console.log(` `);
-          // console.log(`handleSubmitDiscovery --errors`, errors);
-          console.log(`errors`, JSON.stringify(errors, null, 2));
+          // console.log(`handleSubmitInstallation --errors`, errors);
+          // console.log(`errors`, JSON.stringify(errors, null, 2));
 
           return (
             <ScrollView
@@ -1386,7 +1359,7 @@ export default function FormMeterDiscovery() {
             >
               <Stack.Screen
                 options={{
-                  title: premiseAddress || "Meter Discovery",
+                  title: premiseAddress || "Meter Installation",
                   headerTitleStyle: { fontSize: 14, fontWeight: "900" }, // Sovereign Polish
                   headerLeft: () => (
                     <TouchableOpacity
