@@ -29,9 +29,46 @@ const DataRow = ({ label, value, subValue }) => (
   </View>
 );
 
+const formatDateTime = (value) => {
+  if (!value) return "N/A";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "N/A";
+
+  return date.toLocaleString();
+};
+
+const getMeterStatusConfig = (state = "") => {
+  const s = String(state || "UNKNOWN").toUpperCase();
+
+  if (s === "CONNECTED") {
+    return {
+      label: "CONNECTED",
+      icon: "check-circle",
+      color: "#10B981",
+    };
+  }
+
+  if (s === "DISCONNECTED") {
+    return {
+      label: "DISCONNECTED",
+      icon: "close-circle",
+      color: "#EF4444",
+    };
+  }
+
+  return {
+    label: s,
+    icon: "alert-circle",
+    color: "#F59E0B",
+  };
+};
+
 export default function MeterDetailScreen() {
   const { docId, astNo } = useLocalSearchParams();
   const { data: asset, isLoading } = useGetAstByIdQuery(docId);
+  console.log(`MeterDetailScreen --asset`, asset);
 
   if (isLoading)
     return (
@@ -41,7 +78,10 @@ export default function MeterDetailScreen() {
   const isWater = asset?.meterType === "water";
   const themeColor = isWater ? "#3B82F6" : "#EAB308";
   const { astData, anomalies, location, meterReading } = asset?.ast || {};
-  const { premise, metadata } = asset?.accessData || {};
+
+  const premise = asset?.accessData?.premise || {};
+  const metadata = asset?.metadata || {};
+  const meterStatus = getMeterStatusConfig(asset?.status?.state);
 
   return (
     <ScrollView style={styles.container}>
@@ -86,30 +126,53 @@ export default function MeterDetailScreen() {
           <DataRow label="Details" value={anomalies?.anomalyDetail} />
         </InfoSection>
 
+        {/* 🚦 METER STATUS */}
+        <InfoSection
+          title="STATUS"
+          icon={meterStatus.icon}
+          color={meterStatus.color}
+        >
+          <DataRow label="Current State" value={meterStatus.label} />
+          <DataRow
+            label="Status Detail"
+            value={asset?.status?.detail || "N/A"}
+          />
+        </InfoSection>
+
         {/* ⚡ PLACEMENT & READING */}
         <InfoSection title="TECHNICAL" icon="gauge" color={themeColor}>
           <DataRow
             label="Placement"
             value={location?.placement || "Standard"}
           />
+
           <DataRow
+            label="Last Reading"
+            value={meterReading || "N/A"}
+            subValue={
+              meterReading ? "Recorded at Discovery" : "No reading captured"
+            }
+          />
+
+          {/* <DataRow
             label="Last Reading"
             value={meterReading}
             subValue="Recorded at Discovery"
-          />
+          /> */}
         </InfoSection>
 
+        {/* 🛰️ METADATA */}
         {/* 🛰️ METADATA */}
         <InfoSection title="METADATA" icon="database-outline" color="#64748B">
           <DataRow
             label="Created"
-            value={new Date(asset?.createdAt).toLocaleDateString()}
-            subValue={`By ${metadata?.createdByUser}`}
+            value={formatDateTime(metadata?.createdAt)}
+            subValue={`By ${metadata?.createdByUser || "N/A"}`}
           />
           <DataRow
             label="Last Update"
-            value={new Date(metadata?.updatedAt).toLocaleDateString()}
-            subValue={`By ${metadata?.updatedByUser}`}
+            value={formatDateTime(metadata?.updatedAt)}
+            subValue={`By ${metadata?.updatedByUser || "N/A"}`}
           />
         </InfoSection>
       </View>

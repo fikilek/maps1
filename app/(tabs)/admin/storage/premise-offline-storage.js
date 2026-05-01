@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { Stack, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -13,12 +13,15 @@ import {
 } from "react-native";
 import { ActivityIndicator, Surface, Text } from "react-native-paper";
 
+import { doc, onSnapshot } from "firebase/firestore";
 import { useDiscovery } from "../../../../src/context/DiscoveryContext";
+import { db } from "../../../../src/firebase";
 import { useAuth } from "../../../../src/hooks/useAuth";
 import { processPremiseSubmissionQueue } from "../../../../src/services/processPremiseSubmissionQueue";
 import {
   clearPremiseQueue,
   getPremiseQueue,
+  markPremiseQueueItemSuccess,
   markPremiseQueueItemSyncing,
   removePremiseQueueItem,
 } from "../../../../src/utils/premiseSubmissionQueue";
@@ -218,6 +221,37 @@ export default function PremiseOfflineStorageScreen() {
 
   const { openMissionDiscovery } = useDiscovery();
 
+  const queueCounts = useMemo(() => {
+    const items = Array.isArray(queueItems) ? queueItems : [];
+
+    return items.reduce(
+      (acc, item) => {
+        const status = String(item?.status || "PENDING").toUpperCase();
+
+        acc.all += 1;
+
+        if (status === "SUCCESS") {
+          acc.success += 1;
+        } else if (status === "FAILED") {
+          acc.failed += 1;
+        } else if (status === "SYNCING") {
+          acc.syncing += 1;
+        } else {
+          acc.pending += 1;
+        }
+
+        return acc;
+      },
+      {
+        all: 0,
+        pending: 0,
+        syncing: 0,
+        failed: 0,
+        success: 0,
+      },
+    );
+  }, [queueItems]);
+
   const loadQueue = useCallback(async () => {
     try {
       const queue = await getPremiseQueue();
@@ -241,6 +275,81 @@ export default function PremiseOfflineStorageScreen() {
       loadQueue();
     }, [loadQueue]),
   );
+
+  useEffect(() => {
+    const pendingPremiseQueueItems = (
+      Array.isArray(queueItems) ? queueItems : []
+    ).filter((item) => {
+      const status = String(item?.status || "PENDING").toUpperCase();
+      const premiseId = item?.premiseId || item?.payload?.id || null;
+
+      return premiseId && premiseId !== "NAv" && status !== "SUCCESS";
+    });
+
+    if (pendingPremiseQueueItems.length === 0) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const unsubscribers = pendingPremiseQueueItems.map((item) => {
+      const premiseId = item?.premiseId || item?.payload?.id;
+
+      const premiseRef = doc(db, "premises", premiseId);
+
+      return onSnapshot(
+        premiseRef,
+        async (premiseSnap) => {
+          if (!isMounted) return;
+          if (!premiseSnap.exists()) return;
+
+          const latestQueue = await getPremiseQueue();
+
+          const latestQueueItem = (
+            Array.isArray(latestQueue) ? latestQueue : []
+          ).find((queueItem) => queueItem?.id === item?.id);
+
+          if (!latestQueueItem) return;
+
+          const latestStatus = String(
+            latestQueueItem?.status || "PENDING",
+          ).toUpperCase();
+
+          if (latestStatus === "SUCCESS") return;
+
+          await markPremiseQueueItemSuccess(
+            latestQueueItem.id,
+            {
+              code: "CREATED_AFTER_TIMEOUT",
+              message: "Premise exists in Firestore",
+              premiseId,
+            },
+            agentUid,
+            agentName,
+          );
+
+          await loadQueue();
+
+          ToastAndroid.show(
+            "Premise confirmed in database.",
+            ToastAndroid.SHORT,
+          );
+        },
+        (error) => {
+          console.log(
+            "PremiseOfflineStorageScreen -- premise listener error",
+            premiseId,
+            error,
+          );
+        },
+      );
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribers.forEach((unsubscribe) => unsubscribe?.());
+    };
+  }, [queueItems, agentUid, agentName, loadQueue]);
 
   const handleOpenFormMeterDiscovery = (item) => {
     const draftPremise = item?.payload || null;
@@ -362,7 +471,74 @@ export default function PremiseOfflineStorageScreen() {
       >
         <Surface style={styles.headerCard} elevation={1}>
           <Text style={styles.headerTitle}>Offline Premise Storage</Text>
-          <Text style={styles.headerSub}>Total Items: {queueItems.length}</Text>
+          <Text style={styles.headerSub}>
+            Fast field submissions with background confirmation
+          </Text>
+          <View style={styles.countStrip}>
+            <View style={styles.countStat}>
+              <View style={styles.countTopRow}>
+                <MaterialCommunityIcons
+                  name="format-list-bulleted"
+                  size={15}
+                  color="#334155"
+                />
+                <Text style={styles.countText}>All</Text>
+              </View>
+              <Text style={styles.countNumber}>{queueCounts.all}</Text>
+            </View>
+
+            <View style={styles.countDivider} />
+
+            <View style={styles.countStat}>
+              <View style={styles.countTopRow}>
+                <MaterialCommunityIcons
+                  name="clock-outline"
+                  size={15}
+                  color="#b45309"
+                />
+                <Text style={styles.countText}>Pending</Text>
+              </View>
+              <Text style={styles.countNumber}>{queueCounts.pending}</Text>
+            </View>
+
+            <View style={styles.countDivider} />
+
+            <View style={styles.countStat}>
+              <View style={styles.countTopRow}>
+                <MaterialCommunityIcons name="sync" size={15} color="#2563eb" />
+                <Text style={styles.countText}>Syncing</Text>
+              </View>
+              <Text style={styles.countNumber}>{queueCounts.syncing}</Text>
+            </View>
+
+            <View style={styles.countDivider} />
+
+            <View style={styles.countStat}>
+              <View style={styles.countTopRow}>
+                <MaterialCommunityIcons
+                  name="alert-circle-outline"
+                  size={15}
+                  color="#dc2626"
+                />
+                <Text style={styles.countText}>Failed</Text>
+              </View>
+              <Text style={styles.countNumber}>{queueCounts.failed}</Text>
+            </View>
+
+            <View style={styles.countDivider} />
+
+            <View style={styles.countStat}>
+              <View style={styles.countTopRow}>
+                <MaterialCommunityIcons
+                  name="check-circle-outline"
+                  size={15}
+                  color="#16a34a"
+                />
+                <Text style={styles.countText}>Success</Text>
+              </View>
+              <Text style={styles.countNumber}>{queueCounts.success}</Text>
+            </View>
+          </View>
 
           <View style={styles.actionsRow}>
             {/* Refresh  */}
@@ -550,5 +726,55 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 10,
+  },
+
+  countStrip: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "space-between",
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginTop: 12,
+    marginBottom: 14,
+  },
+
+  countStat: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  countTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    minHeight: 18,
+  },
+
+  countDivider: {
+    width: 1,
+    backgroundColor: "#e2e8f0",
+    marginHorizontal: 2,
+  },
+
+  countNumber: {
+    marginTop: 4,
+    fontSize: 17,
+    fontWeight: "900",
+    color: "#0f172a",
+    lineHeight: 20,
+  },
+
+  countText: {
+    fontSize: 7.5,
+    fontWeight: "900",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: 0.2,
   },
 });

@@ -4,6 +4,38 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
 
+const getMeterStatusConfig = (state = "") => {
+  const s = String(state || "UNKNOWN").toUpperCase();
+
+  if (s === "CONNECTED") {
+    return {
+      label: "CONNECTED",
+      icon: "check-circle",
+      color: "#10B981",
+      bg: "#ECFDF5",
+      border: "#A7F3D0",
+    };
+  }
+
+  if (s === "DISCONNECTED") {
+    return {
+      label: "DISCONNECTED",
+      icon: "close-circle",
+      color: "#EF4444",
+      bg: "#FEF2F2",
+      border: "#FECACA",
+    };
+  }
+
+  return {
+    label: s,
+    icon: "alert-circle",
+    color: "#F59E0B",
+    bg: "#FFFBEB",
+    border: "#FDE68A",
+  };
+};
+
 const AstItem = ({ item }) => {
   // console.log(`AstItem --item`, item);
   const { updateGeo } = useGeo();
@@ -15,6 +47,9 @@ const AstItem = ({ item }) => {
   const meterNo = item.ast?.astData?.astNo || "NO METER NO";
   const manufacturer = item.ast?.astData?.astManufacturer || "Unknown";
   const anomaly = item.ast?.anomalies?.anomaly || "Meter Ok";
+
+  const meterStatusState = item?.status?.state || "UNKNOWN";
+  const meterStatusConfig = getMeterStatusConfig(meterStatusState);
 
   const visibility = item?.master?.visibility || "NAv";
   const isVisible = visibility === "VISIBLE";
@@ -193,19 +228,49 @@ const AstItem = ({ item }) => {
       {/* 🏛️ NEW: EXTREME LEFT-TO-RIGHT ACTION ROW */}
       <View style={styles.fullWidthActionRow}>
         <View style={styles.statusInfo}>
-          <MaterialCommunityIcons
-            name={anomaly === "Meter Ok" ? "check-circle" : "alert-circle"}
-            size={14}
-            color={anomaly === "Meter Ok" ? "#10B981" : "#EF4444"}
-          />
-          <Text
-            style={[
-              styles.statusLabel,
-              { color: anomaly === "Meter Ok" ? "#10B981" : "#EF4444" },
-            ]}
-          >
-            {anomaly}
-          </Text>
+          <View style={styles.statusStack}>
+            <View style={styles.statusLine}>
+              <MaterialCommunityIcons
+                name={anomaly === "Meter Ok" ? "check-circle" : "alert-circle"}
+                size={14}
+                color={anomaly === "Meter Ok" ? "#10B981" : "#EF4444"}
+              />
+              <Text
+                style={[
+                  styles.statusLabel,
+                  { color: anomaly === "Meter Ok" ? "#10B981" : "#EF4444" },
+                ]}
+                numberOfLines={1}
+              >
+                {anomaly}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.meterStateBadge,
+                {
+                  backgroundColor: meterStatusConfig.bg,
+                  borderColor: meterStatusConfig.border,
+                },
+              ]}
+            >
+              <MaterialCommunityIcons
+                name={meterStatusConfig.icon}
+                size={12}
+                color={meterStatusConfig.color}
+              />
+              <Text
+                style={[
+                  styles.meterStateText,
+                  { color: meterStatusConfig.color },
+                ]}
+                numberOfLines={1}
+              >
+                {meterStatusConfig.label}
+              </Text>
+            </View>
+          </View>
         </View>
 
         <View style={styles.buttonGroup}>
@@ -309,22 +374,22 @@ const styles = StyleSheet.create({
 
   subDetail: { fontSize: 13, color: "#64748B", marginBottom: 8 },
   statusRow: { flexDirection: "row", alignItems: "center" },
-  statusInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
+  // statusInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
   statusLabel: { fontSize: 12, fontWeight: "700", marginLeft: 4 },
   mapButton: { padding: 8, backgroundColor: "#F1F5F9", borderRadius: 8 },
 
-  buttonGroup: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  actionButton: {
-    padding: 8,
-    backgroundColor: "#F1F5F9",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-  },
+  // buttonGroup: {
+  //   flexDirection: "row",
+  //   gap: 8,
+  //   alignItems: "center",
+  // },
+  // actionButton: {
+  //   padding: 8,
+  //   backgroundColor: "#F1F5F9",
+  //   borderRadius: 8,
+  //   borderWidth: 1,
+  //   borderColor: "#E2E8F0",
+  // },
   mapButtonHighlight: {
     backgroundColor: "#EFF6FF",
     borderColor: "#DBEAFE",
@@ -426,5 +491,79 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 12,
     flex: 1,
+  },
+
+  // statusStack: {
+  //   flex: 1,
+  //   justifyContent: "center",
+  // },
+
+  statusLine: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  meterStateBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 3,
+  },
+
+  meterStateText: {
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.3,
+  },
+
+  statusInfo: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 8,
+  },
+
+  statusStack: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+
+  statusBadge: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    gap: 3,
+  },
+
+  statusBadgeText: {
+    flexShrink: 1,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.2,
+  },
+
+  buttonGroup: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    flexShrink: 0,
+  },
+
+  actionButton: {
+    padding: 7,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
 });

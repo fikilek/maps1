@@ -22,12 +22,16 @@ const NaScreen = () => {
   const { premiseId } = useLocalSearchParams();
   const { all } = useWarehouse();
 
-  const premise = all?.premises?.find((p) => p.id === premiseId);
+  const premise = all?.prems?.find((p) => p.id === premiseId);
 
   const { data: trns, isLoading } = useGetTrnsByPremiseIdQuery(
     { premiseId },
     { skip: !premiseId },
   );
+
+  const noAccessTrns = Array.isArray(trns)
+    ? trns.filter((trn) => trn?.accessData?.access?.hasAccess === "no")
+    : [];
 
   const [selectedImage, setSelectedImage] = useState(null);
 
@@ -36,13 +40,16 @@ const NaScreen = () => {
     `${premise?.address?.strNo || ""} ${premise?.address?.strName || ""} ${premise?.address?.strType || ""}`.trim();
 
   const renderItem = ({ item }) => {
-    const access = item.accessData?.access;
-    const media = item.accessData?.media?.find(
-      (m) => m.tag === "noAccessPhoto",
-    );
-    const createdAt = item.accessData?.metadata?.createdAt;
+    const access = item?.accessData?.access || {};
 
-    // 🛡️ Safe Date Conversion
+    const media = Array.isArray(item?.media)
+      ? item.media.find((m) => m?.tag === "noAccessPhoto")
+      : null;
+
+    const createdAt = item?.metadata?.createdAt || item?.metadata?.updatedAt;
+    const createdByUser =
+      item?.metadata?.createdByUser || item?.metadata?.updatedByUser || "NAv";
+
     const dateObj = createdAt ? new Date(createdAt) : null;
 
     return (
@@ -60,11 +67,9 @@ const NaScreen = () => {
         {/* COL 2: REASON */}
         <View style={styles.colReason}>
           <Text style={styles.reasonText}>
-            {access?.reason || "Unknown Conflict"}
+            {access?.reason || "Unknown Reason"}
           </Text>
-          <Text style={styles.agentText}>
-            By: {item.accessData?.metadata?.createdByUser}
-          </Text>
+          <Text style={styles.agentText}>By: {createdByUser}</Text>
         </View>
 
         {/* COL 3: THUMBNAIL */}
@@ -112,7 +117,7 @@ const NaScreen = () => {
       </View>
 
       <FlatList
-        data={trns}
+        data={noAccessTrns}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         ListEmptyComponent={
@@ -128,6 +133,14 @@ const NaScreen = () => {
           onDismiss={() => setSelectedImage(null)}
           contentContainerStyle={styles.modalContent}
         >
+          <TouchableOpacity
+            style={styles.modalCloseBtn}
+            onPress={() => setSelectedImage(null)}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
+
           {selectedImage && (
             <Image
               source={{ uri: selectedImage }}
@@ -206,5 +219,18 @@ const styles = StyleSheet.create({
     marginTop: 40,
     color: "#94a3b8",
     fontWeight: "700",
+  },
+
+  modalCloseBtn: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    zIndex: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(15, 23, 42, 0.85)",
+    justifyContent: "center",
+    alignItems: "center",
   },
 });

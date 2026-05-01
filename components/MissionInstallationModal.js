@@ -18,8 +18,6 @@ export default function MissionInstallationModal() {
   ----------------------------- */
 
   const goNoAccess = () => {
-    console.log(`goNoAccess installation`);
-
     closeMissionInstallation();
 
     updateGeo({
@@ -37,8 +35,6 @@ export default function MissionInstallationModal() {
   };
 
   const goWater = () => {
-    console.log(`goWater installation`);
-
     closeMissionInstallation();
 
     updateGeo({
@@ -56,8 +52,6 @@ export default function MissionInstallationModal() {
   };
 
   const goElectricity = () => {
-    console.log(`goElectricity installation`);
-
     closeMissionInstallation();
 
     updateGeo({

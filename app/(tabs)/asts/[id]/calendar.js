@@ -71,8 +71,8 @@ const getTrnSubtitle = (trn) => {
   const user =
     trn?.metadata?.updatedByUser ||
     trn?.metadata?.createdByUser ||
-    trn?.accessData?.metadata?.updatedByUser ||
-    trn?.accessData?.metadata?.createdByUser ||
+    trn?.metadata?.updatedByUser ||
+    trn?.metadata?.createdByUser ||
     "NAv";
 
   const detail =

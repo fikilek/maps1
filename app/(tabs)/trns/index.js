@@ -41,8 +41,7 @@ const TrnItem = ({ item }) => {
 
   const trnRef = item.id?.split("_").pop() || "N/A";
 
-  const agentDisplayName =
-    item.accessData?.metadata?.createdByUser || "Field Agent";
+  const agentDisplayName = item.metadata?.createdByUser || "Field Agent";
 
   const meterNo = hasAccess
     ? item.ast?.astData?.astNo || "NO METER"

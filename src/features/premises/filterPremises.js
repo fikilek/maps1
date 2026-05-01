@@ -1,7 +1,5 @@
 function getNoAccessCount(item = {}) {
-  return Array.isArray(item?.metadata?.noAccessTrnIds)
-    ? item.metadata.noAccessTrnIds.length
-    : 0;
+  return Array.isArray(item?.noAccessTrnIds) ? item.noAccessTrnIds.length : 0;
 }
 
 function getGeofenceIds(item = {}) {

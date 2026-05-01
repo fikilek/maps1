@@ -71,7 +71,7 @@ export const trnsApi = createApi({
         const premise = accessData?.premise || null;
         const erfId = accessData?.erfId || null;
         const parents = accessData?.parents || {};
-        const metadata = accessData?.metadata || {};
+        const metadata = payload?.metadata || {};
 
         const lmPcode = parents?.lmPcode || null;
         const wardPcode = parents?.wardPcode || null;
@@ -154,15 +154,16 @@ export const trnsApi = createApi({
                   if (!p) return;
 
                   const existingNoAccessTrnIds = Array.isArray(
-                    p?.metadata?.noAccessTrnIds,
+                    p?.noAccessTrnIds,
                   )
-                    ? p.metadata.noAccessTrnIds
+                    ? p.noAccessTrnIds
                     : [];
 
                   if (!existingNoAccessTrnIds.includes(trnId)) {
+                    p.noAccessTrnIds = [...existingNoAccessTrnIds, trnId];
+
                     p.metadata = {
                       ...p.metadata,
-                      noAccessTrnIds: [...existingNoAccessTrnIds, trnId],
                       updatedAt,
                       updatedByUid,
                       updatedByUser,
@@ -422,7 +423,7 @@ export const trnsApi = createApi({
           const q = query(
             collection(db, "trns"),
             where("accessData.premise.id", "==", premiseId),
-            orderBy("accessData.metadata.createdAt", "desc"),
+            orderBy("metadata.createdAt", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
@@ -464,7 +465,8 @@ export const trnsApi = createApi({
 
           const q = query(
             collection(db, "trns"),
-            where("accessData.metadata.countryId", "==", countryId),
+            where("accessData.parents.countryPcode", "==", countryId),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {
@@ -569,7 +571,7 @@ export const trnsApi = createApi({
           const q = query(
             collection(db, "trns"),
             where("accessData.parents.lmPcode", "==", lmPcode),
-            orderBy("accessData.metadata.updatedAt", "desc"),
+            orderBy("metadata.updatedAt", "desc"),
           );
 
           unsubscribe = onSnapshot(q, (snapshot) => {

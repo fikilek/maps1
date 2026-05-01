@@ -830,11 +830,6 @@ export default function FormMeterInstallation() {
       name: profile?.employment?.serviceProvider?.name || "NAv",
     };
 
-    // const serviceProvider = {
-    //   id: profile?.employment?.serviceProvider?.id || "NAv",
-    //   name: profile?.employment?.serviceProvider?.name || "NAv",
-    // };
-
     try {
       // Build system fields once.
       // If the premise draft is already successfully synced, use the real Firestore premise id.
@@ -1047,7 +1042,7 @@ export default function FormMeterInstallation() {
       // if (test) {
       //   return;
       // }
-      console.log(`handleSubmitInstallation --cleanPayload`, cleanPayload);
+      // console.log(`handleSubmitInstallation --cleanPayload`, cleanPayload);
 
       /*  
         START TIMEOUT WINDOW

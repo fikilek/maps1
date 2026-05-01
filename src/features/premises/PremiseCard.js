@@ -76,6 +76,69 @@ const getStatusConfig = (status = "") => {
   return { label: "NEW", color: "#94A3B8", icon: "plus-circle-outline" };
 };
 
+const normalizeMeterStatus = (meter) => {
+  if (!meter) return "UNKNOWN";
+
+  // Backward compatibility for old string arrays:
+  // ["TRN_..."] has no status, so it needs attention.
+  if (typeof meter === "string") {
+    return "RECORDED";
+  }
+
+  return String(meter?.status || "UNKNOWN").toUpperCase();
+};
+
+const getServiceStatusIndicator = (meters = []) => {
+  const list = Array.isArray(meters) ? meters : [];
+  const count = list.length;
+
+  if (count === 0) {
+    return {
+      count,
+      icon: "minus-circle-outline",
+      color: "#94a3b8",
+      bg: "#f8fafc",
+      border: "#e2e8f0",
+      label: "NO METER",
+    };
+  }
+
+  const statuses = list.map(normalizeMeterStatus);
+
+  if (statuses.includes("DISCONNECTED")) {
+    return {
+      count,
+      icon: "close-circle",
+      color: "#dc2626",
+      bg: "#fef2f2",
+      border: "#fecaca",
+      label: "ATTENTION",
+    };
+  }
+
+  const hasNotConnected = statuses.some((status) => status !== "CONNECTED");
+
+  if (hasNotConnected) {
+    return {
+      count,
+      icon: "alert-circle",
+      color: "#f59e0b",
+      bg: "#fffbeb",
+      border: "#fde68a",
+      label: "CHECK",
+    };
+  }
+
+  return {
+    count,
+    icon: "check-circle",
+    color: "#16a34a",
+    bg: "#f0fdf4",
+    border: "#bbf7d0",
+    label: "OK",
+  };
+};
+
 const PremiseCard = memo(
   ({
     item,
@@ -123,9 +186,17 @@ const PremiseCard = memo(
     // const beacon = getPropertyBeacon(propertyTypeStr);
     const status = getStatusConfig(item?.occupancy?.status || "");
     const occupancyStatus = item?.occupancy?.status || "Unknown";
-    const noAccessTrnIds = Array.isArray(item?.metadata.noAccessTrnIds)
-      ? item?.metadata.noAccessTrnIds.length
+    const noAccessTrnIds = Array.isArray(item?.noAccessTrnIds)
+      ? item?.noAccessTrnIds.length
       : 0;
+
+    const electricityStatusIndicator = getServiceStatusIndicator(
+      item?.services?.electricityMeters,
+    );
+
+    const waterStatusIndicator = getServiceStatusIndicator(
+      item?.services?.waterMeters,
+    );
 
     const identityLabel = resolveEntityIdentity();
     const addressStr =
@@ -422,21 +493,78 @@ const PremiseCard = memo(
         {/* 🏛️ THE COMMAND STRIP */}
         <View style={styles.commandStrip}>
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <MaterialCommunityIcons
-                name="lightning-bolt"
-                size={16}
-                color="#EAB308"
-              />
-              <Text style={styles.statCount}>
-                {item?.services?.electricityMeters?.length || 0}
-              </Text>
+            <View
+              style={[
+                styles.statItem,
+                {
+                  backgroundColor: electricityStatusIndicator.bg,
+                  borderColor: electricityStatusIndicator.border,
+                },
+              ]}
+            >
+              <View style={styles.statTopRow}>
+                <MaterialCommunityIcons
+                  name="lightning-bolt"
+                  size={16}
+                  color="#EAB308"
+                />
+                <Text style={styles.statCount}>
+                  {electricityStatusIndicator.count}
+                </Text>
+              </View>
+
+              <View style={styles.statStatusRow}>
+                <MaterialCommunityIcons
+                  name={electricityStatusIndicator.icon}
+                  size={13}
+                  color={electricityStatusIndicator.color}
+                />
+                <Text
+                  style={[
+                    styles.statStatusText,
+                    { color: electricityStatusIndicator.color },
+                  ]}
+                >
+                  ELEC
+                </Text>
+              </View>
             </View>
-            <View style={styles.statItem}>
-              <MaterialCommunityIcons name="water" size={16} color="#3B82F6" />
-              <Text style={styles.statCount}>
-                {item?.services?.waterMeters?.length || 0}
-              </Text>
+
+            <View
+              style={[
+                styles.statItem,
+                {
+                  backgroundColor: waterStatusIndicator.bg,
+                  borderColor: waterStatusIndicator.border,
+                },
+              ]}
+            >
+              <View style={styles.statTopRow}>
+                <MaterialCommunityIcons
+                  name="water"
+                  size={16}
+                  color="#3B82F6"
+                />
+                <Text style={styles.statCount}>
+                  {waterStatusIndicator.count}
+                </Text>
+              </View>
+
+              <View style={styles.statStatusRow}>
+                <MaterialCommunityIcons
+                  name={waterStatusIndicator.icon}
+                  size={13}
+                  color={waterStatusIndicator.color}
+                />
+                <Text
+                  style={[
+                    styles.statStatusText,
+                    { color: waterStatusIndicator.color },
+                  ]}
+                >
+                  WTR
+                </Text>
+              </View>
             </View>
 
             {noAccessTrnIds > 0 && (
@@ -572,16 +700,16 @@ const styles = StyleSheet.create({
     borderTopColor: "#F1F5F9",
   },
   statsRow: { flexDirection: "row", alignItems: "center", gap: 6, flex: 0.4 },
-  statItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F8FAFC",
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 6,
-    gap: 2,
-  },
-  statCount: { fontSize: 12, fontWeight: "800", color: "#1E293B" },
+  // statItem: {
+  //   flexDirection: "row",
+  //   alignItems: "center",
+  //   backgroundColor: "#F8FAFC",
+  //   paddingHorizontal: 6,
+  //   paddingVertical: 4,
+  //   borderRadius: 6,
+  //   gap: 2,
+  // },
+  // statCount: { fontSize: 12, fontWeight: "800", color: "#1E293B" },
   compactNaBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -707,5 +835,43 @@ const styles = StyleSheet.create({
 
   erfBadgeTextSelected: {
     color: "#2563eb",
+  },
+
+  statItem: {
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 44,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 7,
+    borderWidth: 1,
+  },
+
+  statTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+
+  statStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    marginTop: 2,
+  },
+
+  statCount: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#1E293B",
+  },
+
+  statStatusText: {
+    fontSize: 7,
+    fontWeight: "900",
+    letterSpacing: 0.2,
   },
 });

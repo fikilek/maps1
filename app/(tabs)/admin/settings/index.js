@@ -34,11 +34,9 @@ export default function SettingsManagerScreen() {
           options: updatedOptions,
           metadata: {
             ...selectedDoc.metadata,
-            updated: {
-              at: new Date().toISOString(),
-              byUser: `${user.name} ${user.surname}`,
-              byUid: user.uid,
-            },
+            updatedAt: new Date().toISOString(),
+            updatedByUid: user.uid,
+            updatedByUser: `${user.name} ${user.surname}`,
           },
         },
       }).unwrap();
