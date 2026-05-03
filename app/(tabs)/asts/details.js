@@ -103,6 +103,7 @@ export default function MeterDetailScreen() {
         <InfoSection title="IDENTITY" icon="fingerprint" color={themeColor}>
           <DataRow label="Manufacturer" value={astData?.astManufacturer} />
           <DataRow label="Model/Name" value={astData?.astName} />
+          <DataRow label="Meter Type" value={astData?.meter?.type} />
           <DataRow label="Category" value={astData?.meter?.category} />
         </InfoSection>
 
@@ -153,12 +154,6 @@ export default function MeterDetailScreen() {
               meterReading ? "Recorded at Discovery" : "No reading captured"
             }
           />
-
-          {/* <DataRow
-            label="Last Reading"
-            value={meterReading}
-            subValue="Recorded at Discovery"
-          /> */}
         </InfoSection>
 
         {/* 🛰️ METADATA */}

@@ -16,7 +16,45 @@ import { useWarehouse } from "../../../src/context/WarehouseContext";
 const TrnItem = ({ item }) => {
   const router = useRouter();
 
-  // console.log(`TrnItem --item`, item);
+  const trnType = item?.accessData?.trnType || "UNKNOWN_TRN";
+
+  const trnTypeLabelMap = {
+    METER_DISCOVERY: "METER DISCOVERY",
+    METER_INSTALLATION: "METER INSTALLATION",
+    METER_COMMISSIONING: "METER COMMISSIONING",
+    METER_INSPECTION: "METER INSPECTION",
+    METER_DISCONNECTION: "METER DISCONNECTION",
+    METER_RECONNECTION: "METER RECONNECTION",
+    METER_REMOVAL: "METER REMOVAL",
+    METER_VENDING: "METER VENDING",
+  };
+
+  const trnTypeIconMap = {
+    METER_DISCOVERY: "magnify-scan",
+    METER_INSTALLATION: "tools",
+    METER_COMMISSIONING: "progress-check",
+    METER_INSPECTION: "clipboard-search-outline",
+    METER_DISCONNECTION: "power-plug-off-outline",
+    METER_RECONNECTION: "power-plug-outline",
+    METER_REMOVAL: "delete-alert-outline",
+    METER_VENDING: "cash-register",
+  };
+
+  const trnTypeColorMap = {
+    METER_DISCOVERY: "#6366F1",
+    METER_INSTALLATION: "#2563EB",
+    METER_COMMISSIONING: "#16A34A",
+    METER_INSPECTION: "#7C3AED",
+    METER_DISCONNECTION: "#DC2626",
+    METER_RECONNECTION: "#059669",
+    METER_REMOVAL: "#EA580C",
+    METER_VENDING: "#0891B2",
+  };
+
+  const trnTypeLabel = trnTypeLabelMap[trnType] || trnType.replaceAll("_", " ");
+
+  const trnTypeIcon = trnTypeIconMap[trnType] || "file-document-outline";
+  const trnTypeColor = trnTypeColorMap[trnType] || "#475569";
 
   const isWater = item.meterType === "water";
 
@@ -71,6 +109,27 @@ const TrnItem = ({ item }) => {
       ]}
     >
       <View style={styles.content}>
+        <View
+          style={[
+            styles.trnTypeBanner,
+            {
+              backgroundColor: `${trnTypeColor}12`,
+              borderColor: `${trnTypeColor}55`,
+            },
+          ]}
+        >
+          <View style={styles.trnTypeLeft}>
+            <MaterialCommunityIcons
+              name={trnTypeIcon}
+              size={18}
+              color={trnTypeColor}
+            />
+            <Text style={[styles.trnTypeBannerText, { color: trnTypeColor }]}>
+              {trnTypeLabel}
+            </Text>
+          </View>
+        </View>
+
         <View style={[styles.header, { alignItems: "center" }]}>
           <View
             style={{
@@ -324,5 +383,36 @@ const styles = StyleSheet.create({
     color: "#0F172A", // Darker navy for contrast
     letterSpacing: 0.5,
     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace", // 🎯 Technical look
+  },
+
+  trnTypeBanner: {
+    minHeight: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  trnTypeLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    flex: 1,
+  },
+
+  trnTypeBannerText: {
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+
+  trnTypeRawText: {
+    fontSize: 8,
+    fontWeight: "900",
+    opacity: 0.75,
   },
 });

@@ -124,8 +124,6 @@ export default function FormMeterDiscovery() {
     action: actionRaw,
     queueItemId: queueItemIdRaw,
   } = useLocalSearchParams();
-  console.log(` `);
-  console.log(`FormMeterDiscovery --munting`);
 
   const queueItemId = Array.isArray(queueItemIdRaw)
     ? queueItemIdRaw[0]
@@ -1377,7 +1375,7 @@ export default function FormMeterDiscovery() {
           // console.log(`FormMeterDiscovery --values`, values);
           // console.log(` `);
           // console.log(`handleSubmitDiscovery --errors`, errors);
-          console.log(`errors`, JSON.stringify(errors, null, 2));
+          // console.log(`errors`, JSON.stringify(errors, null, 2));
 
           return (
             <ScrollView

@@ -54,7 +54,6 @@ export const addPremiseQueueItem = async ({
   createdByUser = "SYSTEM",
 }) => {
   try {
-    console.log(`payload`, payload);
     const queue = readQueue();
     const timestamp = nowIso();
 
@@ -90,10 +89,8 @@ export const addPremiseQueueItem = async ({
         updatedByUser: createdByUser,
       },
     };
-    // console.log(`newItem`, newItem);
 
     const updatedQueue = [newItem, ...queue];
-    console.log(`updatedQueue`, updatedQueue);
 
     const saveResult = writeQueue(updatedQueue);
 

@@ -18,6 +18,7 @@ export const IrepsMedia = ({
   agentName,
   agentUid,
   fallbackGps,
+  required = false,
 }) => {
   const { values, errors, setFieldValue } = useFormikContext();
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
@@ -44,9 +45,17 @@ export const IrepsMedia = ({
       normalizedError.includes("property type")) ||
     (tag === "propertyAdrPhoto" &&
       normalizedError.includes("property address")) ||
-    (tag === "meterReadingPhoto" && normalizedError.includes("meter reading"));
+    (tag === "meterReadingPhoto" &&
+      normalizedError.includes("meter reading")) ||
+    (tag === "vendingEvidence" && normalizedError.includes("vending")) ||
+    (tag === "finalSwitchOnEvidence" &&
+      normalizedError.includes("final switch-on")) ||
+    (tag === "keypadIssuedEvidence" &&
+      normalizedError.includes("keypad issued"));
 
-  const hasError = !!mediaErrorText && isTargetedError && !capturedPhoto;
+  const hasError =
+    (required && !capturedPhoto) ||
+    (!!mediaErrorText && isTargetedError && !capturedPhoto);
 
   const removeImage = () => {
     const newMedia = mediaArray.filter((m) => m?.tag !== tag);
@@ -87,8 +96,8 @@ export const IrepsMedia = ({
               <Text style={styles.statusText}>FORENSIC CAPTURE OK</Text>
 
               <Text style={styles.timeText}>
-                {capturedPhoto?.createdAt
-                  ? new Date(capturedPhoto?.createdAt).toLocaleTimeString()
+                {capturedPhoto?.created?.at
+                  ? new Date(capturedPhoto.created.at).toLocaleTimeString()
                   : "--:--"}
               </Text>
             </View>

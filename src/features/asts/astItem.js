@@ -36,6 +36,33 @@ const getMeterStatusConfig = (state = "") => {
   };
 };
 
+const LifecycleActionButton = ({ label, icon, enabled, onPress }) => {
+  return (
+    <TouchableOpacity
+      onPress={enabled ? onPress : undefined}
+      activeOpacity={enabled ? 0.75 : 1}
+      style={[
+        styles.lifecycleActionButton,
+        !enabled && styles.lifecycleActionButtonDisabled,
+      ]}
+    >
+      <MaterialCommunityIcons
+        name={enabled ? icon : "lock-outline"}
+        size={18}
+        color={enabled ? "#2563EB" : "#94A3B8"}
+      />
+      <Text
+        style={[
+          styles.lifecycleActionText,
+          !enabled && styles.lifecycleActionTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
+
 const AstItem = ({ item }) => {
   // console.log(`AstItem --item`, item);
   const { updateGeo } = useGeo();
@@ -76,6 +103,47 @@ const AstItem = ({ item }) => {
     const n = parseInt(tail, 10);
     return Number.isNaN(n) ? "NAv" : String(n);
   })();
+
+  const normalize = (value) =>
+    String(value || "")
+      .trim()
+      .toUpperCase();
+
+  const meterState = normalize(item?.status?.state);
+  const meterType = String(item?.meterType || "").toLowerCase();
+  const meterKind = String(item?.ast?.astData?.meter?.type || "")
+    .trim()
+    .toLowerCase();
+
+  const isPrepaidElectricity =
+    meterType === "electricity" && meterKind === "prepaid";
+
+  const canCommission = meterState === "FIELD" && meterType === "electricity";
+
+  const canInspect = meterState !== "REMOVED";
+  const canDisconnect = meterState === "CONNECTED";
+  const canReconnect = meterState === "DISCONNECTED";
+  const canRemove = meterState !== "REMOVED";
+  const canVend = meterState === "CONNECTED" && isPrepaidElectricity;
+
+  const launchCommissioning = () => {
+    if (!canCommission) return;
+
+    router.push({
+      pathname: "/(tabs)/asts/commissioning",
+      params: {
+        astId: item.id,
+        premiseId: item?.accessData?.premise?.id || "NAv",
+        action: JSON.stringify({
+          trnType: "METER_COMMISSIONING",
+          astId: item.id,
+          meterType: item?.meterType || "NAv",
+          meterNo: item?.ast?.astData?.astNo || "NAv",
+          statusBefore: item?.status?.state || "UNKNOWN",
+        }),
+      },
+    });
+  };
 
   const handleGoToDetails = () => {
     const meterNo = item.ast?.astData?.astNo;
@@ -223,6 +291,52 @@ const AstItem = ({ item }) => {
             </Text>
           </View>
         </View>
+      </View>
+
+      {/* Row for trn btns */}
+
+      <View style={styles.lifecycleActionRow}>
+        <LifecycleActionButton
+          label="COMM"
+          icon="progress-check"
+          enabled={canCommission}
+          onPress={launchCommissioning}
+        />
+
+        <LifecycleActionButton
+          label="INSP"
+          icon="clipboard-search-outline"
+          enabled={canInspect}
+          onPress={() => {}}
+        />
+
+        <LifecycleActionButton
+          label="DISC"
+          icon="power-plug-off-outline"
+          enabled={canDisconnect}
+          onPress={() => {}}
+        />
+
+        <LifecycleActionButton
+          label="RECON"
+          icon="power-plug-outline"
+          enabled={canReconnect}
+          onPress={() => {}}
+        />
+
+        <LifecycleActionButton
+          label="REM"
+          icon="delete-alert-outline"
+          enabled={canRemove}
+          onPress={() => {}}
+        />
+
+        <LifecycleActionButton
+          label="VEND"
+          icon="cash-register"
+          enabled={canVend}
+          onPress={() => {}}
+        />
       </View>
 
       {/* 🏛️ NEW: EXTREME LEFT-TO-RIGHT ACTION ROW */}
@@ -565,5 +679,43 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#E2E8F0",
+  },
+
+  lifecycleActionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    backgroundColor: "#FFFFFF",
+  },
+
+  lifecycleActionButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  lifecycleActionButtonDisabled: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+  },
+
+  lifecycleActionText: {
+    marginTop: 3,
+    fontSize: 8,
+    fontWeight: "900",
+    color: "#2563EB",
+  },
+
+  lifecycleActionTextDisabled: {
+    color: "#94A3B8",
   },
 });

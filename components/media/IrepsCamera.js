@@ -36,29 +36,71 @@ export const IrepsCamera = ({
   const cameraRef = useRef(null);
   const viewShotRef = useRef(null);
 
+  const withTimeout = (promise, timeoutMs = 1200) =>
+    Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+
+  const resolveGpsInBackground = async () => {
+    try {
+      let permissionResult = await Location.getForegroundPermissionsAsync();
+
+      if (permissionResult?.status !== "granted") {
+        permissionResult = await Location.requestForegroundPermissionsAsync();
+      }
+
+      if (permissionResult?.status !== "granted") {
+        setCurrentGps(null);
+        return;
+      }
+
+      // Fast first attempt: cached location
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 60_000,
+        requiredAccuracy: 100,
+      });
+
+      if (lastKnown?.coords) {
+        setCurrentGps({
+          lat: lastKnown.coords.latitude ?? null,
+          lng: lastKnown.coords.longitude ?? null,
+        });
+      }
+
+      // Slow attempt: fresh location, but capped
+      const freshLocation = await withTimeout(
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }),
+        1200,
+      );
+
+      if (freshLocation?.coords) {
+        setCurrentGps({
+          lat: freshLocation.coords.latitude ?? null,
+          lng: freshLocation.coords.longitude ?? null,
+        });
+      }
+    } catch (e) {
+      console.error("Location Error", e);
+      setCurrentGps(null);
+    }
+  };
+
   const handleOpen = async () => {
     if (!permission?.granted) {
       const { granted } = await requestPermission();
       if (!granted) return;
     }
 
-    try {
-      const { granted } = await Location?.requestForegroundPermissionsAsync();
-      if (granted) {
-        const location = await Location.getCurrentPositionAsync({});
-        setCurrentGps({
-          lat: location?.coords?.latitude ?? null,
-          lng: location?.coords?.longitude ?? null,
-        });
-      } else {
-        setCurrentGps(null);
-      }
-    } catch (e) {
-      console.error("Location Error", e);
-      setCurrentGps(null);
-    }
-
+    // Open camera immediately
     setIsVisible(true);
+
+    // Resolve GPS without blocking camera opening
+    setTimeout(() => {
+      resolveGpsInBackground();
+    }, 0);
   };
 
   const handleCapture = async () => {
@@ -66,7 +108,7 @@ export const IrepsCamera = ({
       setIsProcessing(true);
       try {
         const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.8,
+          quality: 0.6,
           skipProcessing: false,
         });
         setPreviewPhoto(photo.uri);

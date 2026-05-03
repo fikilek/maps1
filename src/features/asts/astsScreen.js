@@ -16,15 +16,6 @@ export default function AstsScreen() {
   const isLoading = loading;
   const noWard = scopeSync?.status === "awaiting-ward";
 
-  // console.log("AstsScreen -- debug", {
-  //   loading,
-  //   scopeStatus: scopeSync?.status,
-  //   astsCount: asts.length,
-  //   firstAst: asts?.[0],
-  //   firstAstWardTop: asts?.[0]?.parents?.wardPcode,
-  //   firstAstWardAccessData: asts?.[0]?.accessData?.parents?.wardPcode,
-  // });
-
   if (noWard) {
     return (
       <View style={[styles.container, styles.center]}>
