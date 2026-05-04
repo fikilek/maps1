@@ -26,6 +26,8 @@ import { trnsApi } from "./trnsApi";
 import { usersApi } from "./usersApi";
 
 import { geofenceApi } from "./geofenceApi";
+import { irepsLookupOptionsApi } from "./irepsLookupOptionsApi";
+import { irepsSelectLookupsApi } from "./irepsSelectLookupsApi";
 import newTrnsReducer from "./newTrnsSlice";
 import offlineReducer from "./offlineSlice";
 
@@ -45,6 +47,8 @@ const rootReducer = combineReducers({
   [astsApi.reducerPath]: astsApi.reducer,
   [salesApi.reducerPath]: salesApi.reducer,
   [geofenceApi.reducerPath]: geofenceApi.reducer,
+  [irepsSelectLookupsApi.reducerPath]: irepsSelectLookupsApi.reducer,
+  [irepsLookupOptionsApi.reducerPath]: irepsLookupOptionsApi.reducer,
 
   offline: offlineReducer,
   newTrns: newTrnsReducer,
@@ -108,6 +112,8 @@ export const store = configureStore({
       astsApi.middleware,
       salesApi.middleware,
       geofenceApi.middleware,
+      irepsSelectLookupsApi.middleware,
+      irepsLookupOptionsApi.middleware,
     ),
 });
 

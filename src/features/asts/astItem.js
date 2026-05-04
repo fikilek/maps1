@@ -36,6 +36,66 @@ const getMeterStatusConfig = (state = "") => {
   };
 };
 
+const getMeterKindConfig = (kind = "") => {
+  const clean = String(kind || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, "");
+
+  if (clean === "prepaid") {
+    return {
+      label: "PRE-PAID",
+      icon: "cash-multiple",
+      color: "#0891B2",
+      bg: "#ECFEFF",
+      border: "#A5F3FC",
+    };
+  }
+
+  if (clean === "conventional" || clean === "postpaid" || clean === "credit") {
+    return {
+      label: "CONVENTIONAL",
+      icon: "gauge",
+      color: "#7C3AED",
+      bg: "#F5F3FF",
+      border: "#DDD6FE",
+    };
+  }
+
+  return {
+    label: "UNKNOWN KIND",
+    icon: "help-circle-outline",
+    color: "#64748B",
+    bg: "#F8FAFC",
+    border: "#E2E8F0",
+  };
+};
+
+const formatAstUpdatedAt = (value) => {
+  if (!value) return "NAv";
+
+  let dateValue = null;
+
+  if (typeof value?.toDate === "function") {
+    dateValue = value.toDate();
+  } else if (value?.seconds) {
+    dateValue = new Date(value.seconds * 1000);
+  } else if (value?.__time__) {
+    dateValue = new Date(value.__time__);
+  } else {
+    dateValue = new Date(value);
+  }
+
+  if (Number.isNaN(dateValue?.getTime?.())) return "NAv";
+
+  return dateValue.toLocaleString(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const LifecycleActionButton = ({ label, icon, enabled, onPress }) => {
   return (
     <TouchableOpacity
@@ -115,6 +175,9 @@ const AstItem = ({ item }) => {
     .trim()
     .toLowerCase();
 
+  const meterKindConfig = getMeterKindConfig(meterKind);
+  const updatedAtLabel = formatAstUpdatedAt(item?.metadata?.updatedAt);
+
   const isPrepaidElectricity =
     meterType === "electricity" && meterKind === "prepaid";
 
@@ -136,6 +199,63 @@ const AstItem = ({ item }) => {
         premiseId: item?.accessData?.premise?.id || "NAv",
         action: JSON.stringify({
           trnType: "METER_COMMISSIONING",
+          astId: item.id,
+          meterType: item?.meterType || "NAv",
+          meterNo: item?.ast?.astData?.astNo || "NAv",
+          statusBefore: item?.status?.state || "UNKNOWN",
+        }),
+      },
+    });
+  };
+
+  const launchRemoval = () => {
+    if (!canRemove) return;
+
+    router.push({
+      pathname: "/(tabs)/asts/removal",
+      params: {
+        astId: item.id,
+        premiseId: item?.accessData?.premise?.id || "NAv",
+        action: JSON.stringify({
+          trnType: "METER_REMOVAL",
+          astId: item.id,
+          meterType: item?.meterType || "NAv",
+          meterNo: item?.ast?.astData?.astNo || "NAv",
+          statusBefore: item?.status?.state || "UNKNOWN",
+        }),
+      },
+    });
+  };
+
+  const launchDisconnection = () => {
+    if (!canDisconnect) return;
+
+    router.push({
+      pathname: "/(tabs)/asts/disconnection",
+      params: {
+        astId: item.id,
+        premiseId: item?.accessData?.premise?.id || "NAv",
+        action: JSON.stringify({
+          trnType: "METER_DISCONNECTION",
+          astId: item.id,
+          meterType: item?.meterType || "NAv",
+          meterNo: item?.ast?.astData?.astNo || "NAv",
+          statusBefore: item?.status?.state || "UNKNOWN",
+        }),
+      },
+    });
+  };
+
+  const launchReconnection = () => {
+    if (!canReconnect) return;
+
+    router.push({
+      pathname: "/(tabs)/asts/reconnection",
+      params: {
+        astId: item.id,
+        premiseId: item?.accessData?.premise?.id || "NAv",
+        action: JSON.stringify({
+          trnType: "METER_RECONNECTION",
           astId: item.id,
           meterType: item?.meterType || "NAv",
           meterNo: item?.ast?.astData?.astNo || "NAv",
@@ -293,8 +413,42 @@ const AstItem = ({ item }) => {
         </View>
       </View>
 
-      {/* Row for trn btns */}
+      <View style={styles.meterMetaRow}>
+        <View
+          style={[
+            styles.meterKindPill,
+            {
+              backgroundColor: meterKindConfig.bg,
+              borderColor: meterKindConfig.border,
+            },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={meterKindConfig.icon}
+            size={13}
+            color={meterKindConfig.color}
+          />
+          <Text
+            style={[styles.meterKindText, { color: meterKindConfig.color }]}
+            numberOfLines={1}
+          >
+            {meterKindConfig.label}
+          </Text>
+        </View>
 
+        <View style={styles.updatedAtPill}>
+          <MaterialCommunityIcons
+            name="clock-edit-outline"
+            size={13}
+            color="#64748B"
+          />
+          <Text style={styles.updatedAtText} numberOfLines={1}>
+            Updated {updatedAtLabel}
+          </Text>
+        </View>
+      </View>
+
+      {/* Row for trn btns */}
       <View style={styles.lifecycleActionRow}>
         <LifecycleActionButton
           label="COMM"
@@ -314,21 +468,21 @@ const AstItem = ({ item }) => {
           label="DISC"
           icon="power-plug-off-outline"
           enabled={canDisconnect}
-          onPress={() => {}}
+          onPress={launchDisconnection}
         />
 
         <LifecycleActionButton
           label="RECON"
           icon="power-plug-outline"
           enabled={canReconnect}
-          onPress={() => {}}
+          onPress={launchReconnection}
         />
 
         <LifecycleActionButton
           label="REM"
           icon="delete-alert-outline"
           enabled={canRemove}
-          onPress={() => {}}
+          onPress={launchRemoval}
         />
 
         <LifecycleActionButton
@@ -717,5 +871,54 @@ const styles = StyleSheet.create({
 
   lifecycleActionTextDisabled: {
     color: "#94A3B8",
+  },
+
+  meterMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    backgroundColor: "#FFFFFF",
+  },
+
+  meterKindPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    maxWidth: "45%",
+  },
+
+  meterKindText: {
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+  },
+
+  updatedAtPill: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+
+  updatedAtText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#64748B",
   },
 });

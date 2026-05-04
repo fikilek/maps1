@@ -4,6 +4,7 @@ import {
   useUpdateSettingsMutation,
 } from "@/src/redux/settingsApi";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
@@ -82,6 +83,26 @@ export default function SettingsManagerScreen() {
       <FlatList
         data={settings}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          <Pressable
+            style={[styles.settingCard, styles.lookupCard]}
+            onPress={() => router.push("/(tabs)/admin/settings/select-lookups")}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>Select Lookups</Text>
+              <Text style={styles.cardSub}>
+                Manage reusable dropdown values used in lifecycle transaction
+                forms.
+              </Text>
+            </View>
+
+            <MaterialCommunityIcons
+              name="format-list-bulleted-type"
+              size={24}
+              color="#007bff"
+            />
+          </Pressable>
+        }
         renderItem={({ item }) => (
           <Pressable
             style={styles.settingCard}
@@ -207,4 +228,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   addButtonText: { color: "#fff", fontWeight: "bold" },
+  lookupCard: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+  },
 });

@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { getIn, useFormikContext } from "formik";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Image,
   Modal,
@@ -10,7 +10,76 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import { IrepsCamera } from "./IrepsCamera";
+
+const MEDIA_ERROR_MATCHERS = {
+  // Discovery / installation evidence
+  astNoPhoto: ["meter"],
+  anomalyPhoto: ["anomaly"],
+  noAccessPhoto: ["no access"],
+  keypadPhoto: ["keypad"],
+  sealPhoto: ["seal"],
+  astCbPhoto: ["circuit breaker"],
+  ogsPhoto: ["off-grid supply"],
+  normalisationPhoto: ["normalisation"],
+  propertyTypePhoto: ["property type"],
+  propertyAdrPhoto: ["property address"],
+  meterReadingPhoto: ["meter reading"],
+
+  // Commissioning lifecycle evidence
+  vendingEvidence: ["vending evidence", "vending"],
+  finalSwitchOnEvidence: ["final switch-on evidence", "final switch-on"],
+  keypadIssuedEvidence: ["keypad issued evidence", "keypad issued"],
+
+  // Removal lifecycle evidence
+  removalInstructionEvidence: ["removal instruction evidence"],
+  removalEvidence: ["removal evidence"],
+  finalReadingEvidence: ["final reading evidence"],
+  supplySafeEvidence: ["supply safe evidence"],
+};
+
+function normalizeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isMediaErrorForTag({ tag, errorText }) {
+  const normalizedError = normalizeText(errorText);
+  if (!tag || !normalizedError) return false;
+
+  const matchers = MEDIA_ERROR_MATCHERS[tag] || [];
+
+  return matchers.some((matcher) =>
+    normalizedError.includes(normalizeText(matcher)),
+  );
+}
+
+function getMediaSource(capturedPhoto) {
+  const uri = capturedPhoto?.url || capturedPhoto?.uri || null;
+  return uri ? { uri } : null;
+}
+
+function formatCaptureTime(capturedPhoto) {
+  if (!capturedPhoto?.created?.at) return "--:--";
+
+  try {
+    return new Date(capturedPhoto.created.at).toLocaleTimeString();
+  } catch (_error) {
+    return "--:--";
+  }
+}
+
+function buildPlaceholderText({ tag, hasError }) {
+  const safeTag = String(tag || "MEDIA").toUpperCase();
+
+  if (hasError) {
+    return `📸 CAPTURE REQUIRED: ${safeTag} MISSING`;
+  }
+
+  return `NO ${safeTag} CAPTURED`;
+}
 
 export const IrepsMedia = ({
   name = "media",
@@ -24,42 +93,29 @@ export const IrepsMedia = ({
   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
 
   const mediaArray = getIn(values, name) || [];
-  const capturedPhoto = mediaArray.find((m) => m?.tag === tag);
+  const capturedPhoto = mediaArray.find((item) => item?.tag === tag);
 
   const mediaError = getIn(errors, name);
   const mediaErrorText = typeof mediaError === "string" ? mediaError : "";
 
-  const normalizedError = String(mediaErrorText || "").toLowerCase();
-
-  const isTargetedError =
-    (tag === "astNoPhoto" && normalizedError.includes("meter")) ||
-    (tag === "anomalyPhoto" && normalizedError.includes("anomaly")) ||
-    (tag === "noAccessPhoto" && normalizedError.includes("no access")) ||
-    (tag === "keypadPhoto" && normalizedError.includes("keypad")) ||
-    (tag === "sealPhoto" && normalizedError.includes("seal")) ||
-    (tag === "astCbPhoto" && normalizedError.includes("circuit breaker")) ||
-    (tag === "ogsPhoto" && normalizedError.includes("off-grid supply")) ||
-    (tag === "normalisationPhoto" &&
-      normalizedError.includes("normalisation")) ||
-    (tag === "propertyTypePhoto" &&
-      normalizedError.includes("property type")) ||
-    (tag === "propertyAdrPhoto" &&
-      normalizedError.includes("property address")) ||
-    (tag === "meterReadingPhoto" &&
-      normalizedError.includes("meter reading")) ||
-    (tag === "vendingEvidence" && normalizedError.includes("vending")) ||
-    (tag === "finalSwitchOnEvidence" &&
-      normalizedError.includes("final switch-on")) ||
-    (tag === "keypadIssuedEvidence" &&
-      normalizedError.includes("keypad issued"));
+  const isTargetedError = useMemo(
+    () =>
+      isMediaErrorForTag({
+        tag,
+        errorText: mediaErrorText,
+      }),
+    [tag, mediaErrorText],
+  );
 
   const hasError =
     (required && !capturedPhoto) ||
     (!!mediaErrorText && isTargetedError && !capturedPhoto);
 
+  const mediaSource = getMediaSource(capturedPhoto);
+
   const removeImage = () => {
-    const newMedia = mediaArray.filter((m) => m?.tag !== tag);
-    setFieldValue(name, newMedia);
+    const nextMediaArray = mediaArray.filter((item) => item?.tag !== tag);
+    setFieldValue(name, nextMediaArray);
   };
 
   return (
@@ -75,15 +131,15 @@ export const IrepsMedia = ({
       </View>
 
       <View style={styles.ribbonSlot}>
-        {capturedPhoto ? (
+        {capturedPhoto && mediaSource ? (
           <TouchableOpacity
             style={styles.photoContainer}
             onPress={() => setIsPreviewVisible(true)}
             activeOpacity={0.8}
           >
             <Image
-              key={capturedPhoto?.uri}
-              source={{ uri: capturedPhoto?.url || capturedPhoto?.uri || null }}
+              key={mediaSource.uri}
+              source={mediaSource}
               style={styles.thumbnail}
             />
 
@@ -96,13 +152,15 @@ export const IrepsMedia = ({
               <Text style={styles.statusText}>FORENSIC CAPTURE OK</Text>
 
               <Text style={styles.timeText}>
-                {capturedPhoto?.created?.at
-                  ? new Date(capturedPhoto.created.at).toLocaleTimeString()
-                  : "--:--"}
+                {formatCaptureTime(capturedPhoto)}
               </Text>
             </View>
 
-            <TouchableOpacity onPress={removeImage} style={styles.deleteBtn}>
+            <TouchableOpacity
+              onPress={removeImage}
+              style={styles.deleteBtn}
+              activeOpacity={0.8}
+            >
               <MaterialCommunityIcons
                 name="close-circle"
                 size={20}
@@ -115,10 +173,9 @@ export const IrepsMedia = ({
             style={[styles.placeholder, hasError && styles.placeholderError]}
           >
             <Text
-              style={[styles.placeholderText, hasError && { color: "#ef4444" }]}
+              style={[styles.placeholderText, hasError && styles.errorText]}
             >
-              {hasError ? "📸 CAPTURE REQUIRED: " : "NO "}
-              {tag?.toUpperCase()} {hasError ? "MISSING" : "CAPTURED"}
+              {buildPlaceholderText({ tag, hasError })}
             </Text>
           </View>
         )}
@@ -131,15 +188,18 @@ export const IrepsMedia = ({
         onRequestClose={() => setIsPreviewVisible(false)}
       >
         <View style={styles.fullScreenContainer}>
-          <Image
-            source={{ uri: capturedPhoto?.url || capturedPhoto?.uri || null }}
-            style={styles.fullScreenImage}
-            resizeMode="contain"
-          />
+          {!!mediaSource && (
+            <Image
+              source={mediaSource}
+              style={styles.fullScreenImage}
+              resizeMode="contain"
+            />
+          )}
 
           <TouchableOpacity
             style={styles.closePreviewBtn}
             onPress={() => setIsPreviewVisible(false)}
+            activeOpacity={0.85}
           >
             <MaterialCommunityIcons name="close-box" size={40} color="white" />
             <Text style={styles.closeText}>CLOSE PREVIEW</Text>
@@ -151,322 +211,140 @@ export const IrepsMedia = ({
 };
 
 const styles = StyleSheet.create({
-  containerError: {
-    borderColor: "#ef4444",
-    borderLeftWidth: 8,
-    backgroundColor: "#fff1f2",
-  },
-  placeholderError: {
-    borderColor: "#ef4444",
-    borderWidth: 2,
-    borderStyle: "solid",
-    backgroundColor: "#ffe4e6",
-  },
-
   container: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#ffffff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 12,
     padding: 10,
     marginVertical: 6,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#E2E8F0",
   },
-  cameraBox: { flex: 0.2, alignItems: "center" },
-  ribbonSlot: { flex: 0.8, marginLeft: 10 },
+
+  containerError: {
+    borderColor: "#EF4444",
+    borderLeftWidth: 8,
+    backgroundColor: "#FFF1F2",
+  },
+
+  cameraBox: {
+    flex: 0.2,
+    alignItems: "center",
+  },
+
+  ribbonSlot: {
+    flex: 0.8,
+    marginLeft: 10,
+  },
+
   photoContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1a1a1a",
+    backgroundColor: "#1A1A1A",
     borderRadius: 10,
     padding: 6,
     height: 90,
   },
-  thumbnail: { width: 65, height: 78, borderRadius: 6, resizeMode: "cover" },
-  infoArea: { flex: 1, paddingLeft: 12, justifyContent: "center" },
-  metaRow: { flexDirection: "row", alignItems: "center", marginBottom: 2 },
-  tagText: { color: "#34D399", fontSize: 10, fontWeight: "bold" },
-  statusText: { color: "#ffffff", fontSize: 9, fontWeight: "600" },
+
+  thumbnail: {
+    width: 65,
+    height: 78,
+    borderRadius: 6,
+    resizeMode: "cover",
+  },
+
+  infoArea: {
+    flex: 1,
+    paddingLeft: 12,
+    justifyContent: "center",
+  },
+
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 2,
+  },
+
+  tagText: {
+    color: "#34D399",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+
+  statusText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "600",
+  },
+
   timeText: {
-    color: "#94a3b8",
+    color: "#94A3B8",
     fontSize: 8,
     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
   },
+
   deleteBtn: {
     position: "absolute",
     top: 4,
     right: 4,
-    backgroundColor: "white",
+    backgroundColor: "#FFFFFF",
     borderRadius: 10,
   },
+
   placeholder: {
     height: 90,
     justifyContent: "center",
     alignItems: "center",
     borderStyle: "dashed",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#CBD5E1",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 8,
   },
-  placeholderText: { fontSize: 9, color: "#64748b", fontWeight: "bold" },
+
+  placeholderError: {
+    borderColor: "#EF4444",
+    borderWidth: 2,
+    borderStyle: "solid",
+    backgroundColor: "#FFE4E6",
+  },
+
+  placeholderText: {
+    fontSize: 9,
+    color: "#64748B",
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+
+  errorText: {
+    color: "#EF4444",
+  },
 
   fullScreenContainer: {
     flex: 1,
-    backgroundColor: "black",
+    backgroundColor: "#000000",
     justifyContent: "center",
     alignItems: "center",
   },
+
   fullScreenImage: {
     width: "100%",
     height: "100%",
   },
+
   closePreviewBtn: {
     position: "absolute",
     top: 50,
     right: 20,
     alignItems: "center",
   },
+
   closeText: {
-    color: "white",
+    color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "bold",
     marginTop: -5,
   },
 });
-
-// import { MaterialCommunityIcons } from "@expo/vector-icons";
-// import { getIn, useFormikContext } from "formik";
-// import { useState } from "react";
-// import {
-//   Image,
-//   Modal,
-//   Platform,
-//   StyleSheet,
-//   Text,
-//   TouchableOpacity,
-//   View,
-// } from "react-native";
-// import { IrepsCamera } from "./IrepsCamera";
-
-// // 🎯 1. Accept the 'name' prop
-// export const IrepsMedia = ({
-//   name = "media",
-//   tag,
-//   agentName,
-//   agentUid,
-//   fallbackGps,
-// }) => {
-//   const { values, errors, setFieldValue } = useFormikContext();
-//   const [isPreviewVisible, setIsPreviewVisible] = useState(false);
-
-//   // 🎯 2. Use getIn to find the array based on the name prop
-//   // This will now find 'values.media' correctly
-//   const mediaArray = getIn(values, name) || [];
-//   const capturedPhoto = mediaArray.find((m) => m?.tag === tag);
-
-//   const mediaError = getIn(errors, name);
-//   const mediaErrorText = typeof mediaError === "string" ? mediaError : "";
-
-//   const normalizedError = String(mediaErrorText || "").toLowerCase();
-
-//   const isTargetedError =
-//     (tag === "astNoPhoto" && normalizedError.includes("meter")) ||
-//     (tag === "anomalyPhoto" && normalizedError.includes("anomaly")) ||
-//     (tag === "noAccessPhoto" && normalizedError.includes("no access")) ||
-//     (tag === "keypadPhoto" && normalizedError.includes("keypad")) ||
-//     (tag === "astCbPhoto" && normalizedError.includes("circuit breaker")) ||
-//     (tag === "ogsPhoto" && normalizedError.includes("off-grid supply")) ||
-//     (tag === "normalisationPhoto" &&
-//       normalizedError.includes("normalisation")) ||
-//     (tag === "propertyTypePhoto" &&
-//       normalizedError.includes("property type")) ||
-//     (tag === "propertyAdrPhoto" &&
-//       normalizedError.includes("property address")) ||
-//     (tag === "meterReadingPhoto" && normalizedError.includes("meter reading"));
-
-//   const hasError = !!mediaErrorText && isTargetedError && !capturedPhoto;
-
-//   const removeImage = () => {
-//     const newMedia = mediaArray.filter((m) => m?.tag !== tag);
-//     setFieldValue(name, newMedia); // 🎯 Use the name prop here too!
-//   };
-
-//   return (
-//     <View style={[styles.container, hasError && styles.containerError]}>
-//       <View style={styles.cameraBox}>
-//         {/* 🎯 4. PASS THE NAME TO THE CAMERA */}
-//         <IrepsCamera
-//           name={name}
-//           tag={tag}
-//           agentName={agentName}
-//           agentUid={agentUid}
-//           fallbackGps={fallbackGps}
-//         />
-//       </View>
-
-//       {/* RIGHT: The Forensic Ribbon */}
-//       <View style={styles.ribbonSlot}>
-//         {capturedPhoto ? (
-//           <TouchableOpacity
-//             style={styles.photoContainer}
-//             onPress={() => setIsPreviewVisible(true)}
-//             activeOpacity={0.8}
-//           >
-//             <Image
-//               key={capturedPhoto?.uri}
-//               source={{ uri: capturedPhoto?.url || capturedPhoto?.uri || null }}
-//               style={styles.thumbnail}
-//             />
-
-//             <View style={styles.infoArea}>
-//               <View style={styles.metaRow}>
-//                 <MaterialCommunityIcons name="tag" size={12} color="#34D399" />
-//                 <Text style={styles.tagText}> {tag}</Text>
-//               </View>
-//               <Text style={styles.statusText}>FORENSIC CAPTURE OK</Text>
-//               <Text style={styles.timeText}>
-//                 {capturedPhoto?.created?.at
-//                   ? new Date(capturedPhoto.created.at).toLocaleTimeString()
-//                   : "--:--"}
-//               </Text>
-//             </View>
-
-//             <TouchableOpacity onPress={removeImage} style={styles.deleteBtn}>
-//               <MaterialCommunityIcons
-//                 name="close-circle"
-//                 size={20}
-//                 color="#EF4444"
-//               />
-//             </TouchableOpacity>
-//           </TouchableOpacity>
-//         ) : (
-//           <View
-//             style={[styles.placeholder, hasError && styles.placeholderError]}
-//           >
-//             <Text
-//               style={[styles.placeholderText, hasError && { color: "#ef4444" }]}
-//             >
-//               {hasError ? "📸 CAPTURE REQUIRED: " : "NO "}
-//               {tag?.toUpperCase()} {hasError ? "MISSING" : "CAPTURED"}
-//             </Text>
-//           </View>
-//         )}
-//       </View>
-
-//       {/* 🎯 FULL SCREEN PREVIEW MODAL */}
-//       <Modal
-//         visible={isPreviewVisible}
-//         transparent={false}
-//         animationType="fade"
-//         onRequestClose={() => setIsPreviewVisible(false)}
-//       >
-//         <View style={styles.fullScreenContainer}>
-//           <Image
-//             source={{ uri: capturedPhoto?.url || capturedPhoto?.uri || null }}
-//             style={styles.fullScreenImage}
-//             resizeMode="contain"
-//           />
-
-//           {/* Close Overlay */}
-//           <TouchableOpacity
-//             style={styles.closePreviewBtn}
-//             onPress={() => setIsPreviewVisible(false)}
-//           >
-//             <MaterialCommunityIcons name="close-box" size={40} color="white" />
-//             <Text style={styles.closeText}>CLOSE PREVIEW</Text>
-//           </TouchableOpacity>
-//         </View>
-//       </Modal>
-//     </View>
-//   );
-// };
-
-// const styles = StyleSheet.create({
-//   containerError: {
-//     borderColor: "#ef4444",
-//     borderLeftWidth: 8, // 🎯 Extra emphasis for forensic gaps
-//     backgroundColor: "#fff1f2",
-//   },
-//   placeholderError: {
-//     borderColor: "#ef4444",
-//     borderWidth: 2,
-//     borderStyle: "solid", // 🎯 Change from dashed to solid for urgent errors
-//     backgroundColor: "#ffe4e6",
-//   },
-
-//   // ... existing styles for container, cameraBox, etc. ...
-//   container: {
-//     flexDirection: "row",
-//     alignItems: "center",
-//     backgroundColor: "#ffffff",
-//     borderRadius: 12,
-//     padding: 10,
-//     marginVertical: 6,
-//     borderWidth: 1,
-//     borderColor: "#e2e8f0",
-//   },
-//   cameraBox: { flex: 0.2, alignItems: "center" },
-//   ribbonSlot: { flex: 0.8, marginLeft: 10 },
-//   photoContainer: {
-//     flexDirection: "row",
-//     alignItems: "center",
-//     backgroundColor: "#1a1a1a",
-//     borderRadius: 10,
-//     padding: 6,
-//     height: 90,
-//   },
-//   thumbnail: { width: 65, height: 78, borderRadius: 6, resizeMode: "cover" },
-//   infoArea: { flex: 1, paddingLeft: 12, justifyContent: "center" },
-//   metaRow: { flexDirection: "row", alignItems: "center", marginBottom: 2 },
-//   tagText: { color: "#34D399", fontSize: 10, fontWeight: "bold" },
-//   statusText: { color: "#ffffff", fontSize: 9, fontWeight: "600" },
-//   timeText: {
-//     color: "#94a3b8",
-//     fontSize: 8,
-//     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-//   },
-//   deleteBtn: {
-//     position: "absolute",
-//     top: 4,
-//     right: 4,
-//     backgroundColor: "white",
-//     borderRadius: 10,
-//   },
-//   placeholder: {
-//     height: 90,
-//     justifyContent: "center",
-//     alignItems: "center",
-//     borderStyle: "dashed",
-//     borderWidth: 1,
-//     borderColor: "#cbd5e1",
-//     borderRadius: 10,
-//     backgroundColor: "#f8fafc",
-//   },
-//   placeholderText: { fontSize: 9, color: "#64748b", fontWeight: "bold" },
-
-//   // 🎯 FULL SCREEN STYLES
-//   fullScreenContainer: {
-//     flex: 1,
-//     backgroundColor: "black",
-//     justifyContent: "center",
-//     alignItems: "center",
-//   },
-//   fullScreenImage: {
-//     width: "100%",
-//     height: "100%",
-//   },
-//   closePreviewBtn: {
-//     position: "absolute",
-//     top: 50,
-//     right: 20,
-//     alignItems: "center",
-//   },
-//   closeText: {
-//     color: "white",
-//     fontSize: 10,
-//     fontWeight: "bold",
-//     marginTop: -5,
-//   },
-// });
