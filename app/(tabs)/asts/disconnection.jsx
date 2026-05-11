@@ -2,9 +2,11 @@ import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { Formik } from "formik";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Image,
+  Linking,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -26,6 +28,7 @@ import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 
 import { IrepsFormActions } from "../../../components/forms/IrepsFormActions";
+import { IrepsNoAccessSection } from "../../../components/forms/IrepsNoAccessSection";
 import IrepsSelectWithOther, {
   isSelectWithOtherFilled,
   normalizeSelectWithOtherValue,
@@ -51,25 +54,50 @@ const EMPTY_SELECT_WITH_OTHER = {
   otherText: "",
 };
 
+const EXECUTION_MEDIA_TAGS = [
+  "disconnectionLevelEvidence",
+  "disconnectionMeterReadingEvidence",
+  "tokenReadingPhoto",
+  "safetyEvidence",
+  "noAccessPhoto",
+];
+
 function makeEmptySelectWithOther() {
   return { ...EMPTY_SELECT_WITH_OTHER };
 }
 
-function buildMeterDisconnectionTrnId({ wardPcode, erfNo, meterType }) {
-  const ts = Date.now();
+function readFirstString(...values) {
+  for (const value of values) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
 
-  const safeWardPcode = String(wardPcode || "NAv")
-    .replace(/[^A-Za-z0-9]/g, "")
-    .slice(0, 12);
+  return "";
+}
 
-  const safeErfNo = String(erfNo || "NAv")
-    .replace(/[^A-Za-z0-9]/g, "")
-    .slice(0, 12);
+function getInstructionWorkflowState(action = {}) {
+  return String(
+    action?.workflowState || action?.workflow?.state || "",
+  ).toUpperCase();
+}
 
-  const typeCode =
-    meterType === "water" ? "WTR" : meterType === "electricity" ? "ELC" : "NA";
+function isLifecycleInstructionLocked(action = {}) {
+  const workflowState = getInstructionWorkflowState(action);
 
-  return `TRN_MDCN_${ts}_${typeCode}_${safeWardPcode}_${safeErfNo}`;
+  return (
+    action?.source === "WMS" ||
+    Boolean(action?.instructionTrnId) ||
+    Boolean(action?.trnId) ||
+    Boolean(action?.id) ||
+    [
+      "ISSUED",
+      "REASSIGNED",
+      "ACCEPTED",
+      "REJECTED",
+      "COMPLETED",
+      "CANCELLED",
+    ].includes(workflowState)
+  );
 }
 
 function withSubmitTimeout(promise, timeoutMs = 15000) {
@@ -203,6 +231,18 @@ function normalizeNoReadingReasonValue(value) {
   return makeEmptySelectWithOther();
 }
 
+function normalizeNoAccessReasonValue(value, reasonText = "") {
+  if (value?.code !== undefined || value?.otherText !== undefined) {
+    return normalizeSelectWithOtherValue(value);
+  }
+
+  if (reasonText && reasonText !== "NAv") {
+    return textToOtherSelectValue(reasonText);
+  }
+
+  return makeEmptySelectWithOther();
+}
+
 function normalizeCodeLabelValue(value) {
   if (!value) return makeEmptySelectWithOther();
 
@@ -213,12 +253,63 @@ function normalizeCodeLabelValue(value) {
   return makeEmptySelectWithOther();
 }
 
-function buildBackendDisconnectionPayload(disconnection = {}) {
-  return {
-    instruction: {
-      text: selectWithOtherToText(disconnection?.instruction),
-    },
+function normalizeMeterKindForReading(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]/g, "");
+}
 
+function isPrepaidMeterKind(value) {
+  return normalizeMeterKindForReading(value) === "prepaid";
+}
+
+function getHasAccess(values = {}) {
+  return String(values?.accessData?.access?.hasAccess || "yes").toLowerCase();
+}
+
+function isNoAccess(values = {}) {
+  return getHasAccess(values) === "no";
+}
+
+function hasMediaTag(media = [], tag) {
+  return (Array.isArray(media) ? media : []).some((item) => item?.tag === tag);
+}
+
+function filterExecutionMedia(media = []) {
+  return (Array.isArray(media) ? media : []).filter((item) =>
+    EXECUTION_MEDIA_TAGS.includes(item?.tag),
+  );
+}
+
+function buildBackendDisconnectionPayload(
+  disconnection = {},
+  { isPrepaid = false, noAccess = false } = {},
+) {
+  if (noAccess) {
+    return {
+      level: {
+        code: "",
+        label: "",
+      },
+
+      supplyDisconnected: {
+        answer: "",
+        notes: "",
+      },
+
+      meterReading: "",
+      tokenReading: "",
+      noReadingReason: "",
+
+      safetyConfirmed: {
+        answer: "",
+        notes: "",
+      },
+    };
+  }
+
+  return {
     level: {
       code: disconnection?.level?.code || "",
       label: disconnection?.level?.label || "",
@@ -229,127 +320,267 @@ function buildBackendDisconnectionPayload(disconnection = {}) {
       notes: disconnection?.supplyDisconnected?.notes || "",
     },
 
-    meterReading: {
-      reading: String(disconnection?.meterReading?.reading || ""),
-      noReadingReason: selectWithOtherToText(
-        disconnection?.meterReading?.noReadingReason,
-      ),
+    meterReading: isPrepaid ? "" : String(disconnection?.meterReading || ""),
+    tokenReading: isPrepaid ? String(disconnection?.tokenReading || "") : "",
+
+    noReadingReason: selectWithOtherToText(disconnection?.noReadingReason),
+
+    safetyConfirmed: {
+      answer: disconnection?.safetyConfirmed?.answer || "",
+      notes: disconnection?.safetyConfirmed?.notes || "",
     },
   };
 }
 
-const DisconnectionSchema = object().shape({
-  disconnection: object().shape({
-    instruction: object()
-      .shape({
-        code: string().notRequired(),
-        label: string().notRequired(),
-        otherText: string().notRequired(),
-      })
-      .test(
-        "disconnection-instruction-required",
-        "Disconnection instruction is required",
-        function (value) {
-          return isSelectWithOtherFilled(value);
+function buildAssignmentPayload({
+  assignment = {},
+  officeInstruction = {},
+  instructionLocked = true,
+}) {
+  const { instructionSelect, createdFor, ...restAssignment } = assignment || {};
+
+  const targetFromCreatedFor = createdFor?.id
+    ? [
+        {
+          type: createdFor?.type || "USER",
+          id: createdFor.id,
+          name: createdFor?.name || "NAv",
         },
-      ),
+      ]
+    : [];
 
-    level: object()
-      .shape({
-        code: string().notRequired(),
-        label: string().notRequired(),
-        otherText: string().notRequired(),
-      })
-      .test(
-        "disconnection-level-required",
-        "Disconnection level is required",
-        function (value) {
-          return isSelectWithOtherFilled(value);
-        },
-      ),
+  const targets =
+    Array.isArray(restAssignment?.targets) && restAssignment.targets.length
+      ? restAssignment.targets
+      : targetFromCreatedFor;
 
-    supplyDisconnected: object().shape({
-      answer: string().oneOf(["yes", "no"]).required("Required"),
-      notes: string().when("answer", {
-        is: "no",
-        then: (s) => s.trim().required("Notes required when answer is no"),
-        otherwise: (s) => s.notRequired(),
-      }),
-    }),
+  const instructionText = instructionLocked
+    ? String(
+        officeInstruction?.text || restAssignment?.instruction?.text || "",
+      ).trim()
+    : selectWithOtherToText(instructionSelect);
 
-    meterReading: object().shape({
-      reading: string().test(
-        "reading-or-reason",
-        "Meter reading or no-reading reason is required",
-        function (value) {
-          const noReadingReason = this.parent?.noReadingReason;
+  return {
+    ...restAssignment,
+    targets,
+    instruction: {
+      code:
+        restAssignment?.instruction?.code ||
+        officeInstruction?.code ||
+        "METER_DISCONNECTION",
+      text: instructionText,
+      notes: String(
+        restAssignment?.instruction?.notes || officeInstruction?.notes || "",
+      ).trim(),
+      mediaRequired:
+        restAssignment?.instruction?.mediaRequired === true ||
+        officeInstruction?.mediaRequired === true,
+    },
+  };
+}
 
-          return (
-            !!String(value || "").trim() ||
-            isSelectWithOtherFilled(noReadingReason)
-          );
-        },
-      ),
+function normalizeFirebaseStorageImageUrl(rawUrl) {
+  const url = String(rawUrl || "").trim();
 
-      noReadingReason: object()
-        .shape({
+  if (!url) return "";
+
+  const marker = "firebasestorage.googleapis.com/v0/b/";
+  const objectMarker = "/o/";
+
+  if (!url.includes(marker) || !url.includes(objectMarker)) {
+    return url;
+  }
+
+  try {
+    const [beforeQuery, query = ""] = url.split("?");
+    const objectMarkerIndex = beforeQuery.indexOf(objectMarker);
+
+    if (objectMarkerIndex < 0) return url;
+
+    const prefix = beforeQuery.slice(
+      0,
+      objectMarkerIndex + objectMarker.length,
+    );
+    const objectPath = beforeQuery.slice(
+      objectMarkerIndex + objectMarker.length,
+    );
+
+    const decodedObjectPath = decodeURIComponent(objectPath);
+    const encodedObjectPath = encodeURIComponent(decodedObjectPath);
+
+    return `${prefix}${encodedObjectPath}${query ? `?${query}` : ""}`;
+  } catch (error) {
+    console.log("normalizeFirebaseStorageImageUrl --error", error);
+
+    return url;
+  }
+}
+
+function getMediaPreviewUrl(mediaItem = {}) {
+  return normalizeFirebaseStorageImageUrl(
+    mediaItem?.url || mediaItem?.uri || "",
+  );
+}
+
+const DisconnectionSchema = object()
+  .shape({
+    accessData: object().shape({
+      access: object().shape({
+        hasAccess: string()
+          .oneOf(["yes", "no"])
+          .required("Access outcome is required"),
+        reason: string().notRequired(),
+        reasonSelect: object().shape({
           code: string().notRequired(),
           label: string().notRequired(),
           otherText: string().notRequired(),
-        })
-        .test(
-          "reason-or-reading",
-          "No-reading reason is required when no meter reading is captured",
-          function (value) {
-            const reading = this.parent?.reading;
-
-            return (
-              !!String(reading || "").trim() || isSelectWithOtherFilled(value)
-            );
-          },
-        ),
+        }),
+      }),
     }),
-  }),
 
-  media: array()
-    .of(object())
-    .test(
-      "disconnection-evidence",
-      "Disconnection evidence missing",
-      function (value) {
-        const disconnection = this.parent?.disconnection || {};
-        const meterReading = String(
-          disconnection?.meterReading?.reading || "",
-        ).trim();
+    assignment: object().shape({
+      instructionSelect: object().shape({
+        code: string().notRequired(),
+        label: string().notRequired(),
+        otherText: string().notRequired(),
+      }),
+    }),
 
-        if (!value?.some((m) => m.tag === "disconnectionInstructionEvidence")) {
-          return this.createError({
-            message: "Disconnection instruction evidence required",
-          });
-        }
+    disconnection: object().shape({
+      level: object().shape({
+        code: string().notRequired(),
+        label: string().notRequired(),
+        otherText: string().notRequired(),
+      }),
 
-        if (
-          disconnection?.supplyDisconnected?.answer === "yes" &&
-          !value?.some((m) => m.tag === "disconnectionLevelEvidence")
-        ) {
-          return this.createError({
-            message: "Disconnection level evidence required",
-          });
-        }
+      supplyDisconnected: object().shape({
+        answer: string().notRequired(),
+        notes: string().notRequired(),
+      }),
 
-        if (
-          meterReading &&
-          !value?.some((m) => m.tag === "disconnectionMeterReadingEvidence")
-        ) {
-          return this.createError({
-            message: "Disconnection meter reading evidence required",
-          });
-        }
+      meterReading: string().notRequired(),
+      tokenReading: string().notRequired(),
 
-        return true;
-      },
-    ),
-});
+      noReadingReason: object().shape({
+        code: string().notRequired(),
+        label: string().notRequired(),
+        otherText: string().notRequired(),
+      }),
+
+      safetyConfirmed: object().shape({
+        answer: string().notRequired(),
+        notes: string().notRequired(),
+      }),
+    }),
+
+    media: array().of(object()),
+  })
+  .test("dcn-v02-validation", "DCN validation failed", function (values = {}) {
+    const access = values?.accessData?.access || {};
+    const disconnection = values?.disconnection || {};
+    const media = values?.media || [];
+
+    if (String(access?.hasAccess || "").toLowerCase() === "no") {
+      if (!isSelectWithOtherFilled(access?.reasonSelect)) {
+        return this.createError({
+          path: "accessData.access.reasonSelect",
+          message: "No-access reason is required",
+        });
+      }
+
+      if (!hasMediaTag(media, "noAccessPhoto")) {
+        return this.createError({
+          path: "media",
+          message: "No access photo is required",
+        });
+      }
+
+      return true;
+    }
+
+    if (!isSelectWithOtherFilled(disconnection?.level)) {
+      return this.createError({
+        path: "disconnection.level",
+        message: "Disconnection level is required",
+      });
+    }
+
+    if (!["yes", "no"].includes(disconnection?.supplyDisconnected?.answer)) {
+      return this.createError({
+        path: "disconnection.supplyDisconnected.answer",
+        message: "Supply disconnected answer is required",
+      });
+    }
+
+    if (disconnection?.supplyDisconnected?.answer !== "yes") {
+      return this.createError({
+        path: "disconnection.supplyDisconnected.answer",
+        message: "Supply must be confirmed as disconnected before submit",
+      });
+    }
+
+    if (!hasMediaTag(media, "disconnectionLevelEvidence")) {
+      return this.createError({
+        path: "media",
+        message: "Disconnection level evidence required",
+      });
+    }
+
+    const meterReading = String(disconnection?.meterReading || "").trim();
+    const tokenReading = String(disconnection?.tokenReading || "").trim();
+
+    if (
+      !meterReading &&
+      !tokenReading &&
+      !isSelectWithOtherFilled(disconnection?.noReadingReason)
+    ) {
+      return this.createError({
+        path: "disconnection.noReadingReason",
+        message:
+          "Meter reading, token reading, or no-reading reason is required",
+      });
+    }
+
+    if (
+      meterReading &&
+      !hasMediaTag(media, "disconnectionMeterReadingEvidence")
+    ) {
+      return this.createError({
+        path: "media",
+        message: "Disconnection meter reading evidence required",
+      });
+    }
+
+    if (tokenReading && !hasMediaTag(media, "tokenReadingPhoto")) {
+      return this.createError({
+        path: "media",
+        message: "Token reading photo is required",
+      });
+    }
+
+    if (!["yes", "no"].includes(disconnection?.safetyConfirmed?.answer)) {
+      return this.createError({
+        path: "disconnection.safetyConfirmed.answer",
+        message: "Safety confirmed answer is required",
+      });
+    }
+
+    if (disconnection?.safetyConfirmed?.answer !== "yes") {
+      return this.createError({
+        path: "disconnection.safetyConfirmed.answer",
+        message: "Safety must be confirmed before submit",
+      });
+    }
+
+    if (!hasMediaTag(media, "safetyEvidence")) {
+      return this.createError({
+        path: "media",
+        message: "Safety evidence required",
+      });
+    }
+
+    return true;
+  });
 
 const YesNoQuestion = ({
   title,
@@ -414,15 +645,301 @@ const YesNoQuestion = ({
   );
 };
 
+const AccessOutcomeCard = ({ value, setFieldValue }) => {
+  return (
+    <Surface style={styles.card} elevation={1}>
+      <View style={styles.sectionHeader}>
+        <MaterialCommunityIcons name="gate-alert" size={18} color="#DC2626" />
+        <Text style={styles.sectionTitle}>Site Access Outcome</Text>
+      </View>
+
+      <Text style={styles.accessHelpText}>
+        Select YES if the meter or supply point was accessed. Select NO ACCESS
+        if the executor could not safely reach the meter or supply point.
+      </Text>
+
+      <RadioButton.Group
+        value={value}
+        onValueChange={(nextValue) => {
+          setFieldValue("accessData.access.hasAccess", nextValue);
+
+          if (nextValue === "yes") {
+            setFieldValue("accessData.access.reason", "NAv");
+            setFieldValue(
+              "accessData.access.reasonSelect",
+              makeEmptySelectWithOther(),
+            );
+          }
+        }}
+      >
+        <View style={styles.accessChoiceRow}>
+          <TouchableOpacity
+            style={[
+              styles.accessChoice,
+              value === "yes" && styles.accessChoiceYes,
+            ]}
+            onPress={() => {
+              setFieldValue("accessData.access.hasAccess", "yes");
+              setFieldValue("accessData.access.reason", "NAv");
+              setFieldValue(
+                "accessData.access.reasonSelect",
+                makeEmptySelectWithOther(),
+              );
+            }}
+            activeOpacity={0.85}
+          >
+            <RadioButton value="yes" />
+            <View style={styles.accessChoiceTextWrap}>
+              <Text style={styles.accessChoiceTitle}>ACCESS YES</Text>
+              <Text style={styles.accessChoiceSub}>
+                Continue with DCN checks
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.accessChoice,
+              value === "no" && styles.accessChoiceNo,
+            ]}
+            onPress={() => setFieldValue("accessData.access.hasAccess", "no")}
+            activeOpacity={0.85}
+          >
+            <RadioButton value="no" />
+            <View style={styles.accessChoiceTextWrap}>
+              <Text style={styles.accessChoiceTitle}>NO ACCESS</Text>
+              <Text style={styles.accessChoiceSub}>
+                Complete as unsuccessful
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </RadioButton.Group>
+    </Surface>
+  );
+};
+
+const OfficeInstructionSection = ({
+  title,
+  icon,
+  color,
+  instruction,
+  media,
+}) => {
+  const [activeMedia, setActiveMedia] = useState(null);
+
+  const cleanMedia = useMemo(() => {
+    return (Array.isArray(media) ? media : []).filter(
+      (item) => item?.url || item?.uri,
+    );
+  }, [media]);
+
+  const hasMedia = cleanMedia.length > 0;
+  const activeUrl = getMediaPreviewUrl(activeMedia);
+
+  async function openActiveMediaExternal() {
+    if (!activeUrl) return;
+
+    try {
+      await Linking.openURL(activeUrl);
+    } catch (error) {
+      console.log(
+        "OfficeInstructionSection openActiveMediaExternal --error",
+        error,
+      );
+
+      Alert.alert(
+        "Open Media Failed",
+        "Could not open this instruction media item.",
+      );
+    }
+  }
+
+  return (
+    <Surface style={styles.card} elevation={1}>
+      <View style={styles.sectionHeader}>
+        <MaterialCommunityIcons name={icon} size={18} color={color} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+
+      <View style={styles.readOnlyBox}>
+        <Text style={styles.readOnlyLabel}>Instruction</Text>
+        <Text style={styles.readOnlyValue}>{instruction?.text || "NAv"}</Text>
+
+        <Text style={styles.readOnlyLabel}>Instruction Notes</Text>
+        <Text style={styles.readOnlyValue}>
+          {instruction?.notes || "No notes captured."}
+        </Text>
+
+        <Text style={styles.readOnlyLabel}>Instruction Media</Text>
+
+        {!hasMedia ? (
+          <Text style={styles.readOnlyValue}>
+            No instruction media captured.
+          </Text>
+        ) : (
+          <View style={styles.readOnlyMediaList}>
+            {cleanMedia.map((item, index) => {
+              const itemUrl = item?.url || item?.uri || "";
+              const isImage =
+                String(item?.type || "").toLowerCase() === "image" ||
+                itemUrl.toLowerCase().includes(".jpg") ||
+                itemUrl.toLowerCase().includes(".jpeg") ||
+                itemUrl.toLowerCase().includes(".png") ||
+                itemUrl.toLowerCase().includes(".webp");
+
+              return (
+                <TouchableOpacity
+                  key={`${itemUrl || "instruction-media"}-${index}`}
+                  style={styles.mediaReadOnlyRow}
+                  activeOpacity={0.8}
+                  onPress={() => setActiveMedia(item)}
+                >
+                  <View style={styles.mediaReadOnlyThumbWrap}>
+                    {isImage ? (
+                      <Image
+                        source={{ uri: getMediaPreviewUrl(item) }}
+                        style={styles.mediaReadOnlyThumb}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <MaterialCommunityIcons
+                        name="file-eye-outline"
+                        size={20}
+                        color="#2563EB"
+                      />
+                    )}
+                  </View>
+
+                  <View style={styles.mediaReadOnlyMain}>
+                    <Text style={styles.mediaReadOnlyText}>
+                      {item?.tag || "instructionMedia"} •{" "}
+                      {item?.type || "media"}
+                    </Text>
+
+                    {!!item?.created?.byUser && (
+                      <Text style={styles.mediaReadOnlyMeta}>
+                        Uploaded by {item.created.byUser}
+                      </Text>
+                    )}
+
+                    <Text style={styles.mediaReadOnlyHint}>Tap to preview</Text>
+                  </View>
+
+                  <MaterialCommunityIcons
+                    name="chevron-right"
+                    size={20}
+                    color="#2563EB"
+                  />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </View>
+
+      <Portal>
+        <Modal
+          visible={Boolean(activeMedia)}
+          onDismiss={() => setActiveMedia(null)}
+          contentContainerStyle={styles.instructionMediaModal}
+        >
+          <View style={styles.instructionMediaModalHeader}>
+            <View style={styles.instructionMediaModalIcon}>
+              <MaterialCommunityIcons
+                name="image-multiple-outline"
+                size={22}
+                color="#2563EB"
+              />
+            </View>
+
+            <View style={styles.instructionMediaModalTitleWrap}>
+              <Text style={styles.instructionMediaModalTitle}>
+                Instruction Media
+              </Text>
+              <Text style={styles.instructionMediaModalSub}>
+                {activeMedia?.tag || "instructionMedia"} •{" "}
+                {activeMedia?.type || "media"}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.instructionMediaModalClose}
+              onPress={() => setActiveMedia(null)}
+            >
+              <MaterialCommunityIcons name="close" size={22} color="#0F172A" />
+            </TouchableOpacity>
+          </View>
+
+          {activeUrl ? (
+            <>
+              <View style={styles.instructionMediaPreviewFrame}>
+                <Image
+                  source={{ uri: activeUrl }}
+                  style={styles.instructionMediaPreviewImage}
+                  resizeMode="contain"
+                />
+              </View>
+
+              <View style={styles.instructionMediaMetaBox}>
+                <Text style={styles.instructionMediaMetaText}>
+                  Uploaded by: {activeMedia?.created?.byUser || "NAv"}
+                </Text>
+                <Text style={styles.instructionMediaMetaText}>
+                  Tag: {activeMedia?.tag || "NAv"}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.openInstructionMediaButton}
+                onPress={openActiveMediaExternal}
+                activeOpacity={0.85}
+              >
+                <MaterialCommunityIcons
+                  name="open-in-new"
+                  size={17}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.openInstructionMediaButtonText}>
+                  OPEN FULL IMAGE
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <View style={styles.instructionMediaEmptyBox}>
+              <MaterialCommunityIcons
+                name="image-off-outline"
+                size={34}
+                color="#94A3B8"
+              />
+              <Text style={styles.readOnlyValue}>No media URL found.</Text>
+            </View>
+          )}
+        </Modal>
+      </Portal>
+    </Surface>
+  );
+};
+
 export default function FormMeterDisconnection() {
   const {
     astId: astIdRaw,
+    sourceAstId: sourceAstIdRaw,
     premiseId: premiseIdRaw,
+    instructionTrnId: instructionTrnIdRaw,
+    trnId: trnIdRaw,
     action: actionRaw,
     queueItemId: queueItemIdRaw,
   } = useLocalSearchParams();
 
-  const astId = Array.isArray(astIdRaw) ? astIdRaw[0] : astIdRaw;
+  const routeAstId = Array.isArray(astIdRaw) ? astIdRaw[0] : astIdRaw;
+  const routeSourceAstId = Array.isArray(sourceAstIdRaw)
+    ? sourceAstIdRaw[0]
+    : sourceAstIdRaw;
+  const routeInstructionTrnId = Array.isArray(instructionTrnIdRaw)
+    ? instructionTrnIdRaw[0]
+    : instructionTrnIdRaw;
+  const routeTrnId = Array.isArray(trnIdRaw) ? trnIdRaw[0] : trnIdRaw;
   const premiseId = Array.isArray(premiseIdRaw)
     ? premiseIdRaw[0]
     : premiseIdRaw;
@@ -438,6 +955,44 @@ export default function FormMeterDisconnection() {
     }
   }, [actionRaw]);
 
+  const instructionTrnId = readFirstString(
+    routeInstructionTrnId,
+    routeTrnId,
+    action?.instructionTrnId,
+    action?.trnId,
+    action?.id,
+    action?.trn?.id,
+  );
+
+  const sourceAstId = readFirstString(
+    routeSourceAstId,
+    routeAstId,
+    action?.sourceAstId,
+    action?.astId,
+    action?.ast?.astData?.astId,
+  );
+
+  const officeInstruction = useMemo(() => {
+    return action?.officeInstruction || action?.assignment?.instruction || {};
+  }, [action]);
+
+  const officeInstructionMedia = useMemo(() => {
+    if (Array.isArray(action?.officeInstructionMedia)) {
+      return action.officeInstructionMedia;
+    }
+
+    if (Array.isArray(action?.media)) {
+      return action.media.filter((media) => media?.tag === "instructionMedia");
+    }
+
+    return [];
+  }, [action]);
+
+  const instructionLocked = useMemo(
+    () => isLifecycleInstructionLocked(action),
+    [action],
+  );
+
   const router = useRouter();
   const { all } = useWarehouse();
   const { profile, user } = useAuth();
@@ -445,6 +1000,7 @@ export default function FormMeterDisconnection() {
 
   const [editQueueItem, setEditQueueItem] = useState(undefined);
   const [inProgress, setInProgress] = useState(false);
+  const [saveInProgress, setSaveInProgress] = useState(false);
   const [initialEligible, setInitialEligible] = useState(null);
 
   const [submitOutcome, setSubmitOutcome] = useState({
@@ -484,11 +1040,11 @@ export default function FormMeterDisconnection() {
   const isEditMode = !!queueItemId;
 
   const astDoc = useMemo(() => {
-    const id = astId || action?.astId;
+    const id = sourceAstId;
     if (!id) return null;
 
     return (all?.meters || []).find((meter) => meter?.id === id) || null;
-  }, [all?.meters, astId, action?.astId]);
+  }, [all?.meters, sourceAstId]);
 
   const premise = useMemo(() => {
     const id =
@@ -504,6 +1060,9 @@ export default function FormMeterDisconnection() {
   const meterNo = astData?.astNo || action?.meterNo || "NAv";
   const meterType = astDoc?.meterType || action?.meterType || "NAv";
   const meterKind = String(meter?.type || "NAv").toLowerCase();
+
+  const isPrepaidReading = isPrepaidMeterKind(meterKind);
+
   const currentStatus = String(
     astDoc?.status?.state || "UNKNOWN",
   ).toUpperCase();
@@ -520,16 +1079,6 @@ export default function FormMeterDisconnection() {
     toLatLng(astDoc?.ast?.location?.gps) ||
     toLatLng(premise?.geometry?.centroid) ||
     null;
-
-  const trnId = useMemo(
-    () =>
-      buildMeterDisconnectionTrnId({
-        wardPcode,
-        erfNo,
-        meterType,
-      }),
-    [wardPcode, erfNo, meterType],
-  );
 
   useEffect(() => {
     if (initialEligible !== null) return;
@@ -568,9 +1117,7 @@ export default function FormMeterDisconnection() {
     "METER_DISCONNECTION_INSTRUCTION",
   );
 
-  const disconnectionLevelLookup = useIrepsLookupOptions(
-    "METER_DISCONNECTION_LEVEL",
-  );
+  const levelLookup = useIrepsLookupOptions("METER_DISCONNECTION_LEVEL");
 
   const noReadingReasonLookup = useIrepsLookupOptions(
     "METER_NO_READING_REASON",
@@ -598,66 +1145,256 @@ export default function FormMeterDisconnection() {
     };
   }
 
-  function buildDisconnectionFailureMessage(values, result) {
-    const reasons = [];
+  function buildQueueContext(values, baseSystemFields) {
+    return {
+      trnType: "METER_DISCONNECTION",
+      instructionTrnId: instructionTrnId || "NAv",
+      sourceAstId: astDoc?.id || sourceAstId || "NAv",
+      astId: astDoc?.id || sourceAstId || "NAv",
+      meterNo: values?.ast?.astData?.astNo || "NAv",
+      meterType: values?.meterType || "NAv",
+      erfId: baseSystemFields?.erfId || "NAv",
+      erfNo: baseSystemFields?.erfNo || "NAv",
+      premiseId: baseSystemFields?.premise?.id || "NAv",
+      lmPcode: lmPcode || "NAv",
+      wardPcode: wardPcode || "NAv",
+    };
+  }
 
-    if (values?.disconnection?.supplyDisconnected?.answer !== "yes") {
-      reasons.push("Supply disconnection was not confirmed.");
+  function buildExecutionPayload(values, mediaOverride) {
+    const baseSystemFields = buildTrnSystemFields();
+    const noAccess = isNoAccess(values);
+    const noAccessReason = noAccess
+      ? selectWithOtherToText(values?.accessData?.access?.reasonSelect)
+      : "NAv";
+
+    const executionOutcome = {
+      outcome: noAccess ? "NO_ACCESS" : "SUCCESS",
+      success: !noAccess,
+    };
+
+    return removeUndefined({
+      id: instructionTrnId,
+      instructionTrnId,
+      sourceAstId: astDoc?.id || sourceAstId || "NAv",
+
+      trnType: "METER_DISCONNECTION",
+
+      accessData: {
+        ...baseSystemFields,
+        access: {
+          hasAccess: values?.accessData?.access?.hasAccess || "yes",
+          reason: noAccessReason || "NAv",
+          reasonSelect: values?.accessData?.access?.reasonSelect,
+        },
+      },
+
+      ast: values.ast,
+
+      disconnection: buildBackendDisconnectionPayload(values.disconnection, {
+        isPrepaid: isPrepaidReading,
+        noAccess,
+      }),
+
+      executionOutcome,
+
+      assignment: buildAssignmentPayload({
+        assignment: values.assignment,
+        officeInstruction,
+        instructionLocked,
+      }),
+
+      meterType: values.meterType,
+      media: filterExecutionMedia(mediaOverride || values.media || []),
+      status: values.status,
+      serviceProvider,
+    });
+  }
+
+  function buildDisconnectionFailureMessage(values, result) {
+    const noAccess = isNoAccess(values);
+
+    if (noAccess) {
+      return [
+        "The DCN was completed as NO ACCESS.",
+        "",
+        "Result:",
+        "• The field attempt was completed.",
+        "• The meter was not moved to DISCONNECTED.",
+        "",
+        `AST status: ${result?.astStatusAfter || currentStatus}`,
+      ].join("\n");
     }
 
-    const reasonText = reasons.length
-      ? reasons.map((reason) => `• ${reason}`).join("\n")
-      : "• Disconnection rules were not fully satisfied.";
-
     return [
-      "The disconnection TRN was submitted and saved for audit, but the meter was not moved to DISCONNECTED.",
-      "",
-      "Reason:",
-      reasonText,
+      "The disconnection TRN was submitted, but the meter was not moved to DISCONNECTED.",
       "",
       `AST status: ${result?.astStatusAfter || currentStatus}`,
       "",
-      "This submitted form cannot be modified.",
-      "A new disconnection form must be completed and submitted.",
+      "Please review the completed TRN result.",
     ].join("\n");
   }
 
-  function getInitialValues() {
+  async function saveDraftToQueue(values, messageTitle, messageBody) {
+    const baseSystemFields = buildTrnSystemFields();
+    const cleanPayload = buildExecutionPayload(values, values?.media || []);
+    const nextContext = buildQueueContext(values, baseSystemFields);
+
+    let queueResult = null;
+
+    if (queueItemId) {
+      const existingSync = editQueueItem?.sync || {
+        attempts: 0,
+        lastAttemptAt: "NAv",
+        nextRetryAt: "NAv",
+      };
+
+      queueResult = await updateSubmissionQueueItem(
+        queueItemId,
+        {
+          payload: cleanPayload,
+          context: nextContext,
+          status: "IN_PROGRESS",
+          result: {
+            success: false,
+            code: "LOCAL_SAVE_ONLY",
+            message: "Saved locally only. Not submitted.",
+            trnId: instructionTrnId || "NAv",
+          },
+          sync: {
+            ...existingSync,
+            nextRetryAt: "NAv",
+          },
+        },
+        agentUid,
+        agentName,
+      );
+    } else {
+      queueResult = await addSubmissionQueueItem({
+        formType: "METER_DISCONNECTION",
+        payload: cleanPayload,
+        context: nextContext,
+        status: "IN_PROGRESS",
+        createdByUid: agentUid,
+        createdByUser: agentName,
+      });
+    }
+
+    if (!queueResult?.success) {
+      Alert.alert(
+        "Draft Save Failed",
+        "Failed to save disconnection draft locally.",
+      );
+      return false;
+    }
+
+    setSubmitOutcome({
+      visible: true,
+      type: "savedLocally",
+      title: messageTitle || "SAVED LOCALLY",
+      message:
+        messageBody ||
+        "This DCN execution form was saved locally only. No backend update was made.",
+      goBackOnContinue: true,
+    });
+
+    return true;
+  }
+
+  async function handleSaveDisconnection(values) {
+    try {
+      setSaveInProgress(true);
+
+      await saveDraftToQueue(
+        values,
+        "SAVED LOCALLY",
+        "This DCN execution form was saved locally only. It was not submitted and no backend update was made.",
+      );
+
+      setSaveInProgress(false);
+    } catch (error) {
+      console.log("handleSaveDisconnection --error", error);
+      setSaveInProgress(false);
+
+      Alert.alert(
+        "Save Failed",
+        error?.message || "Failed to save this DCN form locally.",
+      );
+    }
+  }
+
+  const getInitialValues = useCallback(() => {
     const editPayload = editQueueItem?.payload || null;
 
     if (editPayload) {
       return {
         ...editPayload,
-        disconnection: {
-          ...editPayload?.disconnection,
-          instruction: normalizeInstructionValue(
-            editPayload?.disconnection?.instruction,
-          ),
-          level: normalizeCodeLabelValue(editPayload?.disconnection?.level),
-          meterReading: {
-            ...editPayload?.disconnection?.meterReading,
-            reading: editPayload?.disconnection?.meterReading?.reading || "",
-            noReadingReason: normalizeNoReadingReasonValue(
-              editPayload?.disconnection?.meterReading?.noReadingReason,
+        id: instructionTrnId || editPayload?.id || "NAv",
+        instructionTrnId:
+          instructionTrnId || editPayload?.instructionTrnId || "NAv",
+        sourceAstId: sourceAstId || editPayload?.sourceAstId || "NAv",
+
+        accessData: {
+          ...editPayload?.accessData,
+          access: {
+            hasAccess:
+              editPayload?.accessData?.access?.hasAccess === "no"
+                ? "no"
+                : "yes",
+            reason: editPayload?.accessData?.access?.reason || "NAv",
+            reasonSelect: normalizeNoAccessReasonValue(
+              editPayload?.accessData?.access?.reasonSelect,
+              editPayload?.accessData?.access?.reason,
             ),
           },
         },
+
+        assignment: {
+          ...editPayload?.assignment,
+          instructionSelect: normalizeInstructionValue(
+            editPayload?.assignment?.instructionSelect ||
+              editPayload?.assignment?.instruction,
+          ),
+        },
+
+        disconnection: {
+          ...editPayload?.disconnection,
+          level: normalizeCodeLabelValue(editPayload?.disconnection?.level),
+          meterReading:
+            typeof editPayload?.disconnection?.meterReading === "object"
+              ? editPayload?.disconnection?.meterReading?.reading || ""
+              : editPayload?.disconnection?.meterReading || "",
+          tokenReading: editPayload?.disconnection?.tokenReading || "",
+          noReadingReason: normalizeNoReadingReasonValue(
+            editPayload?.disconnection?.noReadingReason ||
+              editPayload?.disconnection?.meterReading?.noReadingReason,
+          ),
+          safetyConfirmed: editPayload?.disconnection?.safetyConfirmed || {
+            answer: "",
+            notes: "",
+          },
+        },
+
+        media: filterExecutionMedia(editPayload?.media || []),
       };
     }
 
     return {
-      id: trnId,
+      id: instructionTrnId,
+      instructionTrnId,
+      sourceAstId: astDoc?.id || sourceAstId || "NAv",
 
       accessData: {
         access: {
           hasAccess: "yes",
           reason: "NAv",
+          reasonSelect: makeEmptySelectWithOther(),
         },
       },
 
       ast: {
         astData: {
-          astId: astDoc?.id || astId || "NAv",
+          astId: astDoc?.id || sourceAstId || "NAv",
           astNo: astData?.astNo || "NAv",
           astManufacturer: astData?.astManufacturer || "NAv",
           astName: astData?.astName || "NAv",
@@ -669,7 +1406,6 @@ export default function FormMeterDisconnection() {
       },
 
       disconnection: {
-        instruction: makeEmptySelectWithOther(),
         level: makeEmptySelectWithOther(),
 
         supplyDisconnected: {
@@ -677,35 +1413,54 @@ export default function FormMeterDisconnection() {
           notes: "",
         },
 
-        meterReading: {
-          reading: "",
-          noReadingReason: makeEmptySelectWithOther(),
+        meterReading: "",
+        tokenReading: "",
+        noReadingReason: makeEmptySelectWithOther(),
+
+        safetyConfirmed: {
+          answer: "",
+          notes: "",
         },
       },
 
       assignment: {
-        instruction: {
-          code: "METER_DISCONNECTION",
-          text: "Disconnect meter supply and record the disconnection level",
-          notes: "",
-          mediaRequired: true,
-        },
+        instructionSelect: instructionLocked
+          ? normalizeInstructionValue(officeInstruction)
+          : makeEmptySelectWithOther(),
 
-        createdFor: {
-          type: "USER",
-          id: agentUid,
-          name: agentName,
-        },
+        instruction: instructionLocked
+          ? {
+              code: officeInstruction?.code || "METER_DISCONNECTION",
+              text: officeInstruction?.text || "",
+              notes: officeInstruction?.notes || "",
+              mediaRequired: officeInstruction?.mediaRequired === true,
+            }
+          : {
+              code: "METER_DISCONNECTION",
+              text: "",
+              notes: "",
+              mediaRequired: true,
+            },
 
-        acceptedRejectedAt: null,
-        acceptedRejectedUid: null,
-        acceptedRejectedUser: null,
-        rejectReason: "",
+        targets: Array.isArray(action?.assignment?.targets)
+          ? action.assignment.targets
+          : [
+              {
+                type: "USER",
+                id: agentUid,
+                name: agentName,
+              },
+            ],
 
-        cancelledAt: null,
-        cancelledByUid: null,
-        cancelledByUser: null,
-        cancelReason: "",
+        acceptedRejectedAt: action?.assignment?.acceptedRejectedAt || null,
+        acceptedRejectedUid: action?.assignment?.acceptedRejectedUid || null,
+        acceptedRejectedUser: action?.assignment?.acceptedRejectedUser || null,
+        rejectReason: action?.assignment?.rejectReason || "",
+
+        cancelledAt: action?.assignment?.cancelledAt || null,
+        cancelledByUid: action?.assignment?.cancelledByUid || null,
+        cancelledByUser: action?.assignment?.cancelledByUser || null,
+        cancelReason: action?.assignment?.cancelReason || "",
       },
 
       meterType,
@@ -718,31 +1473,47 @@ export default function FormMeterDisconnection() {
         detail: astDoc?.status?.detail || lmPcode || "NAv",
       },
     };
-  }
+  }, [
+    editQueueItem,
+    instructionTrnId,
+    sourceAstId,
+    astDoc?.id,
+    astData?.astNo,
+    astData?.astManufacturer,
+    astData?.astName,
+    meter?.type,
+    meter?.category,
+    meterType,
+    agentUid,
+    agentName,
+    lmPcode,
+    astDoc?.status?.state,
+    astDoc?.status?.id,
+    astDoc?.status?.detail,
+    officeInstruction,
+    instructionLocked,
+    action?.assignment?.targets,
+    action?.assignment?.acceptedRejectedAt,
+    action?.assignment?.acceptedRejectedUid,
+    action?.assignment?.acceptedRejectedUser,
+    action?.assignment?.rejectReason,
+    action?.assignment?.cancelledAt,
+    action?.assignment?.cancelledByUid,
+    action?.assignment?.cancelledByUser,
+    action?.assignment?.cancelReason,
+  ]);
 
-  const actionInit = useMemo(
-    () => getInitialValues(),
-    [
-      editQueueItem,
-      trnId,
-      astDoc?.id,
-      astId,
-      astData?.astNo,
-      astData?.astManufacturer,
-      astData?.astName,
-      meter?.type,
-      meter?.category,
-      meterType,
-      agentUid,
-      agentName,
-      lmPcode,
-      astDoc?.status?.state,
-      astDoc?.status?.id,
-      astDoc?.status?.detail,
-    ],
-  );
+  const actionInit = useMemo(() => getInitialValues(), [getInitialValues]);
 
   const handleSubmitDisconnection = async (values) => {
+    if (!instructionTrnId) {
+      Alert.alert(
+        "Missing Instruction",
+        "This DCN execution form must be opened from an accepted WMS instruction.",
+      );
+      return;
+    }
+
     if (!astDoc?.id) {
       Alert.alert("Error", "AST data not found.");
       return;
@@ -753,96 +1524,6 @@ export default function FormMeterDisconnection() {
       return;
     }
 
-    const baseSystemFields = buildTrnSystemFields();
-
-    let cleanPayload = removeUndefined({
-      id: values.id,
-
-      accessData: {
-        ...baseSystemFields,
-        access: values.accessData.access,
-      },
-
-      ast: values.ast,
-      disconnection: buildBackendDisconnectionPayload(values.disconnection),
-      assignment: values.assignment,
-      meterType: values.meterType,
-      media: values.media || [],
-      status: values.status,
-      serviceProvider,
-    });
-
-    const saveDraftToQueue = async (messageTitle, messageBody) => {
-      const nextContext = {
-        trnType: "METER_DISCONNECTION",
-        astId: astDoc?.id || "NAv",
-        meterNo: values?.ast?.astData?.astNo || "NAv",
-        meterType: cleanPayload?.meterType || "NAv",
-        erfId: baseSystemFields?.erfId || "NAv",
-        erfNo: baseSystemFields?.erfNo || "NAv",
-        premiseId: baseSystemFields?.premise?.id || "NAv",
-        lmPcode: lmPcode || "NAv",
-        wardPcode: wardPcode || "NAv",
-      };
-
-      let queueResult = null;
-
-      if (queueItemId) {
-        const existingSync = editQueueItem?.sync || {
-          attempts: 0,
-          lastAttemptAt: "NAv",
-          nextRetryAt: "NAv",
-        };
-
-        queueResult = await updateSubmissionQueueItem(
-          queueItemId,
-          {
-            payload: cleanPayload,
-            context: nextContext,
-            status: "PENDING",
-            result: {
-              success: false,
-              code: "NAv",
-              message: "NAv",
-              trnId: "NAv",
-            },
-            sync: {
-              ...existingSync,
-              nextRetryAt: "NAv",
-            },
-          },
-          agentUid,
-          agentName,
-        );
-      } else {
-        queueResult = await addSubmissionQueueItem({
-          formType: "METER_DISCONNECTION",
-          payload: cleanPayload,
-          context: nextContext,
-          createdByUid: agentUid,
-          createdByUser: agentName,
-        });
-      }
-
-      if (!queueResult?.success) {
-        Alert.alert(
-          "Draft Save Failed",
-          "Failed to save disconnection draft locally.",
-        );
-        return false;
-      }
-
-      setSubmitOutcome({
-        visible: true,
-        type: "savedLocally",
-        title: messageTitle || "SAVED LOCALLY",
-        message: messageBody,
-        goBackOnContinue: true,
-      });
-
-      return true;
-    };
-
     try {
       setInProgress(true);
 
@@ -850,21 +1531,22 @@ export default function FormMeterDisconnection() {
       const isOnline = netState.isConnected && netState.isInternetReachable;
 
       if (!isOnline) {
-        await saveDraftToQueue(
-          "Saved Offline",
-          "No internet connection. This disconnection TRN was saved locally.",
+        setInProgress(false);
+
+        Alert.alert(
+          "Offline",
+          "You are offline. Use SAVE to keep this DCN execution form locally, then submit when online.",
         );
 
-        setInProgress(false);
         return;
       }
 
       const storage = getStorage();
 
       const syncedMedia = await Promise.all(
-        (values?.media || []).map(async (item) => {
+        filterExecutionMedia(values?.media || []).map(async (item) => {
           if (item.uri && !item.url) {
-            const fileName = `${baseSystemFields.erfId}_${item.tag}_${Date.now()}.jpg`;
+            const fileName = `${instructionTrnId}_${item.tag}_${Date.now()}.jpg`;
             const storageRef = ref(
               storage,
               `meters/lifecycle/disconnection/${fileName}`,
@@ -878,6 +1560,7 @@ export default function FormMeterDisconnection() {
             const downloadUrl = await getDownloadURL(storageRef);
 
             const { uri, ...cleanItem } = item;
+
             return {
               ...cleanItem,
               url: downloadUrl,
@@ -889,10 +1572,7 @@ export default function FormMeterDisconnection() {
         }),
       );
 
-      cleanPayload = {
-        ...cleanPayload,
-        media: syncedMedia,
-      };
+      const cleanPayload = buildExecutionPayload(values, syncedMedia);
 
       const onMeterLifecycleTrnCallable = httpsCallable(
         functions,
@@ -911,8 +1591,9 @@ export default function FormMeterDisconnection() {
       } catch (error) {
         if (error?.message === "SUBMISSION_TIMEOUT") {
           await saveDraftToQueue(
-            "Saved Locally",
-            "The submission is taking too long. Your disconnection data has been saved locally.",
+            values,
+            "SAVED LOCALLY",
+            "The submission took too long. The DCN form was saved locally only and was not confirmed by the backend.",
           );
 
           setInProgress(false);
@@ -946,6 +1627,18 @@ export default function FormMeterDisconnection() {
 
       setInProgress(false);
 
+      if (isNoAccess(values)) {
+        setSubmitOutcome({
+          visible: true,
+          type: "noAccess",
+          title: "DCN COMPLETED - NO ACCESS",
+          message: buildDisconnectionFailureMessage(values, result),
+          goBackOnContinue: true,
+        });
+
+        return;
+      }
+
       if (
         result?.astStatusChanged === true &&
         result?.astStatusAfter === "DISCONNECTED"
@@ -955,7 +1648,7 @@ export default function FormMeterDisconnection() {
           type: "success",
           title: "METER DISCONNECTED",
           message:
-            "The disconnection TRN was submitted and the meter was moved to DISCONNECTED.",
+            "The DCN was submitted and the meter was moved to DISCONNECTED.",
           goBackOnContinue: true,
         });
 
@@ -965,7 +1658,7 @@ export default function FormMeterDisconnection() {
       setSubmitOutcome({
         visible: true,
         type: "disconnectionFailed",
-        title: "DISCONNECTION DID NOT PASS",
+        title: "DCN COMPLETED",
         message: buildDisconnectionFailureMessage(values, result),
         goBackOnContinue: true,
       });
@@ -979,7 +1672,7 @@ export default function FormMeterDisconnection() {
   const confirmCancel = () => {
     Alert.alert(
       "Cancel Disconnection Form?",
-      "This disconnection form has not been submitted. If you cancel now, the captured data will be lost.",
+      "This disconnection form has not been submitted. If you cancel now, the captured data will be lost unless you use SAVE.",
       [
         {
           text: "STAY",
@@ -1008,6 +1701,40 @@ export default function FormMeterDisconnection() {
       <View style={styles.loaderWrap}>
         <Text style={styles.loaderText}>Draft not found.</Text>
       </View>
+    );
+  }
+
+  if (!instructionTrnId) {
+    return (
+      <ScrollView style={styles.container}>
+        <Stack.Screen
+          options={{
+            title: "Disconnect Meter",
+            headerTitleStyle: { fontSize: 14, fontWeight: "900" },
+          }}
+        />
+
+        <Surface style={styles.notEligibleCard} elevation={2}>
+          <MaterialCommunityIcons
+            name="file-alert-outline"
+            size={42}
+            color="#ef4444"
+          />
+
+          <Text style={styles.notEligibleTitle}>Missing DCN Instruction</Text>
+
+          <Text style={styles.notEligibleText}>
+            DCN execution must be opened from an accepted WMS instruction.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.backButtonText}>GO BACK</Text>
+          </TouchableOpacity>
+        </Surface>
+      </ScrollView>
     );
   }
 
@@ -1065,9 +1792,13 @@ export default function FormMeterDisconnection() {
   return (
     <>
       <ScreenLock
-        visible={inProgress}
+        visible={inProgress || saveInProgress}
         title="DISCONNECTION"
-        status="Securing lifecycle transaction..."
+        status={
+          saveInProgress
+            ? "Saving locally..."
+            : "Securing lifecycle transaction..."
+        }
       />
 
       <Formik
@@ -1088,6 +1819,9 @@ export default function FormMeterDisconnection() {
           isValid,
         }) => {
           const disconnectionErrors = errors?.disconnection || {};
+          const assignmentErrors = errors?.assignment || {};
+          const accessErrors = errors?.accessData?.access || {};
+          const noAccess = isNoAccess(values);
 
           return (
             <ScrollView
@@ -1130,6 +1864,11 @@ export default function FormMeterDisconnection() {
                 </View>
 
                 <View style={styles.summaryGrid}>
+                  <View style={styles.summaryItem}>
+                    <Text style={styles.summaryLabel}>Instruction TRN</Text>
+                    <Text style={styles.summaryValue}>{instructionTrnId}</Text>
+                  </View>
+
                   <View style={styles.summaryItem}>
                     <Text style={styles.summaryLabel}>Meter No</Text>
                     <Text style={styles.summaryValue}>{meterNo}</Text>
@@ -1179,60 +1918,77 @@ export default function FormMeterDisconnection() {
                 </View>
               </Surface>
 
-              <Surface style={styles.card} elevation={1}>
-                <View style={styles.sectionHeader}>
-                  <MaterialCommunityIcons
-                    name="text-box-remove-outline"
-                    size={18}
-                    color="#ef4444"
+              {instructionLocked ? (
+                <OfficeInstructionSection
+                  title="Disconnection Instruction"
+                  icon="text-box-remove-outline"
+                  color="#ef4444"
+                  instruction={officeInstruction}
+                  media={officeInstructionMedia}
+                />
+              ) : (
+                <Surface style={styles.card} elevation={1}>
+                  <View style={styles.sectionHeader}>
+                    <MaterialCommunityIcons
+                      name="text-box-remove-outline"
+                      size={18}
+                      color="#ef4444"
+                    />
+                    <Text style={styles.sectionTitle}>
+                      Disconnection Instruction
+                    </Text>
+                  </View>
+
+                  <IrepsSelectWithOther
+                    label="Disconnection Instruction"
+                    placeholder="Select disconnection instruction"
+                    options={disconnectionInstructionLookup.options}
+                    includeOther={
+                      disconnectionInstructionLookup.allowOther ?? true
+                    }
+                    otherCode={
+                      disconnectionInstructionLookup.otherCode || "OTHER"
+                    }
+                    otherLabel={
+                      disconnectionInstructionLookup.otherLabel || "Other"
+                    }
+                    loading={
+                      disconnectionInstructionLookup.isLoading ||
+                      disconnectionInstructionLookup.isFetching
+                    }
+                    value={values?.assignment?.instructionSelect}
+                    onChange={(nextValue) => {
+                      setFieldValue("assignment.instructionSelect", nextValue);
+                      setFieldValue(
+                        "assignment.instruction.text",
+                        selectWithOtherToText(nextValue),
+                      );
+                    }}
+                    errorText={
+                      typeof assignmentErrors?.instructionSelect === "string"
+                        ? assignmentErrors?.instructionSelect
+                        : ""
+                    }
                   />
-                  <Text style={styles.sectionTitle}>
-                    Disconnection Instruction
-                  </Text>
-                </View>
 
-                <IrepsSelectWithOther
-                  label="Disconnection Instruction"
-                  placeholder="Select disconnection instruction"
-                  options={disconnectionInstructionLookup.options}
-                  includeOther={
-                    disconnectionInstructionLookup.allowOther ?? true
-                  }
-                  otherCode={
-                    disconnectionInstructionLookup.otherCode || "OTHER"
-                  }
-                  otherLabel={
-                    disconnectionInstructionLookup.otherLabel || "Other"
-                  }
-                  loading={
-                    disconnectionInstructionLookup.isLoading ||
-                    disconnectionInstructionLookup.isFetching
-                  }
-                  value={values?.disconnection?.instruction}
-                  onChange={(nextValue) =>
-                    setFieldValue("disconnection.instruction", nextValue)
-                  }
-                  errorText={
-                    typeof disconnectionErrors?.instruction === "string"
-                      ? disconnectionErrors.instruction
-                      : ""
-                  }
-                />
+                  <TextInput
+                    mode="outlined"
+                    label="Instruction Notes"
+                    value={values?.assignment?.instruction?.notes || ""}
+                    onChangeText={(text) =>
+                      setFieldValue("assignment.instruction.notes", text)
+                    }
+                    multiline
+                    numberOfLines={3}
+                    style={styles.notesInput}
+                  />
+                </Surface>
+              )}
 
-                <IrepsMedia
-                  name="media"
-                  tag="disconnectionInstructionEvidence"
-                  agentName={agentName}
-                  agentUid={agentUid}
-                  fallbackGps={fallbackGps}
-                  required={true}
-                />
-
-                {typeof errors?.media === "string" &&
-                  errors.media.toLowerCase().includes("instruction") && (
-                    <Text style={styles.errorText}>{errors.media}</Text>
-                  )}
-              </Surface>
+              <AccessOutcomeCard
+                value={values?.accessData?.access?.hasAccess || "yes"}
+                setFieldValue={setFieldValue}
+              />
 
               <Surface style={styles.card} elevation={1}>
                 <View style={styles.sectionHeader}>
@@ -1241,140 +1997,232 @@ export default function FormMeterDisconnection() {
                     size={18}
                     color="#ef4444"
                   />
-                  <Text style={styles.sectionTitle}>Disconnection Checks</Text>
+                  <Text style={styles.sectionTitle}>
+                    Disconnection Execution
+                  </Text>
                 </View>
 
-                <Surface style={styles.questionCard} elevation={1}>
-                  <View style={styles.questionHeader}>
-                    <Text style={styles.questionTitle}>
-                      Disconnection level
-                    </Text>
-                    <Text style={styles.questionDescription}>
-                      Select the level completed onsite. This level is used for
-                      payment and reporting.
-                    </Text>
-                  </View>
-
-                  <IrepsSelectWithOther
-                    label="Disconnection Level"
-                    placeholder="Select disconnection level"
-                    options={disconnectionLevelLookup.options}
-                    includeOther={false}
-                    otherCode={disconnectionLevelLookup.otherCode || "OTHER"}
-                    otherLabel={disconnectionLevelLookup.otherLabel || "Other"}
-                    loading={
-                      disconnectionLevelLookup.isLoading ||
-                      disconnectionLevelLookup.isFetching
-                    }
-                    value={values?.disconnection?.level}
-                    onChange={(nextValue) =>
-                      setFieldValue("disconnection.level", nextValue)
-                    }
-                    errorText={
-                      typeof disconnectionErrors?.level === "string"
-                        ? disconnectionErrors.level
-                        : ""
-                    }
-                  />
-                </Surface>
-
-                <YesNoQuestion
-                  title="Supply disconnected"
-                  description="Confirm that the supply was disconnected according to the selected level."
-                  value={values?.disconnection?.supplyDisconnected?.answer}
-                  notes={values?.disconnection?.supplyDisconnected?.notes}
-                  answerPath="disconnection.supplyDisconnected.answer"
-                  notesPath="disconnection.supplyDisconnected.notes"
-                  setFieldValue={setFieldValue}
-                  errorText={
-                    disconnectionErrors?.supplyDisconnected?.answer ||
-                    disconnectionErrors?.supplyDisconnected?.notes
-                  }
-                >
-                  <IrepsMedia
-                    name="media"
-                    tag="disconnectionLevelEvidence"
+                {noAccess ? (
+                  <IrepsNoAccessSection
+                    visible={true}
+                    value={values?.accessData?.access?.reasonSelect}
+                    onChange={(nextValue) => {
+                      setFieldValue(
+                        "accessData.access.reasonSelect",
+                        nextValue,
+                      );
+                      setFieldValue(
+                        "accessData.access.reason",
+                        selectWithOtherToText(nextValue),
+                      );
+                    }}
+                    mediaName="media"
+                    mediaTag="noAccessPhoto"
                     agentName={agentName}
                     agentUid={agentUid}
                     fallbackGps={fallbackGps}
-                    required={
-                      values?.disconnection?.supplyDisconnected?.answer ===
-                      "yes"
+                    reasonErrorText={
+                      typeof accessErrors?.reasonSelect === "string"
+                        ? accessErrors.reasonSelect
+                        : ""
+                    }
+                    mediaErrorText={
+                      typeof errors?.media === "string" &&
+                      errors.media.toLowerCase().includes("access")
+                        ? errors.media
+                        : ""
                     }
                   />
-                </YesNoQuestion>
+                ) : (
+                  <>
+                    <Surface style={styles.questionCard} elevation={1}>
+                      <View style={styles.questionHeader}>
+                        <Text style={styles.questionTitle}>
+                          Disconnection Level
+                        </Text>
+                        <Text style={styles.questionDescription}>
+                          Select the physical level of disconnection completed
+                          on site.
+                        </Text>
+                      </View>
 
-                <Surface style={styles.questionCard} elevation={1}>
-                  <View style={styles.questionHeader}>
-                    <Text style={styles.questionTitle}>Meter reading</Text>
-                    <Text style={styles.questionDescription}>
-                      Enter the meter reading. If no reading is available,
-                      provide the reason.
-                    </Text>
-                  </View>
+                      <IrepsSelectWithOther
+                        label="Level"
+                        placeholder="Select disconnection level"
+                        options={levelLookup.options}
+                        includeOther={false}
+                        loading={
+                          levelLookup.isLoading || levelLookup.isFetching
+                        }
+                        value={values?.disconnection?.level}
+                        onChange={(nextValue) =>
+                          setFieldValue("disconnection.level", nextValue)
+                        }
+                        errorText={
+                          typeof disconnectionErrors?.level === "string"
+                            ? disconnectionErrors.level
+                            : ""
+                        }
+                      />
+                    </Surface>
 
-                  <TextInput
-                    mode="outlined"
-                    label="Meter Reading"
-                    value={values?.disconnection?.meterReading?.reading}
-                    onChangeText={(text) =>
-                      setFieldValue(
-                        "disconnection.meterReading.reading",
-                        text.replace(/[^\d.]/g, ""),
-                      )
-                    }
-                    keyboardType="numeric"
-                    style={styles.readingInput}
-                  />
-
-                  <IrepsSelectWithOther
-                    label="No Reading Reason"
-                    placeholder="Select reason"
-                    options={noReadingReasonLookup.options}
-                    includeOther={noReadingReasonLookup.allowOther ?? true}
-                    otherCode={noReadingReasonLookup.otherCode || "OTHER"}
-                    otherLabel={noReadingReasonLookup.otherLabel || "Other"}
-                    loading={
-                      noReadingReasonLookup.isLoading ||
-                      noReadingReasonLookup.isFetching
-                    }
-                    value={values?.disconnection?.meterReading?.noReadingReason}
-                    onChange={(nextValue) =>
-                      setFieldValue(
-                        "disconnection.meterReading.noReadingReason",
-                        nextValue,
-                      )
-                    }
-                    errorText={
-                      disconnectionErrors?.meterReading?.noReadingReason
-                    }
-                  />
-
-                  <View style={styles.questionEvidenceSlot}>
-                    <IrepsMedia
-                      name="media"
-                      tag="disconnectionMeterReadingEvidence"
-                      agentName={agentName}
-                      agentUid={agentUid}
-                      fallbackGps={fallbackGps}
-                      required={
-                        !!String(
-                          values?.disconnection?.meterReading?.reading || "",
-                        ).trim()
+                    <YesNoQuestion
+                      title="Supply disconnected"
+                      description="Confirm that the supply was disconnected according to the selected level."
+                      value={values?.disconnection?.supplyDisconnected?.answer}
+                      notes={values?.disconnection?.supplyDisconnected?.notes}
+                      answerPath="disconnection.supplyDisconnected.answer"
+                      notesPath="disconnection.supplyDisconnected.notes"
+                      setFieldValue={setFieldValue}
+                      errorText={
+                        disconnectionErrors?.supplyDisconnected?.answer ||
+                        disconnectionErrors?.supplyDisconnected?.notes
                       }
-                    />
-                  </View>
+                    >
+                      <IrepsMedia
+                        name="media"
+                        tag="disconnectionLevelEvidence"
+                        agentName={agentName}
+                        agentUid={agentUid}
+                        fallbackGps={fallbackGps}
+                        required={
+                          values?.disconnection?.supplyDisconnected?.answer ===
+                          "yes"
+                        }
+                      />
+                    </YesNoQuestion>
 
-                  {!!(
-                    disconnectionErrors?.meterReading?.reading ||
-                    disconnectionErrors?.meterReading?.noReadingReason
-                  ) && (
-                    <Text style={styles.errorText}>
-                      {disconnectionErrors?.meterReading?.reading ||
-                        disconnectionErrors?.meterReading?.noReadingReason}
-                    </Text>
-                  )}
-                </Surface>
+                    <Surface style={styles.questionCard} elevation={1}>
+                      <View style={styles.questionHeader}>
+                        <Text style={styles.questionTitle}>
+                          {isPrepaidReading ? "Token reading" : "Meter reading"}
+                        </Text>
+
+                        <Text style={styles.questionDescription}>
+                          {isPrepaidReading
+                            ? "Capture the prepaid token/register reading at disconnection. If unavailable, provide the reason."
+                            : "Capture the meter reading at disconnection. If unavailable, provide the reason."}
+                        </Text>
+                      </View>
+
+                      {isPrepaidReading ? (
+                        <>
+                          <TextInput
+                            mode="outlined"
+                            label="Token Reading"
+                            value={values?.disconnection?.tokenReading}
+                            onChangeText={(text) =>
+                              setFieldValue(
+                                "disconnection.tokenReading",
+                                text.replace(/[^\d.]/g, ""),
+                              )
+                            }
+                            keyboardType="numeric"
+                            style={styles.readingInput}
+                          />
+
+                          <View style={styles.questionEvidenceSlot}>
+                            <IrepsMedia
+                              name="media"
+                              tag="tokenReadingPhoto"
+                              agentName={agentName}
+                              agentUid={agentUid}
+                              fallbackGps={fallbackGps}
+                              required={
+                                !!String(
+                                  values?.disconnection?.tokenReading || "",
+                                ).trim()
+                              }
+                            />
+                          </View>
+                        </>
+                      ) : (
+                        <>
+                          <TextInput
+                            mode="outlined"
+                            label="Meter Reading"
+                            value={values?.disconnection?.meterReading}
+                            onChangeText={(text) =>
+                              setFieldValue(
+                                "disconnection.meterReading",
+                                text.replace(/[^\d.]/g, ""),
+                              )
+                            }
+                            keyboardType="numeric"
+                            style={styles.readingInput}
+                          />
+
+                          <View style={styles.questionEvidenceSlot}>
+                            <IrepsMedia
+                              name="media"
+                              tag="disconnectionMeterReadingEvidence"
+                              agentName={agentName}
+                              agentUid={agentUid}
+                              fallbackGps={fallbackGps}
+                              required={
+                                !!String(
+                                  values?.disconnection?.meterReading || "",
+                                ).trim()
+                              }
+                            />
+                          </View>
+                        </>
+                      )}
+
+                      <IrepsSelectWithOther
+                        label="No Reading Reason"
+                        placeholder="Select reason"
+                        options={noReadingReasonLookup.options}
+                        includeOther={noReadingReasonLookup.allowOther ?? true}
+                        otherCode={noReadingReasonLookup.otherCode || "OTHER"}
+                        otherLabel={noReadingReasonLookup.otherLabel || "Other"}
+                        loading={
+                          noReadingReasonLookup.isLoading ||
+                          noReadingReasonLookup.isFetching
+                        }
+                        value={values?.disconnection?.noReadingReason}
+                        onChange={(nextValue) =>
+                          setFieldValue(
+                            "disconnection.noReadingReason",
+                            nextValue,
+                          )
+                        }
+                        errorText={
+                          typeof disconnectionErrors?.noReadingReason ===
+                          "string"
+                            ? disconnectionErrors.noReadingReason
+                            : ""
+                        }
+                      />
+                    </Surface>
+
+                    <YesNoQuestion
+                      title="Safety confirmed"
+                      description="Confirm that the disconnection was left safe after the work was done."
+                      value={values?.disconnection?.safetyConfirmed?.answer}
+                      notes={values?.disconnection?.safetyConfirmed?.notes}
+                      answerPath="disconnection.safetyConfirmed.answer"
+                      notesPath="disconnection.safetyConfirmed.notes"
+                      setFieldValue={setFieldValue}
+                      errorText={
+                        disconnectionErrors?.safetyConfirmed?.answer ||
+                        disconnectionErrors?.safetyConfirmed?.notes
+                      }
+                    >
+                      <IrepsMedia
+                        name="media"
+                        tag="safetyEvidence"
+                        agentName={agentName}
+                        agentUid={agentUid}
+                        fallbackGps={fallbackGps}
+                        required={
+                          values?.disconnection?.safetyConfirmed?.answer ===
+                          "yes"
+                        }
+                      />
+                    </YesNoQuestion>
+                  </>
+                )}
 
                 {typeof errors?.media === "string" && (
                   <Text style={styles.errorText}>{errors.media}</Text>
@@ -1383,9 +2231,12 @@ export default function FormMeterDisconnection() {
 
               <IrepsFormActions
                 resetLabel="RESET"
+                saveLabel="SAVE"
                 submitLabel="SUBMIT DISCONNECTION"
+                canSave={true}
                 canSubmit={isValid}
                 loading={inProgress}
+                saveLoading={saveInProgress}
                 onReset={() => {
                   Alert.alert(
                     "Reset Form?",
@@ -1409,6 +2260,7 @@ export default function FormMeterDisconnection() {
                     ],
                   );
                 }}
+                onSave={() => handleSaveDisconnection(values)}
                 onSubmit={handleSubmit}
                 disabledReason="Complete all required fields before submitting."
               />
@@ -1421,6 +2273,8 @@ export default function FormMeterDisconnection() {
                     styles.successModal,
                     submitOutcome.type === "disconnectionFailed" &&
                       styles.failedOutcomeModal,
+                    submitOutcome.type === "noAccess" &&
+                      styles.noAccessOutcomeModal,
                   ]}
                 >
                   <View style={styles.successContent}>
@@ -1431,6 +2285,8 @@ export default function FormMeterDisconnection() {
                           styles.failedIconCircle,
                         submitOutcome.type === "savedLocally" &&
                           styles.savedLocallyIconCircle,
+                        submitOutcome.type === "noAccess" &&
+                          styles.noAccessIconCircle,
                       ]}
                     >
                       <Feather
@@ -1439,7 +2295,9 @@ export default function FormMeterDisconnection() {
                             ? "alert-triangle"
                             : submitOutcome.type === "savedLocally"
                               ? "download-cloud"
-                              : "check"
+                              : submitOutcome.type === "noAccess"
+                                ? "slash"
+                                : "check"
                         }
                         size={46}
                         color="#fff"
@@ -1451,6 +2309,8 @@ export default function FormMeterDisconnection() {
                         styles.successTitle,
                         submitOutcome.type === "disconnectionFailed" &&
                           styles.failedOutcomeTitle,
+                        submitOutcome.type === "noAccess" &&
+                          styles.noAccessOutcomeTitle,
                       ]}
                     >
                       {submitOutcome.title}
@@ -1465,6 +2325,8 @@ export default function FormMeterDisconnection() {
                         styles.continueBtn,
                         submitOutcome.type === "disconnectionFailed" &&
                           styles.failedContinueBtn,
+                        submitOutcome.type === "noAccess" &&
+                          styles.noAccessContinueBtn,
                       ]}
                       onPress={() => {
                         const shouldGoBack = submitOutcome.goBackOnContinue;
@@ -1568,7 +2430,7 @@ const styles = StyleSheet.create({
   },
 
   summaryValue: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#0F172A",
     fontWeight: "800",
   },
@@ -1584,6 +2446,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     flex: 1,
+  },
+
+  accessHelpText: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+
+  accessChoiceRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  accessChoice: {
+    flex: 1,
+    minHeight: 64,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+  },
+
+  accessChoiceYes: {
+    borderColor: "#22C55E",
+    backgroundColor: "#F0FDF4",
+  },
+
+  accessChoiceNo: {
+    borderColor: "#EF4444",
+    backgroundColor: "#FEF2F2",
+  },
+
+  accessChoiceTextWrap: {
+    flex: 1,
+  },
+
+  accessChoiceTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+
+  accessChoiceSub: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748B",
+    marginTop: 2,
   },
 
   questionCard: {
@@ -1666,6 +2580,58 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  readOnlyBox: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+  },
+
+  readOnlyLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#64748B",
+    textTransform: "uppercase",
+  },
+
+  readOnlyValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+    lineHeight: 18,
+  },
+
+  readOnlyMediaList: {
+    gap: 8,
+  },
+
+  mediaReadOnlyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    padding: 9,
+  },
+
+  mediaReadOnlyText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#334155",
+  },
+
+  mediaReadOnlyMeta: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+
   successModal: {
     backgroundColor: "white",
     padding: 30,
@@ -1696,6 +2662,10 @@ const styles = StyleSheet.create({
 
   savedLocallyIconCircle: {
     backgroundColor: "#2563EB",
+  },
+
+  noAccessIconCircle: {
+    backgroundColor: "#DC2626",
   },
 
   successTitle: {
@@ -1770,12 +2740,21 @@ const styles = StyleSheet.create({
     borderColor: "#F97316",
   },
 
+  noAccessOutcomeModal: {
+    borderWidth: 2,
+    borderColor: "#DC2626",
+  },
+
   failedIconCircle: {
     backgroundColor: "#F97316",
   },
 
   failedOutcomeTitle: {
     color: "#9A3412",
+  },
+
+  noAccessOutcomeTitle: {
+    color: "#991B1B",
   },
 
   outcomeMessage: {
@@ -1790,5 +2769,140 @@ const styles = StyleSheet.create({
 
   failedContinueBtn: {
     backgroundColor: "#F97316",
+  },
+
+  noAccessContinueBtn: {
+    backgroundColor: "#DC2626",
+  },
+
+  mediaReadOnlyThumbWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  mediaReadOnlyThumb: {
+    width: "100%",
+    height: "100%",
+  },
+
+  mediaReadOnlyMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  mediaReadOnlyHint: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#2563EB",
+  },
+
+  instructionMediaModal: {
+    backgroundColor: "#FFFFFF",
+    margin: 18,
+    borderRadius: 20,
+    padding: 14,
+    maxHeight: "88%",
+  },
+
+  instructionMediaModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+
+  instructionMediaModalIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  instructionMediaModalTitleWrap: {
+    flex: 1,
+  },
+
+  instructionMediaModalTitle: {
+    color: "#0F172A",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  instructionMediaModalSub: {
+    color: "#64748B",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+
+  instructionMediaModalClose: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  instructionMediaPreviewFrame: {
+    height: 330,
+    borderRadius: 16,
+    backgroundColor: "#020617",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  instructionMediaPreviewImage: {
+    width: "100%",
+    height: "100%",
+  },
+
+  instructionMediaMetaBox: {
+    marginTop: 10,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 9,
+  },
+
+  instructionMediaMetaText: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "800",
+    marginBottom: 2,
+  },
+
+  openInstructionMediaButton: {
+    minHeight: 44,
+    borderRadius: 13,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+
+  openInstructionMediaButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
+  instructionMediaEmptyBox: {
+    minHeight: 180,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
 });
