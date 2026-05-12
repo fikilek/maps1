@@ -47,7 +47,7 @@ export default function OperationsHub() {
 
           <OpCard
             title="Revenue Analytics"
-            subtitle="Analysis of LM Prepaid Revenues"
+            subtitle="Analysis of LM prepaid revenues"
             icon="currency-usd"
             color="#0891b2"
             disabled={isNavigating}
@@ -66,12 +66,12 @@ export default function OperationsHub() {
           />
 
           <OpCard
-            title="Workorders"
-            subtitle="Queue management & monitoring"
-            icon="clipboard-list"
+            title="My Workorders"
+            subtitle="Accept, reject & execute assigned lifecycle TRNs"
+            icon="clipboard-list-outline"
             color="#059669"
             disabled={isNavigating}
-            onPress={() => handleNavigate("/admin/operations/workorders")}
+            onPress={() => handleNavigate("/admin/operations/my-workorders")}
           />
 
           <OpCard
@@ -116,16 +116,21 @@ const OpCard = ({ title, subtitle, icon, color, onPress, disabled }) => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f8fafc" },
-  scrollContent: { padding: 16 },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#1e293b",
-    marginBottom: 20,
-    letterSpacing: -0.5,
+  container: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
   },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+
+  scrollContent: {
+    padding: 16,
+  },
+
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+
   card: {
     backgroundColor: "#fff",
     width: "48%",
@@ -138,9 +143,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 10,
   },
+
   cardDisabled: {
     opacity: 0.5,
   },
+
   iconContainer: {
     width: 48,
     height: 48,
@@ -149,12 +156,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
+
   cardTitle: {
     fontSize: 14,
     fontWeight: "900",
     color: "#1e293b",
     marginTop: 4,
   },
+
   cardSubtitle: {
     fontSize: 10,
     color: "#64748b",

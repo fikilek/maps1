@@ -1,8 +1,11 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useMemo } from "react";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useGeo } from "../../context/GeoContext";
 import { useWarehouse } from "../../context/WarehouseContext";
+import { useAuth } from "../../hooks/useAuth";
+import { useGetServiceProvidersQuery } from "../../redux/spApi";
 
 const getMeterStatusConfig = (state = "") => {
   const s = String(state || "UNKNOWN").toUpperCase();
@@ -123,11 +126,24 @@ const LifecycleActionButton = ({ label, icon, enabled, onPress }) => {
   );
 };
 
+function serviceProviderLooksMnc(serviceProvider = {}) {
+  const clients = Array.isArray(serviceProvider?.clients)
+    ? serviceProvider.clients
+    : [];
+
+  return clients.some(
+    (client) =>
+      String(client?.clientType || "").toUpperCase() === "LM" &&
+      String(client?.relationshipType || "").toUpperCase() === "MNC",
+  );
+}
+
 const AstItem = ({ item }) => {
   // console.log(`AstItem --item`, item);
   const { updateGeo } = useGeo();
   const { all } = useWarehouse();
   const router = useRouter();
+  const { profile, isMNG, isSPV } = useAuth();
 
   // 🎯 DATA EXTRACTION
   const isWater = item.meterType === "water";
@@ -189,6 +205,44 @@ const AstItem = ({ item }) => {
   const canRemove = meterState !== "REMOVED";
   const canVend = meterState === "CONNECTED" && isPrepaidElectricity;
 
+  const actorServiceProviderId =
+    profile?.employment?.serviceProvider?.id || null;
+
+  const { data: serviceProviders = [] } = useGetServiceProvidersQuery();
+
+  const actorServiceProvider = useMemo(() => {
+    if (!actorServiceProviderId) return null;
+
+    return (
+      serviceProviders.find((serviceProvider) => {
+        return serviceProvider?.id === actorServiceProviderId;
+      }) || null
+    );
+  }, [serviceProviders, actorServiceProviderId]);
+
+  const isMncSpv = isSPV && serviceProviderLooksMnc(actorServiceProvider);
+
+  const canOriginateOfficeLct = isMNG || isMncSpv;
+
+  const launchTrnOrigin = (trnType) => {
+    router.push({
+      pathname: "/(tabs)/admin/operations/trn-origin",
+      params: {
+        trnType,
+        astId: item.id,
+        premiseId: item?.accessData?.premise?.id || "NAv",
+        asset: encodeURIComponent(JSON.stringify(item)),
+      },
+    });
+  };
+
+  const alertNoLifecycleOriginRights = () => {
+    Alert.alert(
+      "Not Allowed",
+      "Lifecycle work must be issued by MNG or SPV from Operations. Field workers must execute assigned work from TrnsScreen.",
+    );
+  };
+
   const launchCommissioning = () => {
     if (!canCommission) return;
 
@@ -211,58 +265,45 @@ const AstItem = ({ item }) => {
   const launchRemoval = () => {
     if (!canRemove) return;
 
-    router.push({
-      pathname: "/(tabs)/asts/removal",
-      params: {
-        astId: item.id,
-        premiseId: item?.accessData?.premise?.id || "NAv",
-        action: JSON.stringify({
-          trnType: "METER_REMOVAL",
-          astId: item.id,
-          meterType: item?.meterType || "NAv",
-          meterNo: item?.ast?.astData?.astNo || "NAv",
-          statusBefore: item?.status?.state || "UNKNOWN",
-        }),
-      },
-    });
+    if (!canOriginateOfficeLct) {
+      alertNoLifecycleOriginRights();
+      return;
+    }
+
+    launchTrnOrigin("METER_REMOVAL");
+  };
+
+  const launchInspection = () => {
+    if (!canInspect) return;
+
+    if (!canOriginateOfficeLct) {
+      alertNoLifecycleOriginRights();
+      return;
+    }
+
+    launchTrnOrigin("METER_INSPECTION");
   };
 
   const launchDisconnection = () => {
     if (!canDisconnect) return;
 
-    router.push({
-      pathname: "/(tabs)/asts/disconnection",
-      params: {
-        astId: item.id,
-        premiseId: item?.accessData?.premise?.id || "NAv",
-        action: JSON.stringify({
-          trnType: "METER_DISCONNECTION",
-          astId: item.id,
-          meterType: item?.meterType || "NAv",
-          meterNo: item?.ast?.astData?.astNo || "NAv",
-          statusBefore: item?.status?.state || "UNKNOWN",
-        }),
-      },
-    });
+    if (!canOriginateOfficeLct) {
+      alertNoLifecycleOriginRights();
+      return;
+    }
+
+    launchTrnOrigin("METER_DISCONNECTION");
   };
 
   const launchReconnection = () => {
     if (!canReconnect) return;
 
-    router.push({
-      pathname: "/(tabs)/asts/reconnection",
-      params: {
-        astId: item.id,
-        premiseId: item?.accessData?.premise?.id || "NAv",
-        action: JSON.stringify({
-          trnType: "METER_RECONNECTION",
-          astId: item.id,
-          meterType: item?.meterType || "NAv",
-          meterNo: item?.ast?.astData?.astNo || "NAv",
-          statusBefore: item?.status?.state || "UNKNOWN",
-        }),
-      },
-    });
+    if (!canOriginateOfficeLct) {
+      alertNoLifecycleOriginRights();
+      return;
+    }
+
+    launchTrnOrigin("METER_RECONNECTION");
   };
 
   const handleGoToDetails = () => {
@@ -461,7 +502,7 @@ const AstItem = ({ item }) => {
           label="INSP"
           icon="clipboard-search-outline"
           enabled={canInspect}
-          onPress={() => {}}
+          onPress={launchInspection}
         />
 
         <LifecycleActionButton
