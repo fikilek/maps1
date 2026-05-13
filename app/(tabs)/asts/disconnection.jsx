@@ -988,10 +988,9 @@ export default function FormMeterDisconnection() {
     return [];
   }, [action]);
 
-  const instructionLocked = useMemo(
-    () => isLifecycleInstructionLocked(action),
-    [action],
-  );
+  const instructionLocked = useMemo(() => {
+    return Boolean(instructionTrnId) || isLifecycleInstructionLocked(action);
+  }, [action, instructionTrnId]);
 
   const router = useRouter();
   const { all } = useWarehouse();
@@ -1043,8 +1042,82 @@ export default function FormMeterDisconnection() {
     const id = sourceAstId;
     if (!id) return null;
 
-    return (all?.meters || []).find((meter) => meter?.id === id) || null;
-  }, [all?.meters, sourceAstId]);
+    const warehouseAst =
+      (all?.meters || []).find((meterDoc) => meterDoc?.id === id) || null;
+
+    if (warehouseAst) return warehouseAst;
+
+    const actionAst = action?.ast || {};
+    const actionAstData = actionAst?.astData || {};
+    const actionAccessData = action?.accessData || {};
+    const actionStatus = action?.status || {};
+
+    const actionMeterNo = readFirstString(
+      actionAstData?.astNo,
+      action?.meterNo,
+    );
+
+    if (!actionAstData?.astId && !actionMeterNo) {
+      return null;
+    }
+
+    return {
+      id,
+      ast: {
+        ...actionAst,
+        astData: {
+          ...actionAstData,
+          astId: readFirstString(actionAstData?.astId, id),
+          astNo: readFirstString(actionAstData?.astNo, action?.meterNo, "NAv"),
+          astManufacturer: readFirstString(
+            actionAstData?.astManufacturer,
+            "NAv",
+          ),
+          astName: readFirstString(actionAstData?.astName, "NAv"),
+          meter: actionAstData?.meter || {
+            type: readFirstString(action?.meterKind, "NAv"),
+            category: readFirstString(action?.meterType, "NAv"),
+          },
+        },
+      },
+      accessData: {
+        ...actionAccessData,
+        erfId: readFirstString(actionAccessData?.erfId, action?.erfId, "NAv"),
+        erfNo: readFirstString(actionAccessData?.erfNo, action?.erfNo, "NAv"),
+        parents: actionAccessData?.parents || {},
+        premise: {
+          ...(actionAccessData?.premise || {}),
+          id: readFirstString(
+            actionAccessData?.premise?.id,
+            action?.premiseId,
+            premiseId,
+            "NAv",
+          ),
+          address: readFirstString(
+            actionAccessData?.premise?.address,
+            action?.address,
+            "NAv",
+          ),
+          propertyType: readFirstString(
+            actionAccessData?.premise?.propertyType,
+            action?.propertyType,
+            "NAv",
+          ),
+        },
+      },
+      status: {
+        ...actionStatus,
+        state: readFirstString(
+          actionStatus?.state,
+          action?.meterPreStatus,
+          "UNKNOWN",
+        ),
+        id: readFirstString(actionStatus?.id, "NAv"),
+        detail: readFirstString(actionStatus?.detail, "NAv"),
+      },
+      meterType: readFirstString(action?.meterType, "NAv"),
+    };
+  }, [all?.meters, sourceAstId, action, premiseId]);
 
   const premise = useMemo(() => {
     const id =
@@ -1052,25 +1125,72 @@ export default function FormMeterDisconnection() {
 
     if (!id) return null;
 
-    return (all?.prems || []).find((p) => p?.id === id) || null;
-  }, [all?.prems, premiseId, astDoc?.accessData?.premise?.id, action]);
+    const warehousePremise =
+      (all?.prems || []).find((premiseDoc) => premiseDoc?.id === id) || null;
+
+    if (warehousePremise) return warehousePremise;
+
+    if (astDoc?.accessData?.premise?.id) {
+      return {
+        id: astDoc.accessData.premise.id,
+        erfNo: astDoc?.accessData?.erfNo || action?.erfNo || "NAv",
+        parents: astDoc?.accessData?.parents || {},
+        address: {
+          strNo: "",
+          strName:
+            astDoc?.accessData?.premise?.address || action?.address || "",
+          strType: "",
+        },
+        propertyType: {
+          type: "",
+          name: astDoc?.accessData?.premise?.propertyType || "NAv",
+          unitNo: "",
+        },
+        geometry: {
+          centroid: null,
+        },
+      };
+    }
+
+    return null;
+  }, [
+    all?.prems,
+    premiseId,
+    astDoc?.accessData?.premise?.id,
+    astDoc?.accessData?.premise?.address,
+    astDoc?.accessData?.premise?.propertyType,
+    astDoc?.accessData?.erfNo,
+    astDoc?.accessData?.parents,
+    action,
+  ]);
 
   const astData = astDoc?.ast?.astData || {};
   const meter = astData?.meter || {};
-  const meterNo = astData?.astNo || action?.meterNo || "NAv";
-  const meterType = astDoc?.meterType || action?.meterType || "NAv";
-  const meterKind = String(meter?.type || "NAv").toLowerCase();
+
+  const meterNo = readFirstString(astData?.astNo, action?.meterNo, "NAv");
+
+  const meterType = readFirstString(
+    astDoc?.meterType,
+    action?.meterType,
+    meter?.category,
+    "NAv",
+  );
+
+  const meterKind = String(
+    readFirstString(meter?.type, action?.meterKind, "NAv"),
+  ).toLowerCase();
 
   const isPrepaidReading = isPrepaidMeterKind(meterKind);
 
   const currentStatus = String(
-    astDoc?.status?.state || "UNKNOWN",
+    readFirstString(astDoc?.status?.state, action?.meterPreStatus, "UNKNOWN"),
   ).toUpperCase();
 
   const parents = astDoc?.accessData?.parents || premise?.parents || {};
   const wardPcode = parents?.wardPcode || "NAv";
   const lmPcode = parents?.lmPcode || "NAv";
-  const erfNo = astDoc?.accessData?.erfNo || premise?.erfNo || "NAv";
+  const erfNo =
+    astDoc?.accessData?.erfNo || premise?.erfNo || action?.erfNo || "NAv";
 
   const premiseAddress = getPremiseAddress(premise, astDoc);
   const propType = getPropertyType(premise, astDoc);
@@ -1084,12 +1204,19 @@ export default function FormMeterDisconnection() {
     if (initialEligible !== null) return;
     if (!astDoc?.id) return;
 
-    const firstStatus = String(astDoc?.status?.state || "").toUpperCase();
+    const firstStatus = String(
+      astDoc?.status?.state || action?.meterPreStatus || "",
+    ).toUpperCase();
 
     if (!firstStatus) return;
 
     setInitialEligible(firstStatus === "CONNECTED");
-  }, [initialEligible, astDoc?.id, astDoc?.status?.state]);
+  }, [
+    initialEligible,
+    astDoc?.id,
+    astDoc?.status?.state,
+    action?.meterPreStatus,
+  ]);
 
   const isEligible = initialEligible === true;
 
@@ -1627,47 +1754,73 @@ export default function FormMeterDisconnection() {
 
       setInProgress(false);
 
-      if (isNoAccess(values)) {
-        setSubmitOutcome({
-          visible: true,
-          type: "noAccess",
-          title: "DCN COMPLETED - NO ACCESS",
-          message: buildDisconnectionFailureMessage(values, result),
-          goBackOnContinue: true,
-        });
+      router.replace("/admin/operations/my-workorders");
+      return;
 
-        return;
-      }
+      // if (queueItemId) {
+      //   await removeSubmissionQueueItem(queueItemId);
+      // }
 
-      if (
-        result?.astStatusChanged === true &&
-        result?.astStatusAfter === "DISCONNECTED"
-      ) {
-        setSubmitOutcome({
-          visible: true,
-          type: "success",
-          title: "METER DISCONNECTED",
-          message:
-            "The DCN was submitted and the meter was moved to DISCONNECTED.",
-          goBackOnContinue: true,
-        });
+      // setInProgress(false);
 
-        return;
-      }
+      // if (isNoAccess(values)) {
+      //   setSubmitOutcome({
+      //     visible: true,
+      //     type: "noAccess",
+      //     title: "DCN COMPLETED - NO ACCESS",
+      //     message: buildDisconnectionFailureMessage(values, result),
+      //     goBackOnContinue: true,
+      //   });
 
-      setSubmitOutcome({
-        visible: true,
-        type: "disconnectionFailed",
-        title: "DCN COMPLETED",
-        message: buildDisconnectionFailureMessage(values, result),
-        goBackOnContinue: true,
-      });
+      //   return;
+      // }
+
+      // if (
+      //   result?.astStatusChanged === true &&
+      //   result?.astStatusAfter === "DISCONNECTED"
+      // ) {
+      //   setSubmitOutcome({
+      //     visible: true,
+      //     type: "success",
+      //     title: "METER DISCONNECTED",
+      //     message:
+      //       "The DCN was submitted and the meter was moved to DISCONNECTED.",
+      //     goBackOnContinue: true,
+      //   });
+
+      //   return;
+      // }
+
+      // setSubmitOutcome({
+      //   visible: true,
+      //   type: "disconnectionFailed",
+      //   title: "DCN COMPLETED",
+      //   message: buildDisconnectionFailureMessage(values, result),
+      //   goBackOnContinue: true,
+      // });
     } catch (error) {
       console.error("Disconnection Submission Error:", error);
       Alert.alert("Error", error?.message || "Submission failed");
       setInProgress(false);
     }
   };
+
+  function closeAfterExecutionOutcome(outcomeType) {
+    setSubmitOutcome({
+      visible: false,
+      type: null,
+      title: "",
+      message: "",
+      goBackOnContinue: true,
+    });
+
+    if (outcomeType === "savedLocally") {
+      router.replace("/(tabs)/admin/operations/my-workorders");
+      return;
+    }
+
+    router.replace("/(tabs)/admin/operations/my-workorders");
+  }
 
   const confirmCancel = () => {
     Alert.alert(
@@ -2329,19 +2482,7 @@ export default function FormMeterDisconnection() {
                           styles.noAccessContinueBtn,
                       ]}
                       onPress={() => {
-                        const shouldGoBack = submitOutcome.goBackOnContinue;
-
-                        setSubmitOutcome({
-                          visible: false,
-                          type: null,
-                          title: "",
-                          message: "",
-                          goBackOnContinue: true,
-                        });
-
-                        if (shouldGoBack) {
-                          router.back();
-                        }
+                        closeAfterExecutionOutcome(submitOutcome.type);
                       }}
                     >
                       <Text style={styles.continueBtnText}>CONTINUE</Text>

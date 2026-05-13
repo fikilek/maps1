@@ -143,7 +143,7 @@ const AstItem = ({ item }) => {
   const { updateGeo } = useGeo();
   const { all } = useWarehouse();
   const router = useRouter();
-  const { profile, isMNG, isSPV } = useAuth();
+  const { profile, isMNG, isSPV, isFWR } = useAuth();
 
   // 🎯 DATA EXTRACTION
   const isWater = item.meterType === "water";
@@ -197,7 +197,12 @@ const AstItem = ({ item }) => {
   const isPrepaidElectricity =
     meterType === "electricity" && meterKind === "prepaid";
 
-  const canCommission = meterState === "FIELD" && meterType === "electricity";
+  const isValidCommissionMeterType = ["electricity", "water"].includes(
+    meterType,
+  );
+
+  const isCommissionCandidate =
+    meterState === "FIELD" && isValidCommissionMeterType;
 
   const canInspect = meterState !== "REMOVED";
   const canDisconnect = meterState === "CONNECTED";
@@ -221,6 +226,15 @@ const AstItem = ({ item }) => {
   }, [serviceProviders, actorServiceProviderId]);
 
   const isMncSpv = isSPV && serviceProviderLooksMnc(actorServiceProvider);
+  const isSubcSpv =
+    isSPV &&
+    Boolean(actorServiceProvider) &&
+    !serviceProviderLooksMnc(actorServiceProvider);
+
+  const canCreateAndSubmitCommissioning = isFWR || isSubcSpv;
+
+  const canCommission =
+    isCommissionCandidate && canCreateAndSubmitCommissioning;
 
   const canOriginateOfficeLct = isMNG || isMncSpv;
 
@@ -244,7 +258,21 @@ const AstItem = ({ item }) => {
   };
 
   const launchCommissioning = () => {
-    if (!canCommission) return;
+    if (!isCommissionCandidate) {
+      Alert.alert(
+        "Not Eligible",
+        "Only FIELD electricity or water meters can be commissioned.",
+      );
+      return;
+    }
+
+    if (!canCreateAndSubmitCommissioning) {
+      Alert.alert(
+        "Not Allowed",
+        "Only FWR or SPV(SUBC) may create and submit meter commissioning.",
+      );
+      return;
+    }
 
     router.push({
       pathname: "/(tabs)/asts/commissioning",

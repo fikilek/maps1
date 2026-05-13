@@ -4,6 +4,7 @@ import { Formik } from "formik";
 import { useMemo, useState } from "react";
 import {
   Alert,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -163,6 +164,19 @@ function getStateBadgeTextStyle(state) {
     default:
       return styles.badgeMutedText;
   }
+}
+
+function isPhotoMedia(media = {}) {
+  const type = String(media?.type || media?.mimeType || "").toLowerCase();
+  const url = getMediaUrl(media).toLowerCase();
+
+  return (
+    type.includes("image") ||
+    url.includes(".jpg") ||
+    url.includes(".jpeg") ||
+    url.includes(".png") ||
+    url.includes(".webp")
+  );
 }
 
 export default function WorkorderManagementSystem() {
@@ -576,6 +590,7 @@ function GroupDetail({
 
       <ScrollView
         horizontal
+        style={styles.filterScroll}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterRow}
       >
@@ -643,7 +658,48 @@ function GroupDetail({
   );
 }
 
+function getMediaUrl(media = {}) {
+  return (
+    media?.url ||
+    media?.downloadURL ||
+    media?.downloadUrl ||
+    media?.storageUrl ||
+    media?.uri ||
+    ""
+  );
+}
+
+function getMediaLabel(media = {}, index = 0) {
+  return (
+    media?.label ||
+    media?.name ||
+    media?.fileName ||
+    media?.filename ||
+    media?.type ||
+    `Instruction media ${index + 1}`
+  );
+}
+
+function getInstructionMedia(item = {}) {
+  const media = Array.isArray(item?.raw?.media) ? item.raw.media : [];
+
+  return media.filter((mediaItem) => mediaItem?.tag === "instructionMedia");
+}
+
+function getInstructionMediaSummary(mediaItems = []) {
+  if (!mediaItems.length) return "No instruction media";
+
+  if (mediaItems.length === 1) return "1 instruction file";
+
+  return `${mediaItems.length} instruction files`;
+}
+
 function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
+  const [instructionMediaVisible, setInstructionMediaVisible] = useState(false);
+
+  const instructionMedia = getInstructionMedia(item);
+  const hasInstructionMedia = instructionMedia.length > 0;
+
   return (
     <View style={styles.workCard}>
       <View style={styles.workHeader}>
@@ -676,33 +732,77 @@ function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
 
       <View style={styles.infoGrid}>
         <InfoLine icon="counter" label="Meter No" value={item.meterNo} />
+
         <InfoLine
           icon="map-marker-outline"
           label="Address"
           value={item.address}
           fullWidth={true}
         />
+
         <InfoLine icon="home-city-outline" label="ERF No" value={item.erfNo} />
+
         <InfoLine
           icon="gauge"
           label="Meter Pre-Status"
           value={item.meterPreStatus}
         />
+
         <InfoLine
           icon="account-hard-hat-outline"
           label="Assigned Target"
           value={item.assignment?.targetText || "NAv"}
         />
+
         <InfoLine
           icon="account-tie-outline"
           label="Issued By"
           value={item.issuedBy?.name || "NAv"}
         />
+
         <InfoLine
           icon="clock-outline"
           label="Age"
           value={formatAge(item.ageSeconds)}
         />
+
+        <Pressable
+          style={[
+            styles.instructionMediaLine,
+            !hasInstructionMedia && styles.instructionMediaLineEmpty,
+          ]}
+          onPress={() => {
+            if (!hasInstructionMedia) return;
+            setInstructionMediaVisible(true);
+          }}
+          disabled={!hasInstructionMedia}
+        >
+          <MaterialCommunityIcons
+            name={hasInstructionMedia ? "paperclip" : "paperclip-off"}
+            size={16}
+            color={hasInstructionMedia ? "#2563eb" : "#94a3b8"}
+          />
+
+          <View style={styles.instructionMediaLineMain}>
+            <Text style={styles.infoLabel}>Instruction Media</Text>
+            <Text
+              style={[
+                styles.instructionMediaLineValue,
+                !hasInstructionMedia && styles.instructionMediaLineValueEmpty,
+              ]}
+            >
+              {getInstructionMediaSummary(instructionMedia)}
+            </Text>
+          </View>
+
+          {hasInstructionMedia ? (
+            <MaterialCommunityIcons
+              name="chevron-right"
+              size={18}
+              color="#2563eb"
+            />
+          ) : null}
+        </Pressable>
       </View>
 
       {item.acceptedBy ? (
@@ -783,7 +883,158 @@ function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
           </View>
         ) : null}
       </View>
+
+      <InstructionMediaModal
+        visible={instructionMediaVisible}
+        mediaItems={instructionMedia}
+        workItemId={item?.id}
+        onClose={() => setInstructionMediaVisible(false)}
+      />
     </View>
+  );
+}
+
+function InstructionMediaModal({
+  visible,
+  mediaItems = [],
+  workItemId,
+  onClose,
+}) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const selectedMedia = mediaItems[selectedIndex] || mediaItems[0] || null;
+  const selectedUrl = getMediaUrl(selectedMedia);
+  const selectedLabel = getMediaLabel(selectedMedia, selectedIndex);
+  const selectedIsPhoto = isPhotoMedia(selectedMedia);
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.instructionMediaSheet}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalIcon}>
+              <MaterialCommunityIcons
+                name="image-multiple-outline"
+                size={22}
+                color="#2563eb"
+              />
+            </View>
+
+            <View style={styles.modalHeaderMain}>
+              <Text style={styles.modalTitle}>Instruction Media</Text>
+              <Text style={styles.modalSub}>{workItemId || "NAv"}</Text>
+            </View>
+
+            <Pressable style={styles.modalClose} onPress={onClose}>
+              <MaterialCommunityIcons name="close" size={22} color="#0f172a" />
+            </Pressable>
+          </View>
+
+          {mediaItems.length === 0 ? (
+            <View style={styles.instructionMediaEmpty}>
+              <MaterialCommunityIcons
+                name="paperclip-off"
+                size={30}
+                color="#94a3b8"
+              />
+              <Text style={styles.stateTitle}>No instruction media</Text>
+              <Text style={styles.stateText}>
+                This work item has no office instruction media attached.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.instructionPhotoPreviewBox}>
+                {selectedIsPhoto && selectedUrl ? (
+                  <>
+                    <Image
+                      source={{ uri: selectedUrl }}
+                      style={styles.instructionPhotoPreview}
+                      resizeMode="contain"
+                    />
+
+                    <Text style={styles.instructionPhotoTitle}>
+                      {selectedLabel}
+                    </Text>
+                  </>
+                ) : (
+                  <View style={styles.instructionPhotoUnsupported}>
+                    <MaterialCommunityIcons
+                      name="file-eye-outline"
+                      size={38}
+                      color="#94a3b8"
+                    />
+
+                    <Text style={styles.instructionPhotoUnsupportedTitle}>
+                      Preview not enabled yet
+                    </Text>
+
+                    <Text style={styles.instructionPhotoUnsupportedText}>
+                      Only instruction photos are previewed in this modal for
+                      now.
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.instructionMediaThumbScroll}
+                contentContainerStyle={styles.instructionMediaThumbRow}
+              >
+                {mediaItems.map((mediaItem, index) => {
+                  const active = index === selectedIndex;
+                  const label = getMediaLabel(mediaItem, index);
+                  const url = getMediaUrl(mediaItem);
+                  const isPhoto = isPhotoMedia(mediaItem);
+
+                  return (
+                    <Pressable
+                      key={`${label}-${index}`}
+                      style={[
+                        styles.instructionMediaThumb,
+                        active && styles.instructionMediaThumbActive,
+                      ]}
+                      onPress={() => setSelectedIndex(index)}
+                    >
+                      {isPhoto && url ? (
+                        <Image
+                          source={{ uri: url }}
+                          style={styles.instructionMediaThumbImage}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <MaterialCommunityIcons
+                          name="file-eye-outline"
+                          size={18}
+                          color={active ? "#ffffff" : "#2563eb"}
+                        />
+                      )}
+
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.instructionMediaThumbText,
+                          active && styles.instructionMediaThumbTextActive,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1109,59 +1360,59 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 
-  filterRow: {
-    paddingHorizontal: 12,
-    paddingTop: 2,
-    paddingBottom: 4,
-    gap: 6,
-  },
+  // filterRow: {
+  //   paddingHorizontal: 12,
+  //   paddingTop: 2,
+  //   paddingBottom: 4,
+  //   gap: 6,
+  // },
 
-  filterChip: {
-    minHeight: 28,
-    borderRadius: 14,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
+  // filterChip: {
+  //   minHeight: 28,
+  //   borderRadius: 14,
+  //   paddingHorizontal: 9,
+  //   paddingVertical: 4,
+  //   backgroundColor: "#ffffff",
+  //   borderWidth: 1,
+  //   borderColor: "#e2e8f0",
+  //   flexDirection: "row",
+  //   alignItems: "center",
+  //   gap: 5,
+  // },
 
-  filterChipActive: {
-    backgroundColor: "#0f172a",
-    borderColor: "#0f172a",
-  },
+  // filterChipActive: {
+  //   backgroundColor: "#0f172a",
+  //   borderColor: "#0f172a",
+  // },
 
-  filterChipText: {
-    color: "#475569",
-    fontSize: 10,
-    fontWeight: "900",
-  },
+  // filterChipText: {
+  //   color: "#475569",
+  //   fontSize: 10,
+  //   fontWeight: "900",
+  // },
 
-  filterChipTextActive: {
-    color: "#ffffff",
-  },
+  // filterChipTextActive: {
+  //   color: "#ffffff",
+  // },
 
-  filterCountText: {
-    minWidth: 18,
-    minHeight: 18,
-    borderRadius: 9,
-    overflow: "hidden",
-    backgroundColor: "#f1f5f9",
-    color: "#64748b",
-    fontSize: 9,
-    fontWeight: "900",
-    textAlign: "center",
-    paddingHorizontal: 4,
-    paddingTop: 2,
-  },
+  // filterCountText: {
+  //   minWidth: 18,
+  //   minHeight: 18,
+  //   borderRadius: 9,
+  //   overflow: "hidden",
+  //   backgroundColor: "#f1f5f9",
+  //   color: "#64748b",
+  //   fontSize: 9,
+  //   fontWeight: "900",
+  //   textAlign: "center",
+  //   paddingHorizontal: 4,
+  //   paddingTop: 2,
+  // },
 
-  filterCountTextActive: {
-    backgroundColor: "#334155",
-    color: "#e2e8f0",
-  },
+  // filterCountTextActive: {
+  //   backgroundColor: "#334155",
+  //   color: "#e2e8f0",
+  // },
 
   // filterRow: {
   //   paddingHorizontal: 12,
@@ -1199,6 +1450,69 @@ const styles = StyleSheet.create({
   // filterCountTextActive: {
   //   color: "#cbd5e1",
   // },
+
+  filterScroll: {
+    flexGrow: 0,
+    maxHeight: 34,
+    marginBottom: 6,
+  },
+
+  filterRow: {
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    paddingBottom: 2,
+    gap: 6,
+    alignItems: "center",
+  },
+
+  filterChip: {
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 9,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    alignSelf: "center",
+  },
+
+  filterChipActive: {
+    backgroundColor: "#0f172a",
+    borderColor: "#0f172a",
+  },
+
+  filterChipText: {
+    color: "#475569",
+    fontSize: 10,
+    fontWeight: "900",
+    lineHeight: 12,
+  },
+
+  filterChipTextActive: {
+    color: "#ffffff",
+  },
+
+  filterCountText: {
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    overflow: "hidden",
+    backgroundColor: "#f1f5f9",
+    color: "#64748b",
+    fontSize: 9,
+    fontWeight: "900",
+    textAlign: "center",
+    lineHeight: 17,
+  },
+
+  filterCountTextActive: {
+    backgroundColor: "#334155",
+    color: "#e2e8f0",
+  },
+
   workCard: {
     backgroundColor: "#ffffff",
     borderRadius: 17,
@@ -1525,5 +1839,197 @@ const styles = StyleSheet.create({
     color: "#7f1d1d",
     fontSize: 12,
     fontWeight: "900",
+  },
+
+  instructionMediaLine: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff",
+    paddingHorizontal: 9,
+    paddingVertical: 9,
+  },
+
+  instructionMediaLineEmpty: {
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+  },
+
+  instructionMediaLineMain: {
+    flex: 1,
+  },
+
+  instructionMediaLineValue: {
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: "900",
+    marginTop: 1,
+  },
+
+  instructionMediaLineValueEmpty: {
+    color: "#94a3b8",
+  },
+
+  instructionMediaSheet: {
+    backgroundColor: "#ffffff",
+    borderRadius: 22,
+    padding: 14,
+    maxHeight: "72%",
+  },
+
+  instructionMediaList: {
+    maxHeight: 360,
+  },
+
+  instructionMediaListContent: {
+    gap: 9,
+    paddingBottom: 8,
+  },
+
+  instructionMediaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#f8fafc",
+    padding: 10,
+  },
+
+  instructionMediaItemIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#dbeafe",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  instructionMediaItemMain: {
+    flex: 1,
+  },
+
+  instructionMediaItemTitle: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
+  instructionMediaItemSub: {
+    color: "#64748b",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+
+  instructionMediaEmpty: {
+    minHeight: 170,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    padding: 16,
+  },
+
+  instructionPhotoPreviewBox: {
+    backgroundColor: "#0f172a",
+    borderRadius: 16,
+    minHeight: 320,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#1e293b",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 10,
+  },
+
+  instructionPhotoPreview: {
+    width: "100%",
+    height: 280,
+    borderRadius: 12,
+    backgroundColor: "#020617",
+  },
+
+  instructionPhotoTitle: {
+    marginTop: 9,
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+
+  instructionPhotoUnsupported: {
+    minHeight: 300,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    gap: 8,
+  },
+
+  instructionPhotoUnsupportedTitle: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+
+  instructionPhotoUnsupportedText: {
+    color: "#cbd5e1",
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+    lineHeight: 16,
+  },
+
+  instructionMediaThumbScroll: {
+    marginTop: 10,
+    flexGrow: 0,
+  },
+
+  instructionMediaThumbRow: {
+    gap: 8,
+    paddingBottom: 2,
+  },
+
+  instructionMediaThumb: {
+    minWidth: 108,
+    maxWidth: 150,
+    minHeight: 44,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff",
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  instructionMediaThumbActive: {
+    backgroundColor: "#2563eb",
+    borderColor: "#2563eb",
+  },
+
+  instructionMediaThumbImage: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: "#dbeafe",
+  },
+
+  instructionMediaThumbText: {
+    flex: 1,
+    color: "#1d4ed8",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+
+  instructionMediaThumbTextActive: {
+    color: "#ffffff",
   },
 });

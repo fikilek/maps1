@@ -22,7 +22,7 @@ import { auth } from "../../src/firebase";
 import { useSigninMutation } from "../../src/redux/authApi";
 
 const initialValues = {
-  email: "spu@smars.co.za",
+  email: "zm@gmail.com",
   password: "fkpass123",
 };
 
