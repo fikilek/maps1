@@ -7,6 +7,11 @@ import { useDispatch, useSelector } from "react-redux";
 
 import { useGeo } from "@/src/context/GeoContext";
 import { erfsApi } from "@/src/redux/erfsApi";
+import { useGetAuthStateQuery } from "@/src/redux/authApi";
+import {
+  clearLastActiveScopeIfMatches,
+  removeScopeDataset,
+} from "@/src/storage/wardScopeStorage";
 import { useGetWardsByLocalMunicipalityQuery } from "@/src/redux/geoApi";
 import WardErfSyncLock from "../../../../components/WardErfSyncLock";
 import WardErfsSyncDoneModal from "../../../../components/WardErfsSyncDoneModal";
@@ -22,7 +27,7 @@ function getWardQueryCacheKey(lmPcode, wardPcode) {
   return `getErfsByLmPcodeWardPcode(${lmPcode}__${wardPcode})`;
 }
 
-function startWardErfSubscription(dispatch, lmPcode, wardPcode) {
+function startWardErfSubscription(dispatch, lmPcode, wardPcode, scopeIdentity = {}) {
   const wardKey = `${lmPcode}__${wardPcode}`;
 
   // already live -> do nothing
@@ -33,6 +38,8 @@ function startWardErfSubscription(dispatch, lmPcode, wardPcode) {
       {
         lmPcode,
         wardPcode,
+        uid: scopeIdentity?.uid || null,
+        activeWorkbaseId: scopeIdentity?.activeWorkbaseId || null,
       },
       { subscribe: true },
     ),
@@ -67,11 +74,15 @@ export default function WardErfsSync() {
   const dispatch = useDispatch();
 
   const { geoState, updateGeo } = useGeo();
+  const { data: authState } = useGetAuthStateQuery();
 
   const activeLm = geoState?.selectedLm;
   const activeWard = geoState?.selectedWard;
 
-  const lmPcode = activeLm?.id;
+  const lmPcode = activeLm?.pcode || activeLm?.id || null;
+  const uid = authState?.auth?.uid || null;
+  const activeWorkbaseId =
+    authState?.profile?.access?.activeWorkbase?.id || lmPcode || null;
 
   const [isOnline, setIsOnline] = useState(false);
 
@@ -321,7 +332,7 @@ export default function WardErfsSync() {
                         ratePerSecond: 0,
                       });
 
-                      startWardErfSubscription(dispatch, lmPcode, item.id);
+                      startWardErfSubscription(dispatch, lmPcode, item.id, { uid, activeWorkbaseId });
                     }}
                   >
                     <Text style={styles.btnText}>
@@ -354,6 +365,23 @@ export default function WardErfsSync() {
                     style={styles.dropBtn}
                     onPress={() => {
                       stopWardErfSubscription(dispatch, lmPcode, item.id);
+
+                      if (uid && activeWorkbaseId && lmPcode && item.id) {
+                        removeScopeDataset({
+                          uid,
+                          activeWorkbaseId,
+                          lmPcode,
+                          wardPcode: item.id,
+                          dataset: "erfs",
+                        });
+
+                        clearLastActiveScopeIfMatches({
+                          uid,
+                          activeWorkbaseId,
+                          lmPcode,
+                          wardPcode: item.id,
+                        });
+                      }
 
                       if (activeWard?.id === item.id) {
                         updateGeo({

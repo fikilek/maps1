@@ -5,10 +5,15 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useGetLocalMunicipalityByIdQuery } from "../redux/geoApi";
+import {
+  getRestorableLastActiveScope,
+  saveLastActiveScope,
+} from "../storage/wardScopeStorage";
 
 export const GeoContext = createContext(null);
 
@@ -27,7 +32,7 @@ export const GeoContext = createContext(null);
 //   - selectedPremise = null
 //   - selectedMeter = null
 //
-// Stage 2: LM known, Ward manually selected
+// Stage 2: LM known, Ward restored/selected
 //   - selectedLm = active LM
 //   - selectedWard = active Ward
 //   - selectedErf = null
@@ -36,6 +41,8 @@ export const GeoContext = createContext(null);
 //
 // IMPORTANT:
 // Warehouse operational data must remain closed until both LM and Ward exist.
+// MMKV is only used here to record/replay the last active scope pointer.
+// Operational data still flows RTK Query -> WarehouseContext -> UI.
 
 const INITIAL_GEO = {
   selectedLm: null,
@@ -48,14 +55,34 @@ const INITIAL_GEO = {
   flightSignal: 0, // counter, not Date.now
 };
 
+function readUidFromAuth(authCtx, profile) {
+  return (
+    authCtx?.auth?.uid ||
+    authCtx?.uid ||
+    profile?.uid ||
+    profile?.id ||
+    profile?.identity?.uid ||
+    null
+  );
+}
+
+function getGeoPcode(entity) {
+  return entity?.pcode || entity?.id || null;
+}
+
 export const GeoProvider = ({ children }) => {
-  const { profile } = useAuth();
+  const authCtx = useAuth();
+  const { profile } = authCtx || {};
+
+  const uid = readUidFromAuth(authCtx, profile);
   const workbaseId = profile?.access?.activeWorkbase?.id;
+  const restoreAttemptRef = useRef(null);
 
   const [geoState, setGeoState] = useState(INITIAL_GEO);
 
   useEffect(() => {
     if (!profile) {
+      restoreAttemptRef.current = null;
       setGeoState(INITIAL_GEO);
       return;
     }
@@ -100,6 +127,85 @@ export const GeoProvider = ({ children }) => {
       };
     });
   }, [profile, remoteLmDoc, workbaseId]);
+
+  // 3) RESTORE: replay last active ward pointer after user + workbase + LM are known.
+  useEffect(() => {
+    if (!profile || !uid || !workbaseId || !remoteLmDoc) return;
+
+    const lmPcode = getGeoPcode(remoteLmDoc);
+    if (!lmPcode) return;
+
+    const restoreKey = `${uid}__${workbaseId}__${lmPcode}`;
+    if (restoreAttemptRef.current === restoreKey) return;
+
+    // Do not override a ward the user already selected in this session.
+    if (geoState?.selectedWard?.id || geoState?.selectedWard?.pcode) {
+      restoreAttemptRef.current = restoreKey;
+      return;
+    }
+
+    const restorableScope = getRestorableLastActiveScope({
+      uid,
+      activeWorkbaseId: workbaseId,
+      lmPcode,
+    });
+
+    restoreAttemptRef.current = restoreKey;
+
+    if (!restorableScope?.wardPcode) return;
+
+    setGeoState((prev) => {
+      // If something selected a ward while this effect was resolving, do not override it.
+      if (prev?.selectedWard?.id || prev?.selectedWard?.pcode) return prev;
+
+      const ward = restorableScope.ward || {
+        id: restorableScope.wardPcode,
+        pcode: restorableScope.wardPcode,
+        name: `Ward ${restorableScope.wardPcode}`,
+      };
+
+      return {
+        ...INITIAL_GEO,
+        selectedLm: remoteLmDoc,
+        selectedWard: ward,
+        lastSelectionType: "WARD",
+        flightSignal: prev.flightSignal + 1,
+      };
+    });
+  }, [profile, uid, workbaseId, remoteLmDoc, geoState?.selectedWard?.id, geoState?.selectedWard?.pcode]);
+
+  // 4) RECORD: whenever a valid LM + Ward scope is active, save the pointer to MMKV.
+  useEffect(() => {
+    if (!profile || !uid || !workbaseId) return;
+
+    const lm = geoState?.selectedLm || null;
+    const ward = geoState?.selectedWard || null;
+
+    const lmPcode = getGeoPcode(lm);
+    const wardPcode = getGeoPcode(ward);
+
+    if (!lmPcode || !wardPcode) return;
+
+    saveLastActiveScope({
+      uid,
+      activeWorkbaseId: workbaseId,
+      lmPcode,
+      wardPcode,
+      lm,
+      ward,
+    });
+  }, [
+    profile,
+    uid,
+    workbaseId,
+    geoState?.selectedLm?.id,
+    geoState?.selectedLm?.pcode,
+    geoState?.selectedLm?.name,
+    geoState?.selectedWard?.id,
+    geoState?.selectedWard?.pcode,
+    geoState?.selectedWard?.name,
+    geoState?.selectedWard?.code,
+  ]);
 
   /**
    * updateGeo(updates, options)

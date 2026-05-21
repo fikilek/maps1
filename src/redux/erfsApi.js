@@ -11,6 +11,8 @@ import {
 import { REHYDRATE } from "redux-persist";
 import { db } from "../firebase";
 import { fsError, fsLog } from "./firestoreLogger";
+import { authApi } from "./authApi";
+import { loadScopeDataset, saveScopeDataset } from "../storage/wardScopeStorage";
 
 const workoutSovereignErf = (id) => {
   if (!id) return { erfNo: "N/A" };
@@ -47,6 +49,105 @@ const transformToMeta = (id, erf) => {
 };
 
 const makeWardPackKey = ({ lmPcode, wardPcode }) => `${lmPcode}__${wardPcode}`;
+
+
+function emptyWardPack({ lmPcode, wardPcode }) {
+  const wardCacheKey = lmPcode && wardPcode ? makeWardPackKey({ lmPcode, wardPcode }) : null;
+
+  return {
+    metaEntries: [],
+    geoEntries: {},
+    sync: {
+      status: "idle", // idle | syncing | ready | error
+      lmPcode: lmPcode || null,
+      wardPcode: wardPcode || null,
+      wardCacheKey,
+      firstSnapshotAt: 0,
+      lastSyncAt: 0,
+      lastError: null,
+      size: 0,
+      source: "empty",
+      refreshStatus: "idle",
+    },
+  };
+}
+
+function readAuthScopeFromState(state, args = {}) {
+  const authState = authApi.endpoints.getAuthState.select()(state)?.data;
+
+  const uid =
+    args?.uid ||
+    authState?.auth?.uid ||
+    authState?.profile?.uid ||
+    authState?.profile?.id ||
+    null;
+
+  const activeWorkbaseId =
+    args?.activeWorkbaseId ||
+    authState?.profile?.access?.activeWorkbase?.id ||
+    authState?.profile?.access?.activeWorkbase?.pcode ||
+    args?.lmPcode ||
+    null;
+
+  return { uid, activeWorkbaseId };
+}
+
+function parseErfGeometry(erf) {
+  const rawGeometry = erf?.geometry ?? erf?.erf?.geometry ?? null;
+
+  if (typeof rawGeometry === "string") {
+    try {
+      return JSON.parse(rawGeometry);
+    } catch {
+      return null;
+    }
+  }
+
+  return rawGeometry || null;
+}
+
+function buildWardErfPackFromSnapshot(snap, { lmPcode, wardPcode, wardCacheKey, firstSnapshotAt }) {
+  const metaEntries = [];
+  const geoEntries = {};
+
+  snap.docs.forEach((docSnap) => {
+    const erf = docSnap.data() || {};
+    const id = erf?.erfId || erf?.erf?.erfId || docSnap.id;
+
+    metaEntries.push(transformToMeta(id, erf));
+
+    geoEntries[id] = {
+      bbox: erf?.bbox ?? erf?.erf?.bbox ?? null,
+      centroid: erf?.centroid ?? erf?.erf?.centroid ?? null,
+      geometry: parseErfGeometry(erf),
+    };
+  });
+
+  metaEntries.sort((a, b) =>
+    String(b?.metadata?.updatedAt || "").localeCompare(
+      String(a?.metadata?.updatedAt || ""),
+    ),
+  );
+
+  const now = Date.now();
+
+  return {
+    metaEntries,
+    geoEntries,
+    sync: {
+      status: "ready",
+      lmPcode,
+      wardPcode,
+      wardCacheKey,
+      firstSnapshotAt: firstSnapshotAt || now,
+      lastSyncAt: now,
+      lastError: null,
+      size: snap.size,
+      source: "firestore",
+      refreshStatus: "idle",
+    },
+  };
+}
 
 export const erfsApi = createApi({
   reducerPath: "erfsApi",
@@ -248,29 +349,61 @@ export const erfsApi = createApi({
     }),
 
     getErfsByLmPcodeWardPcode: builder.query({
-      queryFn: ({ lmPcode, wardPcode }) => ({
-        data: {
-          metaEntries: [],
-          geoEntries: {},
-          sync: {
-            status: "idle", // idle | syncing | ready | error
-            lmPcode: lmPcode || null,
-            wardPcode: wardPcode || null,
-            wardCacheKey:
-              lmPcode && wardPcode
-                ? makeWardPackKey({ lmPcode, wardPcode })
-                : null,
-            firstSnapshotAt: 0,
-            lastSyncAt: 0,
-            lastError: null,
-            size: 0,
-          },
-        },
-      }),
+      queryFn: (args = {}, { getState }) => {
+        const lmPcode = args?.lmPcode || null;
+        const wardPcode = args?.wardPcode || null;
+        const wardCacheKey =
+          lmPcode && wardPcode ? makeWardPackKey({ lmPcode, wardPcode }) : null;
+
+        const { uid, activeWorkbaseId } = readAuthScopeFromState(
+          getState(),
+          args,
+        );
+
+        if (uid && activeWorkbaseId && lmPcode && wardPcode) {
+          const cached = loadScopeDataset({
+            uid,
+            activeWorkbaseId,
+            lmPcode,
+            wardPcode,
+            dataset: "erfs",
+          });
+
+          const cachedPack = cached?.data || null;
+          const cachedPackKey = cachedPack?.sync?.wardCacheKey || cached?.wardCacheKey;
+
+          if (cachedPack && cachedPackKey === wardCacheKey) {
+            return {
+              data: {
+                metaEntries: Array.isArray(cachedPack?.metaEntries)
+                  ? cachedPack.metaEntries
+                  : [],
+                geoEntries: cachedPack?.geoEntries || {},
+                sync: {
+                  ...(cachedPack?.sync || {}),
+                  status: "ready",
+                  lmPcode,
+                  wardPcode,
+                  wardCacheKey,
+                  source: "mmkv",
+                  refreshStatus: "pending",
+                  hydratedAt: Date.now(),
+                  lastError: null,
+                  size: Number(cachedPack?.sync?.size || cachedPack?.metaEntries?.length || 0),
+                },
+              },
+            };
+          }
+        }
+
+        return {
+          data: emptyWardPack({ lmPcode, wardPcode }),
+        };
+      },
 
       async onCacheEntryAdded(
         args,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved, getState },
       ) {
         const lmPcode = args?.lmPcode;
         const wardPcode = args?.wardPcode;
@@ -281,10 +414,24 @@ export const erfsApi = createApi({
 
         await cacheDataLoaded;
 
-        // 1) immediately mark syncing
+        const { uid, activeWorkbaseId } = readAuthScopeFromState(
+          getState(),
+          args,
+        );
+
+        // 1) Mark refresh without making MMKV-hydrated data unavailable.
         updateCachedData((draft) => {
+          draft.metaEntries = draft.metaEntries || [];
+          draft.geoEntries = draft.geoEntries || {};
           draft.sync = draft.sync || {};
-          draft.sync.status = "syncing";
+
+          const hasUsableData =
+            draft.sync.status === "ready" ||
+            draft.sync.source === "mmkv" ||
+            draft.metaEntries.length > 0;
+
+          draft.sync.status = hasUsableData ? "ready" : "syncing";
+          draft.sync.refreshStatus = "refreshing";
           draft.sync.lmPcode = lmPcode;
           draft.sync.wardPcode = wardPcode;
           draft.sync.wardCacheKey = wardCacheKey;
@@ -309,53 +456,26 @@ export const erfsApi = createApi({
               if (isFirstSnapshot) {
                 isFirstSnapshot = false;
 
-                const metaEntries = [];
-                const geoEntries = {};
-
-                snap.docs.forEach((docSnap) => {
-                  const erf = docSnap.data() || {};
-                  const id = erf?.erfId || erf?.erf?.erfId || docSnap.id;
-
-                  metaEntries.push(transformToMeta(id, erf));
-
-                  let parsedGeometry = null;
-                  const rawGeometry =
-                    erf?.geometry ?? erf?.erf?.geometry ?? null;
-
-                  if (typeof rawGeometry === "string") {
-                    try {
-                      parsedGeometry = JSON.parse(rawGeometry);
-                    } catch {
-                      parsedGeometry = null;
-                    }
-                  } else {
-                    parsedGeometry = rawGeometry || null;
-                  }
-
-                  geoEntries[id] = {
-                    bbox: erf?.bbox ?? erf?.erf?.bbox ?? null,
-                    centroid: erf?.centroid ?? erf?.erf?.centroid ?? null,
-                    geometry: parsedGeometry,
-                  };
+                const nextPack = buildWardErfPackFromSnapshot(snap, {
+                  lmPcode,
+                  wardPcode,
+                  wardCacheKey,
+                  firstSnapshotAt: Date.now(),
                 });
 
-                // ✅ final sort by updatedAt desc (extra safety)
-                metaEntries.sort((a, b) =>
-                  String(b?.metadata?.updatedAt || "").localeCompare(
-                    String(a?.metadata?.updatedAt || ""),
-                  ),
-                );
+                updateCachedData(() => nextPack);
 
-                updateCachedData((draft) => {
-                  draft.metaEntries = metaEntries;
-                  draft.geoEntries = geoEntries;
-                  draft.sync.status = "ready";
-                  draft.sync.firstSnapshotAt =
-                    draft.sync.firstSnapshotAt || Date.now();
-                  draft.sync.lastSyncAt = Date.now();
-                  draft.sync.lastError = null;
-                  draft.sync.size = snap.size;
-                });
+                if (uid && activeWorkbaseId) {
+                  saveScopeDataset({
+                    uid,
+                    activeWorkbaseId,
+                    lmPcode,
+                    wardPcode,
+                    wardCacheKey,
+                    dataset: "erfs",
+                    data: nextPack,
+                  });
+                }
 
                 fsLog(scope, "first snapshot loaded", { size: snap.size });
                 return;
@@ -394,24 +514,10 @@ export const erfsApi = createApi({
                   }
 
                   // --- GEO ---
-                  let parsedGeometry = null;
-                  const rawGeometry =
-                    erf?.geometry ?? erf?.erf?.geometry ?? null;
-
-                  if (typeof rawGeometry === "string") {
-                    try {
-                      parsedGeometry = JSON.parse(rawGeometry);
-                    } catch {
-                      parsedGeometry = null;
-                    }
-                  } else {
-                    parsedGeometry = rawGeometry || null;
-                  }
-
                   draft.geoEntries[id] = {
                     bbox: erf?.bbox ?? erf?.erf?.bbox ?? null,
                     centroid: erf?.centroid ?? erf?.erf?.centroid ?? null,
-                    geometry: parsedGeometry,
+                    geometry: parseErfGeometry(erf),
                   };
                 });
 
@@ -424,10 +530,32 @@ export const erfsApi = createApi({
                 );
 
                 draft.sync.status = "ready";
+                draft.sync.source = "firestore";
+                draft.sync.refreshStatus = "idle";
                 draft.sync.lastSyncAt = Date.now();
                 draft.sync.lastError = null;
                 draft.sync.size = snap.size;
               });
+
+              if (uid && activeWorkbaseId) {
+                const nextPack = buildWardErfPackFromSnapshot(snap, {
+                  lmPcode,
+                  wardPcode,
+                  wardCacheKey,
+                  firstSnapshotAt: Date.now(),
+                });
+
+                saveScopeDataset({
+                  uid,
+                  activeWorkbaseId,
+                  lmPcode,
+                  wardPcode,
+                  wardCacheKey,
+                  dataset: "erfs",
+                  data: nextPack,
+                });
+              }
+
               fsLog(scope, "docChanges applied", {
                 changes: changes.length,
                 ward: wardPcode,
@@ -439,7 +567,8 @@ export const erfsApi = createApi({
 
               updateCachedData((draft) => {
                 draft.sync = draft.sync || {};
-                draft.sync.status = "error";
+                draft.sync.status = draft.sync.source === "mmkv" ? "ready" : "error";
+                draft.sync.refreshStatus = "error";
                 draft.sync.lastError = String(error?.message || error);
               });
             },
@@ -449,7 +578,8 @@ export const erfsApi = createApi({
 
           updateCachedData((draft) => {
             draft.sync = draft.sync || {};
-            draft.sync.status = "error";
+            draft.sync.status = draft.sync.source === "mmkv" ? "ready" : "error";
+            draft.sync.refreshStatus = "error";
             draft.sync.lastError = String(error?.message || error);
           });
         }
