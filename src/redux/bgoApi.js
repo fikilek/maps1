@@ -1,611 +1,609 @@
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { httpsCallable } from "firebase/functions";
 import {
   collection,
-  limit as limitQuery,
+  limit as firestoreLimit,
   onSnapshot,
+  orderBy,
   query,
-  where,
 } from "firebase/firestore";
-
+import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 
-const BGO_BATCHES_COLLECTION = "bgo_batches";
-// BGO row truth now lives in trns. BGO row = BGO-created MLCT TRN.
-const BGO_ROWS_COLLECTION = "trns";
+const BGO_STREAM_LIMIT = 200;
 
-function asArray(value) {
+const BGO_RELEASE_STATES = {
+  WAITING: "WAITING_BATCH_ACCEPTANCE",
+  RELEASED: "RELEASED_TO_EXECUTION",
+  REJECTED: "BATCH_REJECTED",
+};
+
+const EMPTY_BGO_BUCKET_DATA = {
+  buckets: [],
+  summary: {
+    total: 0,
+    waiting: 0,
+    released: 0,
+    rejected: 0,
+    cancelled: 0,
+  },
+  meta: {
+    source: "BGO_BUCKET_STREAM",
+    updatedAt: null,
+    streamLimit: BGO_STREAM_LIMIT,
+  },
+};
+
+function normalizeUpper(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase();
+}
+
+function cleanText(value, fallback = "NAv") {
+  const clean = String(value || "").trim();
+  return clean || fallback;
+}
+
+function readFirstString(...values) {
+  for (const value of values) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
+
+  return "";
+}
+
+function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function valueOrNav(value) {
-  if (value === null || value === undefined || value === "") return "NAv";
-  return value;
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function safeNumber(value, fallback = 0) {
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : fallback;
+function getCreatedAt(batch = {}) {
+  return batch?.metadata?.createdAt || batch?.createdAt || null;
 }
 
-function normalizeDateValue(value) {
-  if (!value) return null;
+function getUpdatedAt(batch = {}) {
+  return batch?.metadata?.updatedAt || batch?.updatedAt || getCreatedAt(batch);
+}
 
-  if (typeof value === "string") return value;
+function getAgeSeconds(value) {
+  const ms = toMillis(value);
+  if (!ms) return 0;
+  return Math.max(Math.floor((Date.now() - ms) / 1000), 0);
+}
 
-  if (typeof value?.toDate === "function") {
-    return value.toDate().toISOString();
+function normalizeTarget(target = {}) {
+  return {
+    type: normalizeUpper(target?.type),
+    id: String(target?.id || "").trim(),
+    name: cleanText(target?.name || target?.title || target?.id),
+  };
+}
+
+function getBatchTarget(batch = {}) {
+  const assignmentTargets = safeArray(batch?.assignment?.targets);
+  const firstAssignmentTarget = assignmentTargets[0] || null;
+
+  return normalizeTarget(
+    firstAssignmentTarget ||
+      batch?.target ||
+      batch?.bgo?.target ||
+      batch?.refs?.target ||
+      {},
+  );
+}
+
+function getTargetText(target = {}) {
+  if (!target?.type || !target?.id) return "NAv";
+  return `${target.type}: ${target.name || target.id}`;
+}
+
+function normalizeGeofenceRef(ref = {}) {
+  const id = String(ref?.id || ref?.geofenceId || ref?.geoFenceId || "").trim();
+  const name = String(ref?.name || ref?.label || ref?.description || id).trim();
+
+  if (!id) {
+    return {
+      id: "NAv",
+      name: "NAv",
+    };
   }
 
-  return String(value);
-}
-
-function normalizeGeofenceRef(data = {}) {
-  const geofenceRef =
-    data.geofenceRef ||
-    data.geofence ||
-    data.bgo?.geofenceRef ||
-    data.bgo?.geofence ||
-    data.refs?.geofence ||
-    null;
-
-  const id =
-    geofenceRef?.id ||
-    geofenceRef?.geofenceId ||
-    data.geofenceId ||
-    data.bgo?.geofenceId ||
-    data.refs?.geofenceId ||
-    "";
-
-  const name =
-    geofenceRef?.name ||
-    geofenceRef?.geofenceName ||
-    data.geofenceName ||
-    data.bgo?.geofenceName ||
-    data.refs?.geofenceName ||
-    id ||
-    "NAv";
-
   return {
-    id: valueOrNav(id),
-    name: valueOrNav(name),
+    id,
+    name: name || id,
   };
 }
 
-function normalizeTarget(data = {}) {
-  const target =
-    data.target ||
-    data.assignment?.target ||
-    asArray(data.assignment?.targets)[0] ||
-    data.bgo?.target ||
-    null;
+function getBatchGeofenceRef(batch = {}) {
+  const geofenceRefs = safeArray(batch?.geofenceRefs);
 
-  return {
-    type: valueOrNav(target?.type || data.targetType || data.bgo?.targetType),
-    id: valueOrNav(target?.id || data.targetId || data.bgo?.targetId),
-    name: valueOrNav(target?.name || data.targetName || data.bgo?.targetName),
-  };
-}
-
-function getWorkflowState(data = {}) {
-  return valueOrNav(
-    data.workflow?.state ||
-      data.workflowState ||
-      data.state ||
-      data.status ||
-      data.bgo?.workflowState,
+  return normalizeGeofenceRef(
+    batch?.geofenceRef ||
+      batch?.bgo?.geofenceRef ||
+      batch?.geofence ||
+      batch?.refs?.geofenceRef ||
+      geofenceRefs[0] ||
+      {},
   );
 }
 
-function getTcId(data = {}, fallbackId = "") {
-  return valueOrNav(
-    data.tcId ||
-      data.origin?.tcId ||
-      data.bgo?.tcId ||
-      data.refs?.tcId ||
-      data.refs?.tcUploadId ||
-      data.upload?.tcId ||
-      fallbackId,
+function getBatchTrnType(batch = {}) {
+  return normalizeUpper(
+    batch?.operationType ||
+      batch?.accessData?.trnType ||
+      batch?.bgo?.trnType ||
+      batch?.assignment?.instruction?.code ||
+      batch?.trnType ||
+      "",
   );
 }
 
-function getBgoBatchId(data = {}, docId = "") {
-  return valueOrNav(
-    data.bgoBatchId ||
-      data.batchId ||
-      data.bgo?.batchId ||
-      data.refs?.bgoBatchId ||
-      data.refs?.batchId ||
-      data.id ||
-      docId,
+function getBatchTrnCode(batch = {}) {
+  return normalizeUpper(
+    batch?.trnCode ||
+      batch?.operationCode ||
+      batch?.bgo?.trnCode ||
+      batch?.summary?.trnCode ||
+      "",
   );
 }
 
-function getTrnId(data = {}) {
-  return valueOrNav(
-    data.trnId ||
-      data.trn?.id ||
-      data.childTrnId ||
-      data.refs?.trnId ||
-      data.bgo?.trnId,
-  );
-}
-
-function normalizeBgoBatchDoc(docSnap) {
-  if (!docSnap || !docSnap.exists()) return null;
-
-  const data = docSnap.data() || {};
-
-  // DATA CONTRACT:
-  // Firestore bgo_batches.summary is no longer a truthful source name.
-  // Backend now writes:
-  // - batchReleaseSummary for batch acceptance/release control counts
-  // - derivedExecutionSummary for execution counts derived from child TRNs
-  // Keep a normalized UI summary alias for existing dashboard components only.
-  const releaseSummary = data.batchReleaseSummary || data.summary || {};
-  const executionSummary = data.derivedExecutionSummary || {};
-  const metadata = data.metadata || {};
-  const geofenceRef = normalizeGeofenceRef(data);
-  const target = normalizeTarget(data);
-  const bgoBatchId = getBgoBatchId(data, docSnap.id);
-
-  return {
-    id: data.id || docSnap.id,
-    bgoBatchId,
-    batchId: bgoBatchId,
-    tcId: getTcId(data),
-    trnType: valueOrNav(data.trnType || data.operationType || data.operationCode),
-    operationType: valueOrNav(data.operationType || data.trnType),
-    operationCode: valueOrNav(data.operationCode || data.trnCode),
-    geofenceRef,
-    geofenceId: geofenceRef.id,
-    geofenceName: geofenceRef.name,
-    target,
-    targetType: target.type,
-    targetId: target.id,
-    targetName: target.name,
-    workflowState: getWorkflowState(data),
-    batchReleaseSummary: {
-      ...releaseSummary,
-      totalRows: safeNumber(releaseSummary.totalRows ?? data.totalRows),
-      totalTrnsCreated: safeNumber(
-        releaseSummary.totalTrnsCreated ??
-          releaseSummary.totalChildTrns ??
-          data.totalTrnsCreated,
-      ),
-      totalWaitingBatchAcceptance: safeNumber(
-        releaseSummary.totalWaitingBatchAcceptance,
-      ),
-      totalReleased: safeNumber(releaseSummary.totalReleased),
-      totalAcceptedForExecution: safeNumber(
-        releaseSummary.totalAcceptedForExecution ?? releaseSummary.totalAccepted,
-      ),
-      totalRejectedAtBatch: safeNumber(
-        releaseSummary.totalRejectedAtBatch ?? releaseSummary.totalRejected,
-      ),
-      totalCancelledAtBatch: safeNumber(
-        releaseSummary.totalCancelledAtBatch ?? releaseSummary.totalCancelled,
-      ),
-    },
-    derivedExecutionSummary: {
-      ...executionSummary,
-      totalChildTrns: safeNumber(
-        executionSummary.totalChildTrns ??
-          releaseSummary.totalTrnsCreated ??
-          data.totalTrnsCreated,
-      ),
-      totalNotExecuted: safeNumber(executionSummary.totalNotExecuted),
-      totalAccepted: safeNumber(executionSummary.totalAccepted),
-      totalInProgress: safeNumber(executionSummary.totalInProgress),
-      totalCompleted: safeNumber(executionSummary.totalCompleted),
-      totalSuccess: safeNumber(executionSummary.totalSuccess),
-      totalNoAccess: safeNumber(executionSummary.totalNoAccess),
-      totalNoReading: safeNumber(executionSummary.totalNoReading),
-      totalRejected: safeNumber(executionSummary.totalRejected),
-      totalCancelled: safeNumber(executionSummary.totalCancelled),
-    },
-    // Normalized UI alias only. Do not treat this as a Firestore data contract.
-    summary: {
-      totalRows: safeNumber(releaseSummary.totalRows ?? data.totalRows),
-      totalTrnsCreated: safeNumber(
-        releaseSummary.totalTrnsCreated ??
-          releaseSummary.totalChildTrns ??
-          executionSummary.totalChildTrns ??
-          data.totalTrnsCreated,
-      ),
-      totalWaitingBatchAcceptance: safeNumber(
-        releaseSummary.totalWaitingBatchAcceptance,
-      ),
-      totalReleased: safeNumber(releaseSummary.totalReleased),
-      totalAcceptedForExecution: safeNumber(
-        releaseSummary.totalAcceptedForExecution ?? releaseSummary.totalAccepted,
-      ),
-      totalRejectedAtBatch: safeNumber(
-        releaseSummary.totalRejectedAtBatch ?? releaseSummary.totalRejected,
-      ),
-      totalCancelledAtBatch: safeNumber(
-        releaseSummary.totalCancelledAtBatch ?? releaseSummary.totalCancelled,
-      ),
-      totalAccepted: safeNumber(
-        executionSummary.totalAccepted ??
-          releaseSummary.totalAcceptedForExecution ??
-          releaseSummary.totalAccepted,
-      ),
-      totalInProgress: safeNumber(executionSummary.totalInProgress),
-      totalCompleted: safeNumber(executionSummary.totalCompleted),
-      totalSuccess: safeNumber(executionSummary.totalSuccess),
-      totalNoAccess: safeNumber(executionSummary.totalNoAccess),
-      totalNoReading: safeNumber(executionSummary.totalNoReading),
-      totalRejected: safeNumber(
-        executionSummary.totalRejected ?? releaseSummary.totalRejectedAtBatch,
-      ),
-      totalCancelled: safeNumber(
-        executionSummary.totalCancelled ?? releaseSummary.totalCancelledAtBatch,
-      ),
-    },
-    metadata: {
-      ...metadata,
-      createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
-      updatedAt: normalizeDateValue(metadata.updatedAt || data.updatedAt),
-    },
-    raw: data,
-  };
-}
-
-function normalizeBgoRowDoc(docSnap) {
-  if (!docSnap || !docSnap.exists()) return null;
-
-  const data = docSnap.data() || {};
-  const metadata = data.metadata || {};
-  const geofenceRef = normalizeGeofenceRef(data);
-  const target = normalizeTarget(data);
-  const bgoBatchId = getBgoBatchId(data, docSnap.id);
-  const trnId = getTrnId(data);
-
-  return {
-    id: data.id || docSnap.id,
-    bgoRowId: data.id || docSnap.id,
-    bgoBatchId,
-    batchId: bgoBatchId,
-    tcId: getTcId(data),
-    tcRowId: valueOrNav(
-      data.tcRowId || data.origin?.tcRowId || data.bgo?.tcRowId || data.refs?.tcRowId,
-    ),
-    trnId,
-    trnType: valueOrNav(data.trnType || data.operationType || data.trn?.type),
-    workflowState: getWorkflowState(data),
-    geofenceRef,
-    geofenceId: geofenceRef.id,
-    geofenceName: geofenceRef.name,
-    target,
-    targetType: target.type,
-    targetId: target.id,
-    targetName: target.name,
-    ast: data.ast || {},
-    premise: data.premise || {},
-    trn: data.trn || null,
-    executionOutcomeCode: valueOrNav(
-      data.executionOutcome?.code ||
-        data.executionOutcomeCode ||
-        data.trn?.executionOutcomeCode,
-    ),
-    completedAt: normalizeDateValue(
-      data.workflow?.completedAt || data.completedAt || data.trn?.completedAt,
-    ),
-    completedByUser: valueOrNav(
-      data.workflow?.completedByUser || data.completedByUser || data.trn?.completedByUser,
-    ),
-    metadata: {
-      ...metadata,
-      createdAt: normalizeDateValue(metadata.createdAt || data.createdAt),
-      updatedAt: normalizeDateValue(metadata.updatedAt || data.updatedAt),
-    },
-    raw: data,
-  };
-}
-
-function sortByCreatedDesc(left, right) {
-  const leftDate = String(left?.metadata?.createdAt || "");
-  const rightDate = String(right?.metadata?.createdAt || "");
-
-  if (leftDate !== rightDate) return rightDate.localeCompare(leftDate);
-
-  return String(left?.id || "").localeCompare(String(right?.id || ""));
-}
-
-function sortBgoRows(left, right) {
-  const leftRow = Number(
-    left?.raw?.bgo?.sourceRow?.rowNo ??
-      left?.raw?.rowNo ??
-      left?.raw?.tcRowNo ??
-      Number.MAX_SAFE_INTEGER,
-  );
-  const rightRow = Number(
-    right?.raw?.bgo?.sourceRow?.rowNo ??
-      right?.raw?.rowNo ??
-      right?.raw?.tcRowNo ??
-      Number.MAX_SAFE_INTEGER,
-  );
-
-  if (Number.isFinite(leftRow) && Number.isFinite(rightRow) && leftRow !== rightRow) {
-    return leftRow - rightRow;
+function getTrnTypeLabel(trnType = "") {
+  switch (normalizeUpper(trnType)) {
+    case "METER_INSPECTION":
+      return "Bulk Inspection Batch";
+    case "METER_DISCONNECTION":
+      return "Bulk Disconnection Batch";
+    case "METER_RECONNECTION":
+      return "Bulk Reconnection Batch";
+    case "METER_REMOVAL":
+      return "Bulk Removal Batch";
+    case "METER_READING":
+      return "Bulk Meter Reading Batch";
+    case "METER_DISCOVERY":
+      return "Bulk Discovery Batch";
+    case "METER_INSTALLATION":
+      return "Bulk Installation Batch";
+    default:
+      return trnType || "Bulk Geofence Batch";
   }
-
-  return String(left?.id || "").localeCompare(String(right?.id || ""));
 }
 
-function mergeUniqueDocs(snapshots, normalizer) {
-  const byId = new Map();
-
-  snapshots.forEach((snapshot) => {
-    snapshot.docs.forEach((docSnapshot) => {
-      const normalized = normalizer(docSnapshot);
-      if (!normalized?.id) return;
-      byId.set(normalized.id, normalized);
-    });
-  });
-
-  return Array.from(byId.values());
+function getBatchWorkflowState(batch = {}) {
+  return normalizeUpper(batch?.workflow?.state || batch?.workflowState);
 }
 
-function buildTcIdQueries(collectionName, tcId, maxResults) {
-  const collectionRef = collection(db, collectionName);
+function getBatchReleaseState(batch = {}) {
+  return normalizeUpper(batch?.bgo?.releaseState || batch?.releaseState);
+}
 
+function getBatchTrnIds(batch = {}) {
   return [
-    query(collectionRef, where("tcId", "==", tcId), limitQuery(maxResults)),
-    query(collectionRef, where("origin.tcId", "==", tcId), limitQuery(maxResults)),
-    query(collectionRef, where("bgo.tcId", "==", tcId), limitQuery(maxResults)),
-    query(collectionRef, where("refs.tcUploadId", "==", tcId), limitQuery(maxResults)),
+    ...new Set(
+      [
+        ...safeArray(batch?.trnIds),
+        ...safeArray(batch?.refs?.trnIds),
+        ...safeArray(batch?.bgo?.trnIds),
+        ...safeArray(batch?.childTrnIds),
+      ]
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    ),
   ];
 }
 
-function resolveLimit(arg, fallback = 500) {
-  if (typeof arg === "number") return safeNumber(arg, fallback);
-  return safeNumber(arg?.limit, fallback);
+function readNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+
+  return 0;
+}
+
+function getBatchCounts(batch = {}, trnIds = []) {
+  const summary = batch?.summary || {};
+  const counts = batch?.counts || {};
+  const bgoSummary = batch?.bgo?.summary || {};
+  const workflowState = getBatchWorkflowState(batch);
+  const releaseState = getBatchReleaseState(batch);
+
+  const total = readNumber(
+    summary?.totalTrns,
+    summary?.totalTrnsCreated,
+    summary?.trnCount,
+    summary?.rowCount,
+    summary?.totalRows,
+    counts?.totalTrns,
+    counts?.totalTrnsCreated,
+    counts?.trnCount,
+    counts?.rowCount,
+    bgoSummary?.totalTrns,
+    bgoSummary?.totalTrnsCreated,
+    bgoSummary?.trnCount,
+    bgoSummary?.rowCount,
+    batch?.totalTrns,
+    batch?.trnCount,
+    batch?.rowCount,
+    trnIds.length,
+  );
+
+  const waitingFromData = readNumber(
+    summary?.waitingCount,
+    summary?.waiting,
+    summary?.totalWaitingBatchAcceptance,
+    counts?.waitingCount,
+    counts?.waiting,
+    counts?.totalWaitingBatchAcceptance,
+    bgoSummary?.waitingCount,
+    bgoSummary?.waiting,
+    bgoSummary?.totalWaitingBatchAcceptance,
+  );
+
+  const waiting =
+    releaseState === BGO_RELEASE_STATES.WAITING
+      ? waitingFromData || total
+      : 0;
+
+  const completed = readNumber(
+    summary?.completedCount,
+    summary?.completed,
+    summary?.totalCompleted,
+    counts?.completedCount,
+    counts?.completed,
+    counts?.totalCompleted,
+    bgoSummary?.completedCount,
+    bgoSummary?.completed,
+    bgoSummary?.totalCompleted,
+  );
+
+  const inProgress = readNumber(
+    summary?.inProgressCount,
+    summary?.inProgress,
+    summary?.totalInProgress,
+    counts?.inProgressCount,
+    counts?.inProgress,
+    counts?.totalInProgress,
+    bgoSummary?.inProgressCount,
+    bgoSummary?.inProgress,
+    bgoSummary?.totalInProgress,
+  );
+
+  const rejectedFromData = readNumber(
+    summary?.rejectedCount,
+    summary?.rejected,
+    summary?.totalRejected,
+    counts?.rejectedCount,
+    counts?.rejected,
+    counts?.totalRejected,
+    bgoSummary?.rejectedCount,
+    bgoSummary?.rejected,
+    bgoSummary?.totalRejected,
+  );
+
+  const rejected =
+    workflowState === "REJECTED" || releaseState === BGO_RELEASE_STATES.REJECTED
+      ? rejectedFromData || total
+      : rejectedFromData;
+
+  const cancelled = readNumber(
+    summary?.cancelledCount,
+    summary?.cancelled,
+    summary?.totalCancelled,
+    counts?.cancelledCount,
+    counts?.cancelled,
+    counts?.totalCancelled,
+    bgoSummary?.cancelledCount,
+    bgoSummary?.cancelled,
+    bgoSummary?.totalCancelled,
+  );
+
+  const acceptedFromData = readNumber(
+    summary?.acceptedCount,
+    summary?.accepted,
+    summary?.totalAccepted,
+    summary?.totalReleased,
+    counts?.acceptedCount,
+    counts?.accepted,
+    counts?.totalAccepted,
+    counts?.totalReleased,
+    bgoSummary?.acceptedCount,
+    bgoSummary?.accepted,
+    bgoSummary?.totalAccepted,
+    bgoSummary?.totalReleased,
+  );
+
+  const accepted =
+    workflowState === "ACCEPTED" && releaseState === BGO_RELEASE_STATES.RELEASED
+      ? acceptedFromData ||
+        Math.max(total - inProgress - completed - rejected - cancelled, 0)
+      : acceptedFromData;
+
+  return {
+    total,
+    waiting,
+    accepted,
+    inProgress,
+    completed,
+    rejected,
+    cancelled,
+  };
+}
+
+function getIssuedBy(batch = {}) {
+  return {
+    uid: cleanText(batch?.metadata?.createdByUid || batch?.issuedBy?.uid, null),
+    name: cleanText(
+      batch?.metadata?.createdByUser ||
+        batch?.issuedBy?.name ||
+        batch?.assignment?.issuedByUser,
+    ),
+  };
+}
+
+function normalizeBgoBucket(batch = {}) {
+  const id = batch?.id || "NAv";
+  const trnType = getBatchTrnType(batch);
+  const trnCode = getBatchTrnCode(batch);
+  const workflowState = getBatchWorkflowState(batch);
+  const releaseState = getBatchReleaseState(batch);
+  const target = getBatchTarget(batch);
+  const geofenceRef = getBatchGeofenceRef(batch);
+  const trnIds = getBatchTrnIds(batch);
+  const counts = getBatchCounts(batch, trnIds);
+  const createdAt = getCreatedAt(batch);
+  const updatedAt = getUpdatedAt(batch);
+
+  return {
+    id,
+    bucketType: "BGOB",
+    itemKind: "BGO_BATCH",
+    title: getTrnTypeLabel(trnType),
+    subtitle: geofenceRef?.name || "Bulk Geofence Batch",
+    trnType,
+    trnCode,
+    trnTypeLabel: getTrnTypeLabel(trnType),
+
+    workflowState,
+    releaseState,
+    hiddenUntilBatchAccepted: batch?.bgo?.hiddenUntilBatchAccepted === true,
+
+    target,
+    targetText: getTargetText(target),
+    geofenceRef,
+    geofenceName: geofenceRef?.name || "NAv",
+    geofenceId: geofenceRef?.id || "NAv",
+
+    counts,
+    totalTrns: counts.total,
+    childTrnIds: trnIds,
+
+    tcId: readFirstString(batch?.tcId, batch?.bgo?.tcId, batch?.refs?.tcId),
+    tcUploadId: readFirstString(
+      batch?.tcUploadId,
+      batch?.bgo?.tcUploadId,
+      batch?.refs?.tcUploadId,
+      batch?.tcId,
+    ),
+
+    issuedBy: getIssuedBy(batch),
+    issuedAt: createdAt,
+    updatedAt,
+    ageSeconds: getAgeSeconds(createdAt),
+
+    permissions: {
+      canAccept:
+        workflowState === "ISSUED" &&
+        releaseState === BGO_RELEASE_STATES.WAITING,
+      canReject:
+        workflowState === "ISSUED" &&
+        releaseState === BGO_RELEASE_STATES.WAITING,
+      canViewTrns:
+        workflowState === "ACCEPTED" &&
+        releaseState === BGO_RELEASE_STATES.RELEASED,
+      canReverseAcceptance:
+        workflowState === "ACCEPTED" &&
+        releaseState === BGO_RELEASE_STATES.RELEASED,
+    },
+
+    raw: batch,
+  };
+}
+
+function buildBgoBucketData({ batches = [], streamLimit = BGO_STREAM_LIMIT }) {
+  const buckets = batches
+    .map(normalizeBgoBucket)
+    .sort(
+      (a, b) =>
+        toMillis(b.updatedAt || b.issuedAt) -
+        toMillis(a.updatedAt || a.issuedAt),
+    );
+
+  const summary = buckets.reduce(
+    (acc, bucket) => {
+      acc.total += 1;
+
+      if (bucket.releaseState === BGO_RELEASE_STATES.WAITING) {
+        acc.waiting += 1;
+      } else if (bucket.releaseState === BGO_RELEASE_STATES.RELEASED) {
+        acc.released += 1;
+      } else if (bucket.releaseState === BGO_RELEASE_STATES.REJECTED) {
+        acc.rejected += 1;
+      } else if (bucket.workflowState === "CANCELLED") {
+        acc.cancelled += 1;
+      }
+
+      return acc;
+    },
+    {
+      total: 0,
+      waiting: 0,
+      released: 0,
+      rejected: 0,
+      cancelled: 0,
+    },
+  );
+
+  return {
+    buckets,
+    summary,
+    meta: {
+      source: "BGO_BUCKET_STREAM",
+      updatedAt: new Date().toISOString(),
+      streamLimit,
+    },
+  };
 }
 
 export const bgoApi = createApi({
   reducerPath: "bgoApi",
   baseQuery: fakeBaseQuery(),
+  tagTypes: ["BGO"],
   endpoints: (builder) => ({
+    getBgoBuckets: builder.query({
+      queryFn() {
+        return { data: EMPTY_BGO_BUCKET_DATA };
+      },
 
-    createBgo: builder.mutation({
+      async onCacheEntryAdded(
+        args = {},
+        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
+      ) {
+        let unsubscribeBgoBatches = () => {};
+
+        try {
+          await cacheDataLoaded;
+
+          const streamLimit = Number(args?.limit || BGO_STREAM_LIMIT);
+
+          const bgoBatchQuery = query(
+            collection(db, "bgo_batches"),
+            orderBy("metadata.createdAt", "desc"),
+            firestoreLimit(streamLimit),
+          );
+
+          unsubscribeBgoBatches = onSnapshot(
+            bgoBatchQuery,
+            (snapshot) => {
+              const batches = snapshot.docs.map((docSnap) => ({
+                id: docSnap.id,
+                ...docSnap.data(),
+              }));
+
+              updateCachedData(() =>
+                buildBgoBucketData({
+                  batches,
+                  streamLimit,
+                }),
+              );
+            },
+            (error) => {
+              console.error("❌ [BGO_BUCKET_STREAM_ERROR]:", error);
+            },
+          );
+        } catch (error) {
+          console.error("❌ [BGO_BUCKET_STREAM_SETUP_ERROR]:", error);
+        }
+
+        await cacheEntryRemoved;
+        unsubscribeBgoBatches();
+      },
+      providesTags: ["BGO"],
+    }),
+
+    acceptRejectBgoBatch: builder.mutation({
       async queryFn(payload) {
         try {
-          const callable = httpsCallable(functions, "onCreateBgoCallable");
-          const result = await callable(payload || {});
+          const callable = httpsCallable(
+            functions,
+            "onAcceptRejectBgoBatchCallable",
+          );
+
+          const result = await callable(payload);
           const data = result?.data || {};
 
-          if (data?.success === false) {
+          if (!data?.success) {
             return {
               error: {
-                status: data?.code || "BGO_CREATE_FAILED",
+                code: data?.code || "ACCEPT_REJECT_BGO_BATCH_FAILED",
+                message:
+                  data?.message || "Could not accept/reject BGO batch.",
                 data,
-                message: data?.message || "Failed to create BGO",
               },
             };
           }
 
           return { data };
         } catch (error) {
+          console.log("acceptRejectBgoBatch ERROR", error);
+
           return {
             error: {
-              status: error?.code || "BGO_CREATE_ERROR",
-              data: error,
-              message: error?.message || "Failed to create BGO",
+              code: error?.code || "ACCEPT_REJECT_BGO_BATCH_ERROR",
+              message:
+                error?.message ||
+                "Unexpected error accepting/rejecting BGO batch.",
+              error,
             },
           };
         }
       },
+      invalidatesTags: ["BGO"],
     }),
 
-    deleteUnacceptedBgo: builder.mutation({
+    reverseBgoBatchAcceptance: builder.mutation({
       async queryFn(payload) {
         try {
-          const callable = httpsCallable(functions, "onDeleteUnacceptedBgoCallable");
-          const result = await callable(payload || {});
+          const callable = httpsCallable(
+            functions,
+            "onReverseBgoBatchAcceptanceCallable",
+          );
+
+          const result = await callable(payload);
           const data = result?.data || {};
 
-          if (data?.success === false) {
+          if (!data?.success) {
             return {
               error: {
-                status: data?.code || "BGO_DELETE_FAILED",
+                code: data?.code || "REVERSE_BGO_ACCEPTANCE_FAILED",
+                message:
+                  data?.message || "Could not reverse BGO batch acceptance.",
                 data,
-                message: data?.message || "Failed to delete BGO",
               },
             };
           }
 
           return { data };
         } catch (error) {
+          console.log("reverseBgoBatchAcceptance ERROR", error);
+
           return {
             error: {
-              status: error?.code || "BGO_DELETE_ERROR",
-              data: error,
-              message: error?.message || "Failed to delete BGO",
+              code: error?.code || "REVERSE_BGO_ACCEPTANCE_ERROR",
+              message:
+                error?.message ||
+                "Unexpected error reversing BGO batch acceptance.",
+              error,
             },
           };
         }
       },
-    }),
-
-    getBgoBatchesByTcId: builder.query({
-      queryFn: () => ({ data: [] }),
-      async onCacheEntryAdded(
-        arg,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-      ) {
-        const tcId = typeof arg === "string" ? arg : arg?.tcId;
-        if (!tcId) return;
-
-        const maxResults = resolveLimit(arg, 300);
-        const latestSnapshots = new globalThis.Map();
-        const unsubscribes = [];
-
-        try {
-          await cacheDataLoaded;
-
-          buildTcIdQueries(BGO_BATCHES_COLLECTION, tcId, maxResults).forEach(
-            (bgoQuery, index) => {
-              const unsubscribe = onSnapshot(
-                bgoQuery,
-                (snapshot) => {
-                  latestSnapshots.set(index, snapshot);
-
-                  const batches = mergeUniqueDocs(
-                    Array.from(latestSnapshots.values()),
-                    normalizeBgoBatchDoc,
-                  ).sort(sortByCreatedDesc);
-
-                  updateCachedData((draft) => {
-                    draft.splice(0, draft.length, ...batches);
-                  });
-                },
-                (error) => {
-                  console.error("bgoApi getBgoBatchesByTcId stream error:", error);
-                },
-              );
-
-              unsubscribes.push(unsubscribe);
-            },
-          );
-
-          await cacheEntryRemoved;
-        } finally {
-          unsubscribes.forEach((unsubscribe) => unsubscribe());
-        }
-      },
-    }),
-
-    getBgoRowsByTcId: builder.query({
-      queryFn: () => ({ data: [] }),
-      async onCacheEntryAdded(
-        arg,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-      ) {
-        const tcId = typeof arg === "string" ? arg : arg?.tcId;
-        if (!tcId) return;
-
-        const maxResults = resolveLimit(arg, 1000);
-        const latestSnapshots = new globalThis.Map();
-        const unsubscribes = [];
-
-        try {
-          await cacheDataLoaded;
-
-          buildTcIdQueries(BGO_ROWS_COLLECTION, tcId, maxResults).forEach(
-            (bgoQuery, index) => {
-              const unsubscribe = onSnapshot(
-                bgoQuery,
-                (snapshot) => {
-                  latestSnapshots.set(index, snapshot);
-
-                  const rows = mergeUniqueDocs(
-                    Array.from(latestSnapshots.values()),
-                    normalizeBgoRowDoc,
-                  ).sort(sortBgoRows);
-
-                  updateCachedData((draft) => {
-                    draft.splice(0, draft.length, ...rows);
-                  });
-                },
-                (error) => {
-                  console.error("bgoApi getBgoRowsByTcId stream error:", error);
-                },
-              );
-
-              unsubscribes.push(unsubscribe);
-            },
-          );
-
-          await cacheEntryRemoved;
-        } finally {
-          unsubscribes.forEach((unsubscribe) => unsubscribe());
-        }
-      },
-    }),
-
-    getBgoRowsByBatchId: builder.query({
-      queryFn: () => ({ data: [] }),
-      async onCacheEntryAdded(
-        arg,
-        { updateCachedData, cacheDataLoaded, cacheEntryRemoved },
-      ) {
-        const bgoBatchId = typeof arg === "string" ? arg : arg?.bgoBatchId;
-        if (!bgoBatchId) return;
-
-        const maxResults = resolveLimit(arg, 1000);
-        const latestSnapshots = new globalThis.Map();
-        const unsubscribes = [];
-
-        try {
-          await cacheDataLoaded;
-
-          const rowsCollection = collection(db, BGO_ROWS_COLLECTION);
-          const queries = [
-            query(
-              rowsCollection,
-              where("bgo.batchId", "==", bgoBatchId),
-              limitQuery(maxResults),
-            ),
-            query(
-              rowsCollection,
-              where("bgo.bgoBatchId", "==", bgoBatchId),
-              limitQuery(maxResults),
-            ),
-            query(
-              rowsCollection,
-              where("refs.bgoBatchId", "==", bgoBatchId),
-              limitQuery(maxResults),
-            ),
-            query(
-              rowsCollection,
-              where("refs.batchId", "==", bgoBatchId),
-              limitQuery(maxResults),
-            ),
-            query(
-              rowsCollection,
-              where("bucket.batchId", "==", bgoBatchId),
-              limitQuery(maxResults),
-            ),
-          ];
-
-          queries.forEach((bgoQuery, index) => {
-            const unsubscribe = onSnapshot(
-              bgoQuery,
-              (snapshot) => {
-                latestSnapshots.set(index, snapshot);
-
-                const rows = mergeUniqueDocs(
-                  Array.from(latestSnapshots.values()),
-                  normalizeBgoRowDoc,
-                ).sort(sortBgoRows);
-
-                updateCachedData((draft) => {
-                  draft.splice(0, draft.length, ...rows);
-                });
-              },
-              (error) => {
-                console.error("bgoApi getBgoRowsByBatchId stream error:", error);
-              },
-            );
-
-            unsubscribes.push(unsubscribe);
-          });
-
-          await cacheEntryRemoved;
-        } finally {
-          unsubscribes.forEach((unsubscribe) => unsubscribe());
-        }
-      },
+      invalidatesTags: ["BGO"],
     }),
   }),
 });
 
 export const {
-  useCreateBgoMutation,
-  useDeleteUnacceptedBgoMutation,
-  useGetBgoBatchesByTcIdQuery,
-  useGetBgoRowsByTcIdQuery,
-  useGetBgoRowsByBatchIdQuery,
+  useGetBgoBucketsQuery,
+  useAcceptRejectBgoBatchMutation,
+  useReverseBgoBatchAcceptanceMutation,
 } = bgoApi;
