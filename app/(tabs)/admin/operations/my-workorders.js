@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Stack, useRouter } from "expo-router";
 import { Formik } from "formik";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -22,6 +22,12 @@ import {
   useAcceptRejectLifecycleInstructionMutation,
   useGetWmsLifecycleWorkItemsQuery,
 } from "../../../../src/redux/lifecycleInstructionApi";
+import {
+  useAcceptRejectBgoBatchMutation,
+  useGetBgoBucketsQuery,
+  useReverseBgoBatchAcceptanceMutation,
+} from "../../../../src/redux/bgoApi";
+import { useGetTeamsQuery } from "../../../../src/redux/teamsApi";
 import { removeSubmissionQueueItemsByInstructionTrnId } from "../../../../src/utils/submissionQueue";
 
 const WMS_GROUPS = [
@@ -63,7 +69,9 @@ const STATE_FILTERS = [
   { key: "REASSIGNED", label: "Reassigned" },
   { key: "ACCEPTED", label: "Accepted" },
   { key: "IN_PROGRESS", label: "In Progress" },
+  { key: "COMPLETED", label: "Completed" },
   { key: "REJECTED", label: "Rejected" },
+  { key: "CANCELLED", label: "Cancelled" },
 ];
 
 const EXECUTION_ROUTES = {
@@ -120,6 +128,8 @@ function emptyCounts() {
     accepted: 0,
     rejected: 0,
     inProgress: 0,
+    completed: 0,
+    cancelled: 0,
     total: 0,
   };
 }
@@ -133,6 +143,8 @@ function countItems(items = []) {
     if (item.workflowState === "ACCEPTED") acc.accepted += 1;
     if (item.workflowState === "REJECTED") acc.rejected += 1;
     if (item.workflowState === "IN_PROGRESS") acc.inProgress += 1;
+    if (item.workflowState === "COMPLETED") acc.completed += 1;
+    if (item.workflowState === "CANCELLED") acc.cancelled += 1;
 
     return acc;
   }, emptyCounts());
@@ -149,10 +161,12 @@ function getStateBadgeStyle(state) {
     case "REASSIGNED":
       return styles.badgeBlue;
     case "ACCEPTED":
+    case "COMPLETED":
       return styles.badgeGreen;
     case "IN_PROGRESS":
       return styles.badgeOrange;
     case "REJECTED":
+    case "CANCELLED":
       return styles.badgeRed;
     default:
       return styles.badgeMuted;
@@ -165,10 +179,12 @@ function getStateBadgeTextStyle(state) {
     case "REASSIGNED":
       return styles.badgeBlueText;
     case "ACCEPTED":
+    case "COMPLETED":
       return styles.badgeGreenText;
     case "IN_PROGRESS":
       return styles.badgeOrangeText;
     case "REJECTED":
+    case "CANCELLED":
       return styles.badgeRedText;
     default:
       return styles.badgeMutedText;
@@ -188,6 +204,205 @@ function isPhotoMedia(media = {}) {
   );
 }
 
+function getBgoBatchIdFromItem(item = {}) {
+  return (
+    item?.raw?.bgo?.batchId ||
+    item?.raw?.bucket?.batchId ||
+    item?.bgo?.batchId ||
+    item?.bucket?.batchId ||
+    item?.batchId ||
+    ""
+  );
+}
+
+function isBgoChildItem(item = {}) {
+  return Boolean(getBgoBatchIdFromItem(item));
+}
+
+function cleanId(value) {
+  return String(value || "").trim();
+}
+
+function addCleanId(set, value) {
+  const id = cleanId(value);
+  if (id) set.add(id);
+}
+
+function getTeamMemberIds(team = {}) {
+  const ids = new Set();
+
+  if (Array.isArray(team?.memberUids)) {
+    team.memberUids.forEach((uid) => addCleanId(ids, uid));
+  }
+
+  if (Array.isArray(team?.memberIds)) {
+    team.memberIds.forEach((uid) => addCleanId(ids, uid));
+  }
+
+  if (Array.isArray(team?.userIds)) {
+    team.userIds.forEach((uid) => addCleanId(ids, uid));
+  }
+
+  if (Array.isArray(team?.scope?.memberUserIds)) {
+    team.scope.memberUserIds.forEach((uid) => addCleanId(ids, uid));
+  }
+
+  if (Array.isArray(team?.members)) {
+    team.members.forEach((member) => {
+      if (typeof member === "string") {
+        addCleanId(ids, member);
+        return;
+      }
+
+      addCleanId(ids, member?.uid);
+      addCleanId(ids, member?.id);
+      addCleanId(ids, member?.userId);
+    });
+  }
+
+  if (Array.isArray(team?.users)) {
+    team.users.forEach((member) => {
+      if (typeof member === "string") {
+        addCleanId(ids, member);
+        return;
+      }
+
+      addCleanId(ids, member?.uid);
+      addCleanId(ids, member?.id);
+      addCleanId(ids, member?.userId);
+    });
+  }
+
+  return [...ids];
+}
+
+function getActorTeamIds({ teams = [], actorUid }) {
+  const uid = cleanId(actorUid);
+
+  if (!uid) return [];
+
+  return teams
+    .filter((team) => getTeamMemberIds(team).includes(uid))
+    .map((team) => cleanId(team?.id || team?.teamId))
+    .filter(Boolean);
+}
+
+function getBgoBucketTarget(bucket = {}) {
+  const assignmentTargets = Array.isArray(bucket?.raw?.assignment?.targets)
+    ? bucket.raw.assignment.targets
+    : [];
+
+  const target =
+    bucket?.target ||
+    assignmentTargets[0] ||
+    bucket?.raw?.target ||
+    bucket?.raw?.bgo?.target ||
+    {};
+
+  return {
+    type: normalizeUpper(target?.type || bucket?.raw?.bgo?.targetType),
+    id: cleanId(target?.id || bucket?.raw?.bgo?.targetId),
+    name: cleanId(target?.name || bucket?.raw?.bgo?.targetName),
+  };
+}
+
+function canActorSeeBgoBucket({ bucket, actorUid, actorSpId, actorTeamIds }) {
+  const target = getBgoBucketTarget(bucket);
+
+  if (target.type === "USER") {
+    return target.id === cleanId(actorUid);
+  }
+
+  if (target.type === "SP") {
+    return target.id === cleanId(actorSpId);
+  }
+
+  if (target.type === "TEAM") {
+    return actorTeamIds.includes(target.id);
+  }
+
+  return false;
+}
+
+function getBgoBucketStatusText(bucket = {}) {
+  const workflowState = normalizeUpper(bucket?.workflowState);
+  const releaseState = normalizeUpper(bucket?.releaseState);
+
+  if (workflowState === "REJECTED" || releaseState === "BATCH_REJECTED") {
+    return "Rejected";
+  }
+
+  if (workflowState === "CANCELLED") {
+    return "Cancelled";
+  }
+
+  if (workflowState === "ACCEPTED" && releaseState === "RELEASED_TO_EXECUTION") {
+    return "Accepted";
+  }
+
+  if (releaseState === "WAITING_BATCH_ACCEPTANCE") {
+    return "Waiting Acceptance";
+  }
+
+  return workflowState || releaseState || "NAv";
+}
+
+function isExecutableWorkflowState(state) {
+  return ["ACCEPTED", "IN_PROGRESS"].includes(normalizeUpper(state));
+}
+
+function isManagerRole(role) {
+  const cleanRole = normalizeUpper(role);
+  return ["SPU", "ADM", "MNG", "SPV"].includes(cleanRole);
+}
+
+function readFirstString(...values) {
+  for (const value of values) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
+
+  return "";
+}
+
+function getServiceProviderRelationshipType(profile = {}) {
+  return normalizeUpper(
+    readFirstString(
+      profile?.employment?.serviceProvider?.relationshipType,
+      profile?.employment?.serviceProvider?.clientRelationshipType,
+      profile?.employment?.relationshipType,
+      profile?.serviceProvider?.relationshipType,
+      profile?.serviceProvider?.clientRelationshipType,
+    ),
+  );
+}
+
+function isFieldWorkorderActor({ actorRole, profile }) {
+  const cleanRole = normalizeUpper(actorRole);
+
+  if (cleanRole === "FWR") return true;
+
+  if (cleanRole !== "SPV") return false;
+
+  const relationshipType = getServiceProviderRelationshipType(profile);
+
+  // If the app profile knows this SPV is MNC-side, block this field screen.
+  // Some current user profiles only carry role + serviceProvider id, so unknown
+  // relationship remains allowed and the backend still performs final authority.
+  if (relationshipType === "MNC") return false;
+
+  return true;
+}
+
+function getActionErrorMessage(error = {}, fallback = "Action failed.") {
+  return (
+    error?.data?.message ||
+    error?.message ||
+    error?.error?.message ||
+    fallback
+  );
+}
+
 export default function WorkorderManagementSystem() {
   const router = useRouter();
   const { user, profile } = useAuth();
@@ -198,36 +413,119 @@ export default function WorkorderManagementSystem() {
   const actorName =
     profile?.profile?.displayName || user?.email || actorUid || "NAv";
 
+  const fieldWorkorderActor = isFieldWorkorderActor({ actorRole, profile });
+
+  useEffect(() => {
+    if (!actorUid || fieldWorkorderActor) return;
+
+    Alert.alert(
+      "WMS Access Blocked",
+      "My Workorders is only available to FWR and SPV(SUBC) users.",
+      [
+        {
+          text: "OK",
+          onPress: () => {
+            if (router?.canGoBack?.()) {
+              router.back();
+            }
+          },
+        },
+      ],
+    );
+  }, [actorUid, actorRole, fieldWorkorderActor, router]);
+
   const {
     data: wmsData,
     isLoading,
     isFetching,
     error,
     refetch,
-  } = useGetWmsLifecycleWorkItemsQuery({
-    actorUid,
-    actorRole,
-    actorSpId,
-    actorName,
-    limit: 500,
+  } = useGetWmsLifecycleWorkItemsQuery(
+    {
+      actorUid,
+      actorRole,
+      actorSpId,
+      actorName,
+      limit: 500,
+    },
+    { skip: !fieldWorkorderActor },
+  );
+
+  const {
+    data: bgoData,
+    isLoading: isLoadingBgo,
+    error: bgoError,
+    refetch: refetchBgo,
+  } = useGetBgoBucketsQuery(
+    {
+      actorUid,
+      actorRole,
+      actorSpId,
+      actorName,
+      limit: 200,
+    },
+    { skip: !fieldWorkorderActor },
+  );
+
+  const { data: teamsData = [] } = useGetTeamsQuery(undefined, {
+    skip: !fieldWorkorderActor,
   });
 
   const [acceptRejectLifecycleInstruction, { isLoading: deciding }] =
     useAcceptRejectLifecycleInstructionMutation();
 
+  const [acceptRejectBgoBatch, { isLoading: decidingBgo }] =
+    useAcceptRejectBgoBatchMutation();
+
+  const [reverseBgoBatchAcceptance, { isLoading: reversingBgo }] =
+    useReverseBgoBatchAcceptanceMutation();
+
+  const actionBusy = deciding || decidingBgo || reversingBgo;
+
+  // My Workorders is now a field execution screen only.
+  // Manager reversal must move to a manager control surface later.
+  const managerActor = false;
+
+  const [selectedBucket, setSelectedBucket] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [stateFilter, setStateFilter] = useState("ALL");
   const [rejectItem, setRejectItem] = useState(null);
 
-  const directItems = useMemo(() => {
-    const items = Array.isArray(wmsData?.items) ? wmsData.items : [];
-
-    return items.filter((item) => item.scopeBucket === "MY_WORK");
+  const allItems = useMemo(() => {
+    return Array.isArray(wmsData?.items) ? wmsData.items : [];
   }, [wmsData?.items]);
+
+  const individualItems = useMemo(() => {
+    return allItems.filter(
+      (item) => item.scopeBucket === "MY_WORK" && !isBgoChildItem(item),
+    );
+  }, [allItems]);
+
+  const actorTeamIds = useMemo(() => {
+    return getActorTeamIds({
+      teams: Array.isArray(teamsData) ? teamsData : [],
+      actorUid,
+    });
+  }, [teamsData, actorUid]);
+
+  const bgoBuckets = useMemo(() => {
+    const allBgoBuckets = Array.isArray(bgoData?.buckets)
+      ? bgoData.buckets
+      : [];
+
+    return allBgoBuckets.filter((bucket) =>
+      canActorSeeBgoBucket({
+        bucket,
+        actorUid,
+        actorSpId,
+        actorTeamIds,
+      }),
+    );
+  }, [bgoData?.buckets, actorUid, actorSpId, actorTeamIds]);
 
   const groups = useMemo(() => {
     return WMS_GROUPS.map((group) => {
-      const groupItems = directItems.filter(
+      const groupItems = individualItems.filter(
         (item) => item.trnType === group.key,
       );
       const counts = countItems(groupItems);
@@ -238,33 +536,112 @@ export default function WorkorderManagementSystem() {
         counts,
       };
     });
-  }, [directItems]);
+  }, [individualItems]);
+
+  const individualBucket = useMemo(() => {
+    const counts = countItems(individualItems);
+
+    return {
+      id: "INDVG",
+      bucketType: "INDVG",
+      itemKind: "INDIVIDUAL_BUCKET",
+      title: "Individual Work Bucket",
+      subtitle: "Individually issued lifecycle TRNs",
+      trnTypeLabel: "Individual Work",
+      workflowState: "ACTIVE",
+      releaseState: "NAv",
+      targetText: "Direct user work",
+      geofenceName: "NAv",
+      counts,
+      totalTrns: individualItems.length,
+      permissions: {
+        canViewTrns: true,
+        canAccept: false,
+        canReject: false,
+        canReverseAcceptance: false,
+      },
+    };
+  }, [individualItems]);
+
+  const bucketCards = useMemo(() => {
+    return [individualBucket, ...bgoBuckets];
+  }, [individualBucket, bgoBuckets]);
 
   const visibleItems = useMemo(() => {
-    if (!selectedGroup?.key) return [];
+    let baseItems = [];
 
-    return directItems.filter((item) => {
-      if (item.trnType !== selectedGroup.key) return false;
-      if (stateFilter !== "ALL" && item.workflowState !== stateFilter) {
-        return false;
+    if (selectedBucket?.bucketType === "BGOB") {
+      baseItems = allItems.filter(
+        (item) => getBgoBatchIdFromItem(item) === selectedBucket.id,
+      );
+    } else if (selectedBucket?.bucketType === "INDVG" && selectedGroup?.key) {
+      baseItems = individualItems.filter(
+        (item) => item.trnType === selectedGroup.key,
+      );
+    }
+
+    if (stateFilter === "ALL") return baseItems;
+
+    return baseItems.filter((item) => item.workflowState === stateFilter);
+  }, [allItems, individualItems, selectedBucket, selectedGroup, stateFilter]);
+
+  const allVisibleBucketItems = useMemo(() => {
+    if (selectedBucket?.bucketType === "BGOB") {
+      return allItems.filter(
+        (item) => getBgoBatchIdFromItem(item) === selectedBucket.id,
+      );
+    }
+
+    if (selectedBucket?.bucketType === "INDVG" && selectedGroup?.key) {
+      return individualItems.filter(
+        (item) => item.trnType === selectedGroup.key,
+      );
+    }
+
+    return [];
+  }, [allItems, individualItems, selectedBucket, selectedGroup]);
+
+  function openBucket(bucket) {
+    if (bucket?.bucketType === "INDVG") {
+      setSelectedBucket(bucket);
+      setSelectedGroup(null);
+      setStateFilter("ALL");
+      return;
+    }
+
+    if (bucket?.bucketType === "BGOB") {
+      if (!bucket?.permissions?.canViewTrns) {
+        Alert.alert(
+          "BGO Bucket Locked",
+          "This BGO bucket must be accepted before its TRNs can be viewed for execution.",
+        );
+        return;
       }
 
-      return true;
-    });
-  }, [directItems, selectedGroup?.key, stateFilter]);
+      setSelectedBucket(bucket);
+      setSelectedGroup(null);
+      setStateFilter("ALL");
+    }
+  }
 
   function openGroup(group) {
     setSelectedGroup(group);
     setStateFilter("ALL");
   }
 
-  function backToGroups() {
+  function backToBuckets() {
+    setSelectedBucket(null);
+    setSelectedGroup(null);
+    setStateFilter("ALL");
+  }
+
+  function backToIndividualGroups() {
     setSelectedGroup(null);
     setStateFilter("ALL");
   }
 
   async function submitDecision({ item, action, rejectReason = "" }) {
-    if (!item?.id || deciding) return false;
+    if (!item?.id || actionBusy) return false;
 
     try {
       const result = await acceptRejectLifecycleInstruction({
@@ -294,6 +671,47 @@ export default function WorkorderManagementSystem() {
     }
   }
 
+  async function submitBgoDecision({ bucket, action, rejectReason = "" }) {
+    if (!bucket?.id || actionBusy) return false;
+
+    try {
+      const result = await acceptRejectBgoBatch({
+        batchId: bucket.id,
+        action,
+        rejectReason: String(rejectReason || "").trim(),
+      }).unwrap();
+
+      if (result?.success === false) {
+        throw {
+          data: result,
+          message: result?.message || "BGO action failed.",
+        };
+      }
+
+      Alert.alert(
+        action === "ACCEPT" ? "BGO Bucket Accepted" : "BGO Bucket Rejected",
+        result?.message ||
+          (action === "ACCEPT"
+            ? "BGO bucket accepted and child TRNs released to execution."
+            : "BGO bucket rejected."),
+      );
+
+      refetchBgo?.();
+      refetch?.();
+
+      return true;
+    } catch (err) {
+      console.log("BGO bucket decision ERROR", err);
+
+      Alert.alert(
+        "BGO Action Failed",
+        getActionErrorMessage(err, "Could not update BGO bucket."),
+      );
+
+      return false;
+    }
+  }
+
   function handleAccept(item) {
     Alert.alert("Accept Work", `Accept ${item?.id || "this work item"}?`, [
       { text: "CANCEL", style: "cancel" },
@@ -304,7 +722,101 @@ export default function WorkorderManagementSystem() {
     ]);
   }
 
+  function handleAcceptBgoBucket(bucket) {
+    if (!fieldWorkorderActor) {
+      Alert.alert(
+        "WMS Access Blocked",
+        "Only FWR and SPV(SUBC) users may accept BGO buckets from My Workorders.",
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Accept BGO Bucket",
+      `Accept ${bucket?.title || "this BGO bucket"}? All child TRNs will become executable.`,
+      [
+        { text: "CANCEL", style: "cancel" },
+        {
+          text: "ACCEPT",
+          onPress: () =>
+            submitBgoDecision({ bucket, action: "ACCEPT" }),
+        },
+      ],
+    );
+  }
+
+  function handleReverseBgoBucket(bucket) {
+    Alert.alert(
+      "Reverse BGO Acceptance",
+      "This is online-only and will only work if no child TRN has started execution. Reverse this BGO bucket acceptance?",
+      [
+        { text: "CANCEL", style: "cancel" },
+        {
+          text: "REVERSE",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const result = await reverseBgoBatchAcceptance({
+                batchId: bucket.id,
+                reason: "Manager reversed BGO acceptance before execution started",
+              }).unwrap();
+
+              if (result?.success === false) {
+                throw {
+                  data: result,
+                  message: result?.message || "Reverse acceptance failed.",
+                };
+              }
+
+              Alert.alert(
+                "BGO Acceptance Reversed",
+                result?.message || "BGO bucket acceptance was reversed.",
+              );
+
+              refetchBgo?.();
+              refetch?.();
+              backToBuckets();
+            } catch (err) {
+              console.log("BGO reverse acceptance ERROR", err);
+
+              Alert.alert(
+                "Reverse Failed",
+                getActionErrorMessage(err, "Could not reverse BGO acceptance."),
+              );
+            }
+          },
+        },
+      ],
+    );
+  }
+
   async function handleReject(values, helpers) {
+    if (rejectItem?.itemKind === "BGO_BATCH") {
+      if (!fieldWorkorderActor) {
+        Alert.alert(
+          "WMS Access Blocked",
+          "Only FWR and SPV(SUBC) users may reject BGO buckets from My Workorders.",
+        );
+        helpers.setSubmitting(false);
+        return;
+      }
+
+      const success = await submitBgoDecision({
+        bucket: rejectItem,
+        action: "REJECT",
+        rejectReason: values.rejectReason,
+      });
+
+      helpers.setSubmitting(false);
+
+      if (success) {
+        helpers.resetForm();
+        setRejectItem(null);
+      }
+
+      return;
+    }
+
     const rejectedInstructionTrnId = rejectItem?.id || "NAv";
 
     const success = await submitDecision({
@@ -349,6 +861,14 @@ export default function WorkorderManagementSystem() {
   }
 
   function handleExecute(item) {
+    if (!isExecutableWorkflowState(item?.workflowState)) {
+      Alert.alert(
+        "TRN Not Executable",
+        "Only ACCEPTED or IN_PROGRESS work items can be opened for execution.",
+      );
+      return;
+    }
+
     const pathname = EXECUTION_ROUTES[item?.trnType];
 
     if (!pathname) {
@@ -442,6 +962,34 @@ export default function WorkorderManagementSystem() {
     });
   }
 
+  const showIndividualGroups =
+    selectedBucket?.bucketType === "INDVG" && !selectedGroup;
+
+  const showTrnDetail =
+    selectedBucket?.bucketType === "BGOB" ||
+    (selectedBucket?.bucketType === "INDVG" && selectedGroup);
+
+  const detailTitle =
+    selectedBucket?.bucketType === "BGOB"
+      ? selectedBucket?.title || "BGO Bucket TRNs"
+      : selectedGroup?.title || "My Allocated Work";
+
+  const detailBackLabel =
+    selectedBucket?.bucketType === "BGOB" ? "Buckets" : "Types";
+
+  if (!fieldWorkorderActor) {
+    return (
+      <AccessDeniedWorkorders
+        actorRole={actorRole}
+        onBack={() => {
+          if (router?.canGoBack?.()) {
+            router.back();
+          }
+        }}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={["left", "right"]}>
       <Stack.Screen
@@ -466,50 +1014,55 @@ export default function WorkorderManagementSystem() {
         </View>
 
         <View style={styles.headerCountBadge}>
-          <Text style={styles.headerCountText}>{directItems.length}</Text>
+          <Text style={styles.headerCountText}>{bucketCards.length}</Text>
         </View>
-
-        {/* <Pressable
-          style={styles.refreshBtn}
-          onPress={refetch}
-          disabled={isFetching}
-        >
-          {isFetching ? (
-            <ActivityIndicator size="small" color="#0f172a" />
-          ) : (
-            <MaterialCommunityIcons name="refresh" size={21} color="#0f172a" />
-          )}
-        </Pressable> */}
       </View>
 
-      {selectedGroup ? (
-        <GroupDetail
-          title={selectedGroup.title}
-          stateFilter={stateFilter}
-          setStateFilter={setStateFilter}
-          allGroupItems={directItems.filter(
-            (item) => item.trnType === selectedGroup.key,
-          )}
-          items={visibleItems}
-          deciding={deciding}
-          onBack={backToGroups}
-          onAccept={handleAccept}
-          onReject={setRejectItem}
-          onExecute={handleExecute}
+      {!selectedBucket ? (
+        <BucketLanding
+          isLoading={isLoading || isLoadingBgo}
+          error={error || bgoError}
+          buckets={bucketCards}
+          deciding={actionBusy}
+          managerActor={managerActor}
+          fieldWorkorderActor={fieldWorkorderActor}
+          onOpenBucket={openBucket}
+          onAcceptBgoBucket={handleAcceptBgoBucket}
+          onRejectBgoBucket={setRejectItem}
+          onReverseBgoBucket={handleReverseBgoBucket}
         />
-      ) : (
+      ) : showIndividualGroups ? (
         <GroupLanding
           isLoading={isLoading}
           error={error}
           groups={groups}
           onOpenGroup={openGroup}
+          onBack={backToBuckets}
         />
-      )}
+      ) : showTrnDetail ? (
+        <GroupDetail
+          title={detailTitle}
+          backLabel={detailBackLabel}
+          stateFilter={stateFilter}
+          setStateFilter={setStateFilter}
+          allGroupItems={allVisibleBucketItems}
+          items={visibleItems}
+          deciding={actionBusy}
+          onBack={
+            selectedBucket?.bucketType === "BGOB"
+              ? backToBuckets
+              : backToIndividualGroups
+          }
+          onAccept={handleAccept}
+          onReject={setRejectItem}
+          onExecute={handleExecute}
+        />
+      ) : null}
 
       <RejectModal
         visible={Boolean(rejectItem)}
         item={rejectItem}
-        busy={deciding}
+        busy={actionBusy}
         onClose={() => setRejectItem(null)}
         onSubmit={handleReject}
       />
@@ -517,7 +1070,269 @@ export default function WorkorderManagementSystem() {
   );
 }
 
-function GroupLanding({ isLoading, error, groups, onOpenGroup }) {
+function AccessDeniedWorkorders({ actorRole, onBack }) {
+  return (
+    <SafeAreaView style={styles.container} edges={["left", "right"]}>
+      <Stack.Screen
+        options={{
+          title: "Workorder Management System",
+          headerTitleStyle: { fontSize: 15, fontWeight: "900" },
+        }}
+      />
+
+      <View style={styles.stateWrap}>
+        <MaterialCommunityIcons
+          name="lock-alert-outline"
+          size={42}
+          color="#dc2626"
+        />
+
+        <Text style={styles.stateTitle}>My Workorders is field-only</Text>
+        <Text style={styles.stateText}>
+          This screen is only available to FWR and SPV(SUBC) users. Current role: {actorRole || "NAv"}.
+        </Text>
+
+        <Pressable style={styles.accessBackButton} onPress={onBack}>
+          <Text style={styles.accessBackButtonText}>GO BACK</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function BucketLanding({
+  isLoading,
+  error,
+  buckets,
+  deciding,
+  managerActor,
+  fieldWorkorderActor,
+  onOpenBucket,
+  onAcceptBgoBucket,
+  onRejectBgoBucket,
+  onReverseBgoBucket,
+}) {
+  if (isLoading) {
+    return (
+      <View style={styles.stateWrap}>
+        <ActivityIndicator size="small" color="#2563eb" />
+        <Text style={styles.stateText}>Loading your work buckets...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.stateWrap}>
+        <MaterialCommunityIcons
+          name="alert-circle-outline"
+          size={36}
+          color="#dc2626"
+        />
+        <Text style={styles.stateTitle}>Could not load WMS buckets</Text>
+        <Text style={styles.stateText}>
+          {error?.message || "Bucket stream failed."}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.scrollContent}
+    >
+      <Text style={styles.sectionEyebrow}>Assigned Work Queue</Text>
+      <Text style={styles.sectionTitle}>My Work Buckets</Text>
+
+      <View style={styles.bucketList}>
+        {buckets.map((bucket) => (
+          <BucketCard
+            key={bucket.id}
+            bucket={bucket}
+            deciding={deciding}
+            managerActor={managerActor}
+            fieldWorkorderActor={fieldWorkorderActor}
+            onOpenBucket={onOpenBucket}
+            onAcceptBgoBucket={onAcceptBgoBucket}
+            onRejectBgoBucket={onRejectBgoBucket}
+            onReverseBgoBucket={onReverseBgoBucket}
+          />
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+function BucketCard({
+  bucket,
+  deciding,
+  managerActor,
+  fieldWorkorderActor,
+  onOpenBucket,
+  onAcceptBgoBucket,
+  onRejectBgoBucket,
+  onReverseBgoBucket,
+}) {
+  const isIndividual = bucket?.bucketType === "INDVG";
+  const isBgo = bucket?.bucketType === "BGOB";
+  const counts = bucket?.counts || {};
+  const statusText = isIndividual ? "Open" : getBgoBucketStatusText(bucket);
+  const canView = bucket?.permissions?.canViewTrns === true;
+  const canAccept = isBgo && bucket?.permissions?.canAccept === true;
+  const canReject = isBgo && bucket?.permissions?.canReject === true;
+  const acceptRejectDisabled = deciding || !fieldWorkorderActor;
+  const canReverse =
+    isBgo &&
+    managerActor &&
+    bucket?.permissions?.canReverseAcceptance === true &&
+    Number(counts?.inProgress || 0) === 0 &&
+    Number(counts?.completed || 0) === 0;
+
+  return (
+    <View style={styles.bucketCard}>
+      <View style={styles.groupTopRow}>
+        <View style={styles.groupIcon}>
+          <MaterialCommunityIcons
+            name={isIndividual ? "account-hard-hat-outline" : "map-marker-radius-outline"}
+            size={23}
+            color="#2563eb"
+          />
+        </View>
+
+        <View style={styles.bucketStatusBadge}>
+          <Text style={styles.bucketStatusText}>{statusText}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.groupTitle}>{bucket.title}</Text>
+      <Text style={styles.groupSub}>{bucket.subtitle || bucket.geofenceName}</Text>
+
+      <View style={styles.bucketMetaGrid}>
+        <InfoLine
+          icon="counter"
+          label="Total TRNs"
+          value={bucket.totalTrns || counts.total || 0}
+        />
+
+        <InfoLine
+          icon="account-hard-hat-outline"
+          label="Target"
+          value={bucket.targetText || "NAv"}
+        />
+
+        {isBgo ? (
+          <>
+            <InfoLine
+              icon="map-marker-outline"
+              label="Geofence"
+              value={bucket.geofenceName || "NAv"}
+            />
+
+            <InfoLine
+              icon="clipboard-text-outline"
+              label="TRN Type"
+              value={bucket.trnTypeLabel || bucket.trnType || "NAv"}
+            />
+
+            <InfoLine
+              icon="account-tie-outline"
+              label="Issued By"
+              value={bucket.issuedBy?.name || "NAv"}
+            />
+
+            <InfoLine
+              icon="clock-outline"
+              label="Age"
+              value={formatAge(bucket.ageSeconds)}
+            />
+          </>
+        ) : null}
+      </View>
+
+      <View style={styles.groupCounts}>
+        <MiniCount
+          label={isBgo ? "Waiting" : "Issued"}
+          value={isBgo ? counts.waiting || 0 : counts.issued || 0}
+        />
+        <MiniCount label="Accepted" value={counts.accepted || 0} />
+        <MiniCount label="Progress" value={counts.inProgress || 0} />
+        <MiniCount label="Completed" value={counts.completed || 0} />
+      </View>
+
+      <View style={styles.actionsRow}>
+        {canAccept ? (
+          <Pressable
+            style={[
+              styles.actionBtn,
+              styles.acceptBtn,
+              acceptRejectDisabled && styles.actionDisabled,
+            ]}
+            onPress={() => onAcceptBgoBucket(bucket)}
+            disabled={acceptRejectDisabled}
+          >
+            <Text style={styles.acceptBtnText}>ACCEPT</Text>
+          </Pressable>
+        ) : null}
+
+        {canReject ? (
+          <Pressable
+            style={[
+              styles.actionBtn,
+              styles.rejectBtn,
+              acceptRejectDisabled && styles.actionDisabled,
+            ]}
+            onPress={() => onRejectBgoBucket(bucket)}
+            disabled={acceptRejectDisabled}
+          >
+            <Text style={styles.rejectBtnText}>REJECT</Text>
+          </Pressable>
+        ) : null}
+
+        {canView ? (
+          <Pressable
+            style={[styles.actionBtn, styles.executeBtn]}
+            onPress={() => onOpenBucket(bucket)}
+            disabled={deciding}
+          >
+            <Text style={styles.executeBtnText}>VIEW TRNS</Text>
+          </Pressable>
+        ) : null}
+
+        {canReverse ? (
+          <Pressable
+            style={[
+              styles.actionBtn,
+              styles.rejectWorkBtn,
+              deciding && styles.actionDisabled,
+            ]}
+            onPress={() => onReverseBgoBucket(bucket)}
+            disabled={deciding}
+          >
+            <Text style={styles.rejectWorkBtnText}>REVERSE</Text>
+          </Pressable>
+        ) : null}
+
+        {!canAccept && !canReject && !canView && !canReverse ? (
+          <View style={styles.noActionBox}>
+            <MaterialCommunityIcons
+              name="lock-check-outline"
+              size={15}
+              color="#64748b"
+            />
+            <Text style={styles.noActionText}>
+              {isBgo
+                ? "Bucket not open for execution."
+                : "No TRNs in this bucket yet."}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function GroupLanding({ isLoading, error, groups, onOpenGroup, onBack }) {
   if (isLoading) {
     return (
       <View style={styles.stateWrap}>
@@ -548,8 +1363,17 @@ function GroupLanding({ isLoading, error, groups, onOpenGroup }) {
       style={styles.scroll}
       contentContainerStyle={styles.scrollContent}
     >
-      <Text style={styles.sectionEyebrow}>Assigned Work Queue</Text>
-      <Text style={styles.sectionTitle}>My Allocated Workgroups</Text>
+      <Pressable style={styles.backPill} onPress={onBack}>
+        <MaterialCommunityIcons
+          name="chevron-left"
+          size={20}
+          color="#0f172a"
+        />
+        <Text style={styles.backPillText}>Buckets</Text>
+      </Pressable>
+
+      <Text style={[styles.sectionEyebrow, { marginTop: 10 }]}>Individual Work</Text>
+      <Text style={styles.sectionTitle}>Select TRN Type</Text>
 
       <View style={styles.groupGrid}>
         {groups.map((group) => (
@@ -585,8 +1409,8 @@ function GroupLanding({ isLoading, error, groups, onOpenGroup }) {
                 value={group?.counts?.inProgress || 0}
               />
               <MiniCount
-                label="Rejected"
-                value={group?.counts?.rejected || 0}
+                label="Completed"
+                value={group?.counts?.completed || 0}
               />
             </View>
           </Pressable>
@@ -598,6 +1422,7 @@ function GroupLanding({ isLoading, error, groups, onOpenGroup }) {
 
 function GroupDetail({
   title,
+  backLabel = "Groups",
   stateFilter,
   setStateFilter,
   allGroupItems,
@@ -617,7 +1442,7 @@ function GroupDetail({
             size={20}
             color="#0f172a"
           />
-          <Text style={styles.backPillText}>Groups</Text>
+          <Text style={styles.backPillText}>{backLabel}</Text>
         </Pressable>
 
         <View style={styles.detailTitleWrap}>
@@ -747,8 +1572,13 @@ function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
   const instructionMedia = getInstructionMedia(item);
   const hasInstructionMedia = instructionMedia.length > 0;
   const isAcceptedWorkItem = normalizeUpper(item?.workflowState) === "ACCEPTED";
+  const isBgoWorkItem = isBgoChildItem(item);
+
+  const canShowAccept = !isBgoWorkItem && item?.permissions?.canAccept === true;
+  const canShowReject = !isBgoWorkItem && item?.permissions?.canReject === true;
 
   const canRejectAcceptedWork =
+    !isBgoWorkItem &&
     item?.permissions?.canExecute === true &&
     isAcceptedWorkItem &&
     item?.permissions?.canReject !== true;
@@ -892,7 +1722,7 @@ function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
       ) : null}
 
       <View style={styles.actionsRow}>
-        {item.permissions?.canAccept ? (
+        {canShowAccept ? (
           <Pressable
             style={[
               styles.actionBtn,
@@ -906,7 +1736,7 @@ function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
           </Pressable>
         ) : null}
 
-        {item.permissions?.canReject ? (
+        {canShowReject ? (
           <Pressable
             style={[
               styles.actionBtn,
@@ -944,8 +1774,8 @@ function WorkItemCard({ item, deciding, onAccept, onReject, onExecute }) {
           </Pressable>
         ) : null}
 
-        {!item.permissions?.canAccept &&
-        !item.permissions?.canReject &&
+        {!canShowAccept &&
+        !canShowReject &&
         !item.permissions?.canExecute ? (
           <View style={styles.noActionBox}>
             <MaterialCommunityIcons
@@ -1137,14 +1967,23 @@ function MiniCount({ label, value }) {
 }
 
 function RejectModal({ visible, item, busy, onClose, onSubmit }) {
+  const isBgoBucket = item?.itemKind === "BGO_BATCH";
   const isAcceptedWorkItem = normalizeUpper(item?.workflowState) === "ACCEPTED";
-  const title = isAcceptedWorkItem
-    ? "Reject Accepted Work"
-    : "Reject Work Item";
-  const placeholder = isAcceptedWorkItem
-    ? "Explain why this accepted work item cannot be executed"
-    : "Explain why this work item cannot be accepted";
-  const submitText = isAcceptedWorkItem ? "REJECT WORK" : "SUBMIT REJECTION";
+  const title = isBgoBucket
+    ? "Reject BGO Bucket"
+    : isAcceptedWorkItem
+      ? "Reject Accepted Work"
+      : "Reject Work Item";
+  const placeholder = isBgoBucket
+    ? "Explain why this BGO bucket cannot be accepted"
+    : isAcceptedWorkItem
+      ? "Explain why this accepted work item cannot be executed"
+      : "Explain why this work item cannot be accepted";
+  const submitText = isBgoBucket
+    ? "REJECT BUCKET"
+    : isAcceptedWorkItem
+      ? "REJECT WORK"
+      : "SUBMIT REJECTION";
 
   return (
     <Modal
@@ -1251,6 +2090,35 @@ function RejectModal({ visible, item, busy, onClose, onSubmit }) {
 }
 
 const styles = StyleSheet.create({
+  bucketList: {
+    gap: 10,
+  },
+  bucketCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 12,
+  },
+  bucketStatusBadge: {
+    borderRadius: 999,
+    backgroundColor: "#eff6ff",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  bucketStatusText: {
+    color: "#1d4ed8",
+    fontSize: 9,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  bucketMetaGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 9,
+    marginBottom: 10,
+  },
   container: {
     flex: 1,
     backgroundColor: "#f8fafc",
@@ -2034,5 +2902,21 @@ const styles = StyleSheet.create({
 
   instructionMediaThumbTextActive: {
     color: "#ffffff",
+  },
+
+  accessBackButton: {
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: "#0f172a",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    marginTop: 8,
+  },
+
+  accessBackButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900",
   },
 });
