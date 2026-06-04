@@ -5,6 +5,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
@@ -168,6 +169,16 @@ function getTrnType(trn = {}) {
 
 function getWorkflowState(trn = {}) {
   return normalizeUpper(trn?.workflow?.state || trn?.workflowState);
+}
+
+function getBgoBatchIdFromTrn(trn = {}) {
+  return readFirstString(
+    trn?.bgo?.batchId,
+    trn?.bucket?.batchId,
+    trn?.refs?.bgoBatchId,
+    trn?.bgoBatchId,
+    trn?.batchId,
+  );
 }
 
 function getCreatedAt(trn = {}) {
@@ -700,8 +711,18 @@ function normalizeWmsWorkItem({
   };
 }
 
-function buildWmsData({ trns = [], teams = [], serviceProviders = [], actor }) {
+function buildWmsData({
+  trns = [],
+  teams = [],
+  serviceProviders = [],
+  actor,
+  mode = "INDIVIDUAL",
+  bgoBatchId = null,
+}) {
   if (!actor?.uid) return EMPTY_WMS_DATA;
+
+  const cleanMode = normalizeUpper(mode || "INDIVIDUAL");
+  const selectedBgoBatchId = readFirstString(bgoBatchId);
 
   const teamMap = new Map();
   teams.forEach((team) => {
@@ -717,6 +738,15 @@ function buildWmsData({ trns = [], teams = [], serviceProviders = [], actor }) {
   const items = trns
     .filter((trn) => WMS_LCT_TYPES.includes(getTrnType(trn)))
     .filter((trn) => WMS_WORKFLOW_STATES.includes(getWorkflowState(trn)))
+    .filter((trn) => {
+      const trnBgoBatchId = getBgoBatchIdFromTrn(trn);
+
+      if (cleanMode === "BGO_BUCKET") {
+        return Boolean(selectedBgoBatchId) && trnBgoBatchId === selectedBgoBatchId;
+      }
+
+      return !trnBgoBatchId;
+    })
     .map((trn) => {
       const managerCanSee =
         isManager && isInManagementScope({ trn, allowedSpIds });
@@ -783,6 +813,8 @@ function buildWmsData({ trns = [], teams = [], serviceProviders = [], actor }) {
       allowedSpIds,
       updatedAt: new Date().toISOString(),
       streamLimit: WMS_DEMO_STREAM_LIMIT,
+      mode: cleanMode,
+      bgoBatchId: selectedBgoBatchId || null,
     },
   };
 }
@@ -818,6 +850,8 @@ export const lifecycleInstructionApi = createApi({
               teams: latestTeams,
               serviceProviders: latestServiceProviders,
               actor,
+              mode: args?.mode || "INDIVIDUAL",
+              bgoBatchId: args?.bgoBatchId || args?.batchId || null,
             }),
           );
         };
@@ -825,11 +859,25 @@ export const lifecycleInstructionApi = createApi({
         try {
           await cacheDataLoaded;
 
-          const trnsQuery = query(
-            collection(db, "trns"),
-            orderBy("metadata.createdAt", "desc"),
-            firestoreLimit(Number(args?.limit || WMS_DEMO_STREAM_LIMIT)),
+          const streamLimit = Number(args?.limit || WMS_DEMO_STREAM_LIMIT);
+          const cleanMode = normalizeUpper(args?.mode || "INDIVIDUAL");
+          const selectedBgoBatchId = readFirstString(
+            args?.bgoBatchId,
+            args?.batchId,
           );
+
+          const trnsQuery =
+            cleanMode === "BGO_BUCKET" && selectedBgoBatchId
+              ? query(
+                  collection(db, "trns"),
+                  where("bgo.batchId", "==", selectedBgoBatchId),
+                  firestoreLimit(streamLimit),
+                )
+              : query(
+                  collection(db, "trns"),
+                  orderBy("metadata.createdAt", "desc"),
+                  firestoreLimit(streamLimit),
+                );
 
           unsubscribeTrns = onSnapshot(
             trnsQuery,

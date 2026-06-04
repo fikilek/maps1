@@ -186,6 +186,32 @@ function getBatchReleaseState(batch = {}) {
   return normalizeUpper(batch?.bgo?.releaseState || batch?.releaseState);
 }
 
+function isBmdBgoBatch(batch = {}) {
+  const batchMode = normalizeUpper(batch?.bgo?.batchMode);
+  const operationType = normalizeUpper(batch?.operationType);
+  const sourceModule = normalizeUpper(batch?.origin?.sourceModule);
+  const createsChildTrnsUpfront = batch?.bgo?.createsChildTrnsUpfront;
+
+  return (
+    batchMode === "BMD" ||
+    sourceModule === "BULK_METER_DISCOVERY" ||
+    (operationType === "METER_DISCOVERY" && createsChildTrnsUpfront === false)
+  );
+}
+
+function getBmdWorklistCount(batch = {}) {
+  const worklistCount = Array.isArray(batch?.worklist?.erfRefs)
+    ? batch.worklist.erfRefs.length
+    : 0;
+
+  return readNumber(
+    batch?.summary?.erfCount,
+    batch?.summary?.totalRows,
+    batch?.batchReleaseSummary?.totalRows,
+    worklistCount,
+  );
+}
+
 function getBatchTrnIds(batch = {}) {
   return [
     ...new Set(
@@ -201,34 +227,118 @@ function getBatchTrnIds(batch = {}) {
   ];
 }
 
-function readNumber(...values) {
+function readOptionalNumber(...values) {
   for (const value of values) {
     const number = Number(value);
     if (Number.isFinite(number)) return number;
   }
 
-  return 0;
+  return null;
+}
+
+function readNumber(...values) {
+  const number = readOptionalNumber(...values);
+  return number === null ? 0 : number;
+}
+
+function hasDerivedExecutionSummary(summary = {}) {
+  return [
+    "totalChildTrns",
+    "totalTrns",
+    "totalIssued",
+    "totalAccepted",
+    "totalInProgress",
+    "totalCompleted",
+    "totalCancelled",
+    "totalRejected",
+    "totalNotExecuted",
+    "totalSuccess",
+    "totalNoAccess",
+    "totalNoReading",
+    "totalUnsuccessful",
+  ].some((key) => readOptionalNumber(summary?.[key]) !== null);
 }
 
 function getBatchCounts(batch = {}, trnIds = []) {
+  const derivedExecutionSummary = batch?.derivedExecutionSummary || {};
+  const batchReleaseSummary = batch?.batchReleaseSummary || {};
   const summary = batch?.summary || {};
   const counts = batch?.counts || {};
   const bgoSummary = batch?.bgo?.summary || {};
   const workflowState = getBatchWorkflowState(batch);
   const releaseState = getBatchReleaseState(batch);
+  const hasDerivedSummary = hasDerivedExecutionSummary(derivedExecutionSummary);
+  const isBmdBatch = isBmdBgoBatch(batch);
 
-  const total = readNumber(
+  if (isBmdBatch) {
+    const totalErfs = getBmdWorklistCount(batch);
+    const totalPremises = readNumber(batch?.summary?.premiseCount);
+    const totalMeters = readNumber(batch?.summary?.meterCount);
+    const discoveryTrns = readNumber(
+      derivedExecutionSummary?.totalChildTrns,
+      batch?.summary?.totalChildTrns,
+      batch?.summary?.totalTrnsCreated,
+      batchReleaseSummary?.totalTrnsCreated,
+      trnIds.length,
+    );
+    const completed = readNumber(derivedExecutionSummary?.totalCompleted);
+    const success = readNumber(derivedExecutionSummary?.totalSuccess);
+    const noAccess = readNumber(derivedExecutionSummary?.totalNoAccess);
+    const noReading = readNumber(derivedExecutionSummary?.totalNoReading);
+    const rejected =
+      workflowState === "REJECTED" || releaseState === BGO_RELEASE_STATES.REJECTED
+        ? totalErfs
+        : readNumber(derivedExecutionSummary?.totalRejected);
+    const cancelled =
+      workflowState === "CANCELLED"
+        ? totalErfs
+        : readNumber(derivedExecutionSummary?.totalCancelled);
+    const waiting = releaseState === BGO_RELEASE_STATES.WAITING ? totalErfs : 0;
+    const accepted =
+      workflowState === "ACCEPTED" && releaseState === BGO_RELEASE_STATES.RELEASED
+        ? totalErfs
+        : 0;
+
+    return {
+      total: totalErfs,
+      waiting,
+      accepted,
+      inProgress: readNumber(derivedExecutionSummary?.totalInProgress),
+      completed,
+      executed: completed,
+      rejected,
+      cancelled,
+      notExecuted: Math.max(totalErfs - completed - rejected - cancelled, 0),
+      success,
+      noAccess,
+      noReading,
+      unsuccessful: noAccess + noReading,
+      erfs: totalErfs,
+      premises: totalPremises,
+      meters: totalMeters,
+      discoveryTrns,
+      summarySource: "bmdBatchSummary",
+    };
+  }
+
+  const fallbackTotal = readNumber(
+    batchReleaseSummary?.totalTrnsCreated,
+    batchReleaseSummary?.totalChildTrns,
+    batchReleaseSummary?.totalRows,
     summary?.totalTrns,
     summary?.totalTrnsCreated,
+    summary?.totalChildTrns,
     summary?.trnCount,
     summary?.rowCount,
     summary?.totalRows,
+    counts?.total,
     counts?.totalTrns,
     counts?.totalTrnsCreated,
     counts?.trnCount,
     counts?.rowCount,
     bgoSummary?.totalTrns,
     bgoSummary?.totalTrnsCreated,
+    bgoSummary?.totalChildTrns,
     bgoSummary?.trnCount,
     bgoSummary?.rowCount,
     batch?.totalTrns,
@@ -237,96 +347,197 @@ function getBatchCounts(batch = {}, trnIds = []) {
     trnIds.length,
   );
 
-  const waitingFromData = readNumber(
-    summary?.waitingCount,
-    summary?.waiting,
-    summary?.totalWaitingBatchAcceptance,
-    counts?.waitingCount,
-    counts?.waiting,
-    counts?.totalWaitingBatchAcceptance,
-    bgoSummary?.waitingCount,
-    bgoSummary?.waiting,
-    bgoSummary?.totalWaitingBatchAcceptance,
-  );
+  // IMPORTANT:
+  // BGOB landing cards must be summary-first. If the backend has stamped
+  // derivedExecutionSummary, execution stats come from that object only.
+  // Release/current-design fields remain fallback only for old or just-created
+  // batches where derivedExecutionSummary has not been stamped yet.
+  const total = hasDerivedSummary
+    ? readNumber(
+        derivedExecutionSummary?.totalChildTrns,
+        derivedExecutionSummary?.totalTrns,
+        fallbackTotal,
+      )
+    : fallbackTotal;
 
-  const waiting =
-    releaseState === BGO_RELEASE_STATES.WAITING
-      ? waitingFromData || total
-      : 0;
+  const completed = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalCompleted)
+    : readNumber(
+        counts?.executed,
+        counts?.completedCount,
+        counts?.completed,
+        counts?.totalCompleted,
+        summary?.completedCount,
+        summary?.completed,
+        summary?.totalCompleted,
+        bgoSummary?.completedCount,
+        bgoSummary?.completed,
+        bgoSummary?.totalCompleted,
+      );
 
-  const completed = readNumber(
-    summary?.completedCount,
-    summary?.completed,
-    summary?.totalCompleted,
-    counts?.completedCount,
-    counts?.completed,
-    counts?.totalCompleted,
-    bgoSummary?.completedCount,
-    bgoSummary?.completed,
-    bgoSummary?.totalCompleted,
-  );
+  const inProgress = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalInProgress)
+    : readNumber(
+        counts?.inProgressCount,
+        counts?.inProgress,
+        counts?.totalInProgress,
+        summary?.inProgressCount,
+        summary?.inProgress,
+        summary?.totalInProgress,
+        bgoSummary?.inProgressCount,
+        bgoSummary?.inProgress,
+        bgoSummary?.totalInProgress,
+      );
 
-  const inProgress = readNumber(
-    summary?.inProgressCount,
-    summary?.inProgress,
-    summary?.totalInProgress,
-    counts?.inProgressCount,
-    counts?.inProgress,
-    counts?.totalInProgress,
-    bgoSummary?.inProgressCount,
-    bgoSummary?.inProgress,
-    bgoSummary?.totalInProgress,
-  );
-
-  const rejectedFromData = readNumber(
-    summary?.rejectedCount,
-    summary?.rejected,
-    summary?.totalRejected,
-    counts?.rejectedCount,
-    counts?.rejected,
-    counts?.totalRejected,
-    bgoSummary?.rejectedCount,
-    bgoSummary?.rejected,
-    bgoSummary?.totalRejected,
-  );
+  const rejectedFromData = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalRejected)
+    : readNumber(
+        counts?.rejectedCount,
+        counts?.rejected,
+        counts?.totalRejected,
+        summary?.rejectedCount,
+        summary?.rejected,
+        summary?.totalRejected,
+        batchReleaseSummary?.totalRejectedAtBatch,
+        bgoSummary?.rejectedCount,
+        bgoSummary?.rejected,
+        bgoSummary?.totalRejected,
+      );
 
   const rejected =
     workflowState === "REJECTED" || releaseState === BGO_RELEASE_STATES.REJECTED
       ? rejectedFromData || total
       : rejectedFromData;
 
-  const cancelled = readNumber(
-    summary?.cancelledCount,
-    summary?.cancelled,
-    summary?.totalCancelled,
-    counts?.cancelledCount,
-    counts?.cancelled,
-    counts?.totalCancelled,
-    bgoSummary?.cancelledCount,
-    bgoSummary?.cancelled,
-    bgoSummary?.totalCancelled,
-  );
+  const cancelled = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalCancelled)
+    : readNumber(
+        counts?.cancelledCount,
+        counts?.cancelled,
+        counts?.totalCancelled,
+        summary?.cancelledCount,
+        summary?.cancelled,
+        summary?.totalCancelled,
+        batchReleaseSummary?.totalCancelledAtBatch,
+        bgoSummary?.cancelledCount,
+        bgoSummary?.cancelled,
+        bgoSummary?.totalCancelled,
+      );
 
-  const acceptedFromData = readNumber(
-    summary?.acceptedCount,
-    summary?.accepted,
-    summary?.totalAccepted,
-    summary?.totalReleased,
-    counts?.acceptedCount,
-    counts?.accepted,
-    counts?.totalAccepted,
-    counts?.totalReleased,
-    bgoSummary?.acceptedCount,
-    bgoSummary?.accepted,
-    bgoSummary?.totalAccepted,
-    bgoSummary?.totalReleased,
-  );
+  const waitingFromData = hasDerivedSummary
+    ? readNumber(
+        derivedExecutionSummary?.totalWaitingBatchAcceptance,
+        derivedExecutionSummary?.totalWaiting,
+        derivedExecutionSummary?.totalIssued,
+      )
+    : readNumber(
+        batchReleaseSummary?.totalWaitingBatchAcceptance,
+        summary?.waitingCount,
+        summary?.waiting,
+        summary?.totalWaitingBatchAcceptance,
+        counts?.waitingCount,
+        counts?.waiting,
+        counts?.totalWaitingBatchAcceptance,
+        bgoSummary?.waitingCount,
+        bgoSummary?.waiting,
+        bgoSummary?.totalWaitingBatchAcceptance,
+      );
+
+  const waiting =
+    releaseState === BGO_RELEASE_STATES.WAITING
+      ? waitingFromData || total
+      : 0;
+
+  const acceptedFromData = hasDerivedSummary
+    ? readOptionalNumber(derivedExecutionSummary?.totalAccepted)
+    : readOptionalNumber(
+        counts?.acceptedCount,
+        counts?.accepted,
+        counts?.totalAccepted,
+        summary?.acceptedCount,
+        summary?.accepted,
+        summary?.totalAccepted,
+        batchReleaseSummary?.totalAcceptedForExecution,
+        batchReleaseSummary?.totalReleased,
+        summary?.totalReleased,
+        counts?.totalReleased,
+        bgoSummary?.acceptedCount,
+        bgoSummary?.accepted,
+        bgoSummary?.totalAccepted,
+        bgoSummary?.totalReleased,
+      );
 
   const accepted =
-    workflowState === "ACCEPTED" && releaseState === BGO_RELEASE_STATES.RELEASED
-      ? acceptedFromData ||
-        Math.max(total - inProgress - completed - rejected - cancelled, 0)
-      : acceptedFromData;
+    acceptedFromData !== null
+      ? acceptedFromData
+      : workflowState === "ACCEPTED" && releaseState === BGO_RELEASE_STATES.RELEASED
+        ? Math.max(total - inProgress - completed - rejected - cancelled, 0)
+        : 0;
+
+  const success = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalSuccess)
+    : readNumber(
+        counts?.success,
+        counts?.successful,
+        counts?.totalSuccess,
+        summary?.success,
+        summary?.successful,
+        summary?.totalSuccess,
+        bgoSummary?.success,
+        bgoSummary?.successful,
+        bgoSummary?.totalSuccess,
+      );
+
+  const noAccess = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalNoAccess)
+    : readNumber(
+        counts?.noAccess,
+        counts?.totalNoAccess,
+        summary?.noAccess,
+        summary?.totalNoAccess,
+        bgoSummary?.noAccess,
+        bgoSummary?.totalNoAccess,
+      );
+
+  const noReading = hasDerivedSummary
+    ? readNumber(derivedExecutionSummary?.totalNoReading)
+    : readNumber(
+        counts?.noReading,
+        counts?.totalNoReading,
+        summary?.noReading,
+        summary?.totalNoReading,
+        bgoSummary?.noReading,
+        bgoSummary?.totalNoReading,
+      );
+
+  const notExecuted = hasDerivedSummary
+    ? readNumber(
+        derivedExecutionSummary?.totalNotExecuted,
+        accepted + inProgress + waiting,
+        Math.max(total - completed - rejected - cancelled, 0),
+      )
+    : readNumber(
+        counts?.notExecuted,
+        counts?.totalNotExecuted,
+        summary?.notExecuted,
+        summary?.totalNotExecuted,
+        accepted + inProgress + waiting,
+      );
+
+  const unsuccessful = hasDerivedSummary
+    ? readNumber(
+        derivedExecutionSummary?.totalUnsuccessful,
+        noAccess + noReading,
+        Math.max(completed - success, 0),
+      )
+    : readNumber(
+        counts?.unsuccessful,
+        counts?.totalUnsuccessful,
+        summary?.unsuccessful,
+        summary?.totalUnsuccessful,
+        noAccess + noReading,
+        Math.max(completed - success, 0),
+      );
 
   return {
     total,
@@ -334,8 +545,15 @@ function getBatchCounts(batch = {}, trnIds = []) {
     accepted,
     inProgress,
     completed,
+    executed: completed,
     rejected,
     cancelled,
+    notExecuted,
+    success,
+    noAccess,
+    noReading,
+    unsuccessful,
+    summarySource: hasDerivedSummary ? "derivedExecutionSummary" : "batchFallback",
   };
 }
 
@@ -362,13 +580,16 @@ function normalizeBgoBucket(batch = {}) {
   const counts = getBatchCounts(batch, trnIds);
   const createdAt = getCreatedAt(batch);
   const updatedAt = getUpdatedAt(batch);
+  const isBmdBgo = isBmdBgoBatch(batch);
 
   return {
     id,
     bucketType: "BGOB",
     itemKind: "BGO_BATCH",
-    title: getTrnTypeLabel(trnType),
-    subtitle: geofenceRef?.name || "Bulk Geofence Batch",
+    title: isBmdBgo ? "Bulk Meter Discovery" : getTrnTypeLabel(trnType),
+    subtitle: isBmdBgo
+      ? `${geofenceRef?.name || "MD-BGO"} • ${counts.erfs || 0} ERFs`
+      : geofenceRef?.name || "Bulk Geofence Batch",
     trnType,
     trnCode,
     trnTypeLabel: getTrnTypeLabel(trnType),
@@ -376,6 +597,9 @@ function normalizeBgoBucket(batch = {}) {
     workflowState,
     releaseState,
     hiddenUntilBatchAccepted: batch?.bgo?.hiddenUntilBatchAccepted === true,
+    isBmdBgo,
+    batchMode: isBmdBgo ? "BMD" : normalizeUpper(batch?.bgo?.batchMode),
+    workUnitLabel: isBmdBgo ? "ERFs" : "TRNs",
 
     target,
     targetText: getTargetText(target),
@@ -408,9 +632,11 @@ function normalizeBgoBucket(batch = {}) {
         workflowState === "ISSUED" &&
         releaseState === BGO_RELEASE_STATES.WAITING,
       canViewTrns:
+        !isBmdBgo &&
         workflowState === "ACCEPTED" &&
         releaseState === BGO_RELEASE_STATES.RELEASED,
       canReverseAcceptance:
+        !isBmdBgo &&
         workflowState === "ACCEPTED" &&
         releaseState === BGO_RELEASE_STATES.RELEASED,
     },
