@@ -575,35 +575,35 @@ export default function FormPremise() {
   }
 
   const handleSubmit = async (values, { setSubmitting }) => {
-    console.log(` `);
-    console.log(` `);
-    console.log(` `);
-    const submitStartedAtMs = Date.now();
+    // console.log(` `);
+    // console.log(` `);
+    // console.log(` `);
+    // const submitStartedAtMs = Date.now();
 
-    const logSubmitTime = (label) => {
-      const elapsedSeconds = ((Date.now() - submitStartedAtMs) / 1000).toFixed(
-        2,
-      );
-      console.log(
-        `⏱️ FormPremise submit timing -- ${label}: ${elapsedSeconds}s`,
-      );
-    };
+    // const logSubmitTime = (label) => {
+    //   const elapsedSeconds = ((Date.now() - submitStartedAtMs) / 1000).toFixed(
+    //     2,
+    //   );
+    //   console.log(
+    //     `⏱️ FormPremise submit timing -- ${label}: ${elapsedSeconds}s`,
+    //   );
+    // };
 
     setInProgress(true);
-    logSubmitTime("START");
+    // logSubmitTime("START");
 
     console.log(`FormPremise handleSubmit --values`, values);
 
     try {
       const systemFields = buildSystemFields();
       const premiseDocId = systemFields.id;
-      logSubmitTime("system fields built");
+      // logSubmitTime("system fields built");
 
       const netState = await NetInfo.fetch();
       const isOnline = Boolean(
         netState?.isConnected && netState?.isInternetReachable,
       );
-      logSubmitTime(`network checked -- isOnline=${isOnline}`);
+      // logSubmitTime(`network checked -- isOnline=${isOnline}`);
 
       /* ------------------------------------------------
      1. BUILD BASE PAYLOAD FIRST
@@ -647,7 +647,7 @@ export default function FormPremise() {
           (key, value) => (value === undefined ? null : value),
         ),
       );
-      logSubmitTime("base payload built");
+      // logSubmitTime("base payload built");
 
       /* ------------------------------------------------
      2. OFFLINE -> SAVE / UPDATE QUEUE
@@ -678,7 +678,7 @@ export default function FormPremise() {
           });
         }
 
-        logSubmitTime("saved offline queue");
+        // logSubmitTime("saved offline queue");
 
         ToastAndroid.show(
           "No network. Premise saved to offline storage.",
@@ -686,7 +686,7 @@ export default function FormPremise() {
         );
 
         router.replace("/(tabs)/admin/storage/premise-offline-storage");
-        logSubmitTime("OFFLINE END");
+        // logSubmitTime("OFFLINE END");
         return;
       }
 
@@ -736,31 +736,29 @@ export default function FormPremise() {
         }),
       );
 
-      const uploadElapsedSeconds = (
-        (Date.now() - uploadStartedAtMs) /
-        1000
-      ).toFixed(2);
+      // const uploadElapsedSeconds = (
+      //   (Date.now() - uploadStartedAtMs) /
+      //   1000
+      // ).toFixed(2);
 
-      console.log(
-        `⏱️ FormPremise all media uploads took ${uploadElapsedSeconds}s`,
-      );
+      // console.log(
+      //   `⏱️ FormPremise all media uploads took ${uploadElapsedSeconds}s`,
+      // );
 
-      console.log(`FormPremise handleSubmit --syncedMedia`, syncedMedia);
-      logSubmitTime("media synced");
+      // logSubmitTime("media synced");
 
       const finalValues = {
         ...basePayload,
         media: syncedMedia,
       };
 
-      console.log(`FormPremise handleSubmit --finalValues`, finalValues);
-      logSubmitTime("final payload built");
+      // logSubmitTime("final payload built");
 
       /* ------------------------------------------------
       4. ONLINE SUBMIT WITH 20 SECOND TIMEOUT
       ------------------------------------------------ */
       let result = null;
-      console.log(`FormPremise handleSubmit --isEdit`, isEdit);
+      // console.log(`FormPremise handleSubmit --isEdit`, isEdit);
 
       try {
         const firestoreSubmitStartedAtMs = Date.now();
@@ -777,18 +775,18 @@ export default function FormPremise() {
           );
         }
 
-        const firestoreSubmitElapsedSeconds = (
-          (Date.now() - firestoreSubmitStartedAtMs) /
-          1000
-        ).toFixed(2);
+        // const firestoreSubmitElapsedSeconds = (
+        //   (Date.now() - firestoreSubmitStartedAtMs) /
+        //   1000
+        // ).toFixed(2);
 
-        console.log(
-          `⏱️ FormPremise Firestore submit took ${firestoreSubmitElapsedSeconds}s`,
-        );
+        // console.log(
+        //   `⏱️ FormPremise Firestore submit took ${firestoreSubmitElapsedSeconds}s`,
+        // );
 
-        logSubmitTime("firestore submit complete");
+        // logSubmitTime("firestore submit complete");
       } catch (error) {
-        logSubmitTime("firestore submit failed");
+        // logSubmitTime("firestore submit failed");
         console.log(`FormPremise handleSubmit --error`, error);
 
         if (error?.message === "SUBMISSION_TIMEOUT") {
@@ -816,7 +814,7 @@ export default function FormPremise() {
             });
           }
 
-          logSubmitTime("timeout fallback saved offline queue");
+          // logSubmitTime("timeout fallback saved offline queue");
 
           ToastAndroid.show(
             "Premise submission is taking too long. Saved locally.",
@@ -824,7 +822,7 @@ export default function FormPremise() {
           );
 
           router.replace("/(tabs)/admin/storage/premise-offline-storage");
-          logSubmitTime("TIMEOUT END");
+          // logSubmitTime("TIMEOUT END");
           return;
         }
 
@@ -832,7 +830,7 @@ export default function FormPremise() {
       }
 
       if (!isEdit && !result?.success) {
-        logSubmitTime("rejected by createPremise");
+        // logSubmitTime("rejected by createPremise");
 
         ToastAndroid.show(
           result?.message || "Premise rejected",
@@ -847,18 +845,18 @@ export default function FormPremise() {
      ------------------------------------------------ */
       if (queueItemId) {
         await removePremiseQueueItem(queueItemId);
-        logSubmitTime("queue item removed");
+        // logSubmitTime("queue item removed");
       }
 
       updateGeo({ selectedPremise: null, lastSelectionType: "PREMISE" });
-      logSubmitTime("geo updated");
+      // logSubmitTime("geo updated");
 
       ToastAndroid.show("Premise saved.", ToastAndroid.LONG);
 
       router.replace("/(tabs)/premises");
-      logSubmitTime("SUCCESS END");
+      // logSubmitTime("SUCCESS END");
     } catch (err) {
-      logSubmitTime("ERROR END");
+      // logSubmitTime("ERROR END");
 
       const errorMessage =
         err?.data?.message || err?.message || "Could not save premise form.";
@@ -867,7 +865,7 @@ export default function FormPremise() {
 
       ToastAndroid.show(errorMessage, ToastAndroid.LONG);
     } finally {
-      logSubmitTime("FINALLY");
+      // logSubmitTime("FINALLY");
       setSubmitting(false);
       setInProgress(false);
     }

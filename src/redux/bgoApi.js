@@ -635,6 +635,10 @@ function normalizeBgoBucket(batch = {}) {
         !isBmdBgo &&
         workflowState === "ACCEPTED" &&
         releaseState === BGO_RELEASE_STATES.RELEASED,
+      canViewErfs:
+        isBmdBgo &&
+        workflowState === "ACCEPTED" &&
+        releaseState === BGO_RELEASE_STATES.RELEASED,
       canReverseAcceptance:
         !isBmdBgo &&
         workflowState === "ACCEPTED" &&

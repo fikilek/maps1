@@ -18,6 +18,8 @@ import { ActivityIndicator } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { object, string } from "yup";
 
+import { useGeo } from "../../../../src/context/GeoContext";
+import { useWarehouse } from "../../../../src/context/WarehouseContext";
 import { useAuth } from "../../../../src/hooks/useAuth";
 import {
   useAcceptRejectLifecycleInstructionMutation,
@@ -380,6 +382,305 @@ function isBmdBgoBucket(bucket = {}) {
   );
 }
 
+function getBmdErfRefsFromBucket(bucket = {}) {
+  const refs = Array.isArray(bucket?.raw?.worklist?.erfRefs)
+    ? bucket.raw.worklist.erfRefs
+    : Array.isArray(bucket?.worklist?.erfRefs)
+      ? bucket.worklist.erfRefs
+      : [];
+
+  return refs.reduce((acc, ref, index) => {
+    const id = cleanId(ref?.id || ref?.erfId);
+    if (!id) return acc;
+
+    acc.push({
+      id,
+      erfId: id,
+      erfNo: readFirstString(ref?.erfNo, ref?.number, `#${index + 1}`),
+      erfType: readFirstString(ref?.erfType, ref?.type, "NAv"),
+      raw: ref,
+      listIndex: index + 1,
+    });
+
+    return acc;
+  }, []);
+}
+
+function getBmdBucketScope(bucket = {}) {
+  const scope = bucket?.raw?.scope || bucket?.scope || {};
+
+  const lmPcode = readFirstString(scope?.lmPcode, scope?.lmId);
+  const wardPcode = readFirstString(scope?.wardPcode, scope?.wardId);
+
+  return {
+    lmPcode,
+    lmName: readFirstString(scope?.lmName, lmPcode, "NAv"),
+    wardPcode,
+    wardName: readFirstString(scope?.wardName, wardPcode, "NAv"),
+  };
+}
+
+function buildBmdSelectedErf({ erf = {}, bucket = {}, warehouseErf = null }) {
+  const scope = getBmdBucketScope(bucket);
+  const geofence = bucket?.geofenceRef || bucket?.raw?.geofenceRef || {};
+  const bgo = bucket?.raw?.bgo || {};
+
+  return {
+    ...(warehouseErf || {}),
+    ...erf,
+    id: erf?.id || warehouseErf?.id || "NAv",
+    erfId: erf?.id || warehouseErf?.id || "NAv",
+    erfNo: readFirstString(erf?.erfNo, warehouseErf?.erfNo, "NAv"),
+    erfType: readFirstString(erf?.erfType, warehouseErf?.erfType, "NAv"),
+    admin: warehouseErf?.admin || {
+      localMunicipality: {
+        pcode: scope.lmPcode || null,
+        name: scope.lmName || null,
+      },
+      ward: {
+        pcode: scope.wardPcode || null,
+        name: scope.wardName || null,
+      },
+    },
+    bmdContext: {
+      batchId: bucket?.id || bgo?.batchId || "NAv",
+      batchMode: "BMD",
+      sourceModule: "BULK_METER_DISCOVERY",
+      operationType: "METER_DISCOVERY",
+      geofenceId: geofence?.id || bgo?.geofenceId || "NAv",
+      geofenceName: geofence?.name || bgo?.geofenceName || "NAv",
+      targetType: bgo?.targetType || bucket?.target?.type || "NAv",
+      targetId: bgo?.targetId || bucket?.target?.id || "NAv",
+      targetName: bgo?.targetName || bucket?.target?.name || "NAv",
+    },
+  };
+}
+
+function toActivityMillis(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getEntityLatestActivityMs(entity = {}) {
+  return Math.max(
+    toActivityMillis(entity?.metadata?.updatedAt),
+    toActivityMillis(entity?.metadata?.createdAt),
+    toActivityMillis(entity?.updatedAt),
+    toActivityMillis(entity?.createdAt),
+    toActivityMillis(entity?.workflow?.completedAt),
+    toActivityMillis(entity?.workflow?.acceptedAt),
+    toActivityMillis(entity?.workflow?.issuedAt),
+  );
+}
+
+function getPremiseId(premise = {}) {
+  return cleanId(premise?.id || premise?.premiseId || premise?.accessData?.premise?.id);
+}
+
+function getPremiseErfId(premise = {}) {
+  return cleanId(
+    premise?.erfId ||
+      premise?.accessData?.erfId ||
+      premise?.refs?.erfId ||
+      premise?.parent?.erfId,
+  );
+}
+
+function getMeterPremiseId(meter = {}) {
+  return cleanId(
+    meter?.premiseId ||
+      meter?.accessData?.premise?.id ||
+      meter?.accessData?.premiseId ||
+      meter?.refs?.premiseId ||
+      meter?.premise?.id,
+  );
+}
+
+function getMeterErfId(meter = {}, premiseIdToErfId = new Map()) {
+  const directErfId = cleanId(
+    meter?.erfId ||
+      meter?.accessData?.erfId ||
+      meter?.refs?.erfId ||
+      meter?.premise?.erfId,
+  );
+
+  if (directErfId) return directErfId;
+
+  const premiseId = getMeterPremiseId(meter);
+  return premiseIdToErfId.get(premiseId) || "";
+}
+
+function getTrnErfId(trn = {}) {
+  return cleanId(
+    trn?.erfId ||
+      trn?.accessData?.erfId ||
+      trn?.accessData?.erf?.id ||
+      trn?.refs?.erfId ||
+      trn?.premise?.erfId,
+  );
+}
+
+function isMeterDiscoveryTrn(trn = {}) {
+  return normalizeUpper(
+    trn?.trnType || trn?.accessData?.trnType || trn?.operationType,
+  ) === "METER_DISCOVERY";
+}
+
+function createEmptyMdBgoErfStats() {
+  return {
+    premiseCount: 0,
+    meterCount: 0,
+    discoveryTrnCount: 0,
+    latestActivityAt: null,
+    latestActivityMs: 0,
+  };
+}
+
+function bumpMdBgoErfActivity(stats, activityMs = 0) {
+  if (!stats || !activityMs) return;
+
+  if (activityMs > Number(stats.latestActivityMs || 0)) {
+    stats.latestActivityMs = activityMs;
+    stats.latestActivityAt = new Date(activityMs).toISOString();
+  }
+}
+
+function sortMdBgoErfWorkItems(a = {}, b = {}) {
+  const aMs = Number(a?.liveStats?.latestActivityMs || 0);
+  const bMs = Number(b?.liveStats?.latestActivityMs || 0);
+
+  if (aMs !== bMs) return bMs - aMs;
+
+  const aNo = Number(String(a?.erfNo || "").replace(/\D/g, ""));
+  const bNo = Number(String(b?.erfNo || "").replace(/\D/g, ""));
+
+  if (Number.isFinite(aNo) && Number.isFinite(bNo) && aNo !== bNo) {
+    return aNo - bNo;
+  }
+
+  return String(a?.erfNo || a?.id || "").localeCompare(
+    String(b?.erfNo || b?.id || ""),
+  );
+}
+
+function buildMdBgoLiveStatsForBucket({
+  bucket = {},
+  premises = [],
+  meters = [],
+  trns = [],
+}) {
+  const erfRefs = getBmdErfRefsFromBucket(bucket);
+  const erfIdSet = new Set(erfRefs.map((erf) => cleanId(erf?.id)).filter(Boolean));
+  const byErfId = {};
+
+  erfRefs.forEach((erf) => {
+    if (!erf?.id) return;
+    byErfId[erf.id] = createEmptyMdBgoErfStats();
+  });
+
+  const premiseIdToErfId = new Map();
+  let premiseCount = 0;
+  let meterCount = 0;
+  let discoveryTrnCount = 0;
+  let latestActivityMs = 0;
+
+  const updateBatchActivity = (activityMs) => {
+    if (activityMs > latestActivityMs) latestActivityMs = activityMs;
+  };
+
+  (Array.isArray(premises) ? premises : []).forEach((premise) => {
+    const premiseId = getPremiseId(premise);
+    const erfId = getPremiseErfId(premise);
+
+    if (premiseId && erfId) premiseIdToErfId.set(premiseId, erfId);
+    if (!erfIdSet.has(erfId)) return;
+
+    const stats = byErfId[erfId] || createEmptyMdBgoErfStats();
+    stats.premiseCount += 1;
+
+    const activityMs = getEntityLatestActivityMs(premise);
+    bumpMdBgoErfActivity(stats, activityMs);
+    updateBatchActivity(activityMs);
+
+    byErfId[erfId] = stats;
+    premiseCount += 1;
+  });
+
+  (Array.isArray(meters) ? meters : []).forEach((meter) => {
+    const erfId = getMeterErfId(meter, premiseIdToErfId);
+    if (!erfIdSet.has(erfId)) return;
+
+    const stats = byErfId[erfId] || createEmptyMdBgoErfStats();
+    stats.meterCount += 1;
+
+    const activityMs = getEntityLatestActivityMs(meter);
+    bumpMdBgoErfActivity(stats, activityMs);
+    updateBatchActivity(activityMs);
+
+    byErfId[erfId] = stats;
+    meterCount += 1;
+  });
+
+  (Array.isArray(trns) ? trns : []).forEach((trn) => {
+    if (!isMeterDiscoveryTrn(trn)) return;
+
+    const erfId = getTrnErfId(trn);
+    if (!erfIdSet.has(erfId)) return;
+
+    const stats = byErfId[erfId] || createEmptyMdBgoErfStats();
+    stats.discoveryTrnCount += 1;
+
+    const activityMs = getEntityLatestActivityMs(trn);
+    bumpMdBgoErfActivity(stats, activityMs);
+    updateBatchActivity(activityMs);
+
+    byErfId[erfId] = stats;
+    discoveryTrnCount += 1;
+  });
+
+  return {
+    erfs: erfRefs.length,
+    premises: premiseCount,
+    meters: meterCount,
+    discoveryTrns: discoveryTrnCount,
+    latestActivityMs,
+    latestActivityAt: latestActivityMs ? new Date(latestActivityMs).toISOString() : null,
+    byErfId,
+  };
+}
+
+function withMdBgoLiveStats({ bucket = {}, premises = [], meters = [], trns = [] }) {
+  if (!isBmdBgoBucket(bucket)) return bucket;
+
+  const liveStats = buildMdBgoLiveStatsForBucket({
+    bucket,
+    premises,
+    meters,
+    trns,
+  });
+
+  const counts = {
+    ...(bucket?.counts || {}),
+    total: liveStats.erfs,
+    erfs: liveStats.erfs,
+    premises: liveStats.premises,
+    meters: liveStats.meters,
+    discoveryTrns: liveStats.discoveryTrns,
+  };
+
+  return {
+    ...bucket,
+    counts,
+    totalTrns: liveStats.erfs,
+    mdBgoLiveStats: liveStats,
+    latestActivityAt: liveStats.latestActivityAt || bucket?.updatedAt || bucket?.issuedAt || null,
+  };
+}
+
 function getBgoBucketStatusText(bucket = {}) {
   const workflowState = normalizeUpper(bucket?.workflowState);
   const releaseState = normalizeUpper(bucket?.releaseState);
@@ -481,6 +782,8 @@ function safeRefetch(refetchFn, label = "query") {
 
 export default function WorkorderManagementSystem() {
   const router = useRouter();
+  const { geoState, updateGeo } = useGeo();
+  const { all } = useWarehouse();
   const { user, profile } = useAuth();
 
   const actorUid = user?.uid || profile?.uid || null;
@@ -499,7 +802,9 @@ export default function WorkorderManagementSystem() {
   const [processingBgoBucketAction, setProcessingBgoBucketAction] = useState(null);
 
   const selectedBgoBatchId =
-    selectedBucket?.bucketType === "BGOB" ? selectedBucket?.id || null : null;
+    selectedBucket?.bucketType === "BGOB" && !isBmdBgoBucket(selectedBucket)
+      ? selectedBucket?.id || null
+      : null;
 
   useEffect(() => {
     if (!actorUid || fieldWorkorderActor) return;
@@ -627,15 +932,29 @@ export default function WorkorderManagementSystem() {
         }),
       )
       .map((bucket) => {
-        const counts = bucket?.counts || {};
+        const liveBucket = withMdBgoLiveStats({
+          bucket,
+          premises: all?.prems || [],
+          meters: all?.meters || [],
+          trns: all?.trns || [],
+        });
+        const counts = liveBucket?.counts || {};
 
         return {
-          ...bucket,
+          ...liveBucket,
           counts,
-          totalTrns: bucket?.totalTrns || counts.total || 0,
+          totalTrns: liveBucket?.totalTrns || counts.total || 0,
         };
       });
-  }, [bgoData?.buckets, actorUid, actorSpId, actorTeamIds]);
+  }, [
+    bgoData?.buckets,
+    actorUid,
+    actorSpId,
+    actorTeamIds,
+    all?.prems,
+    all?.meters,
+    all?.trns,
+  ]);
 
   const groups = useMemo(() => {
     return WMS_GROUPS.map((group) => {
@@ -680,6 +999,15 @@ export default function WorkorderManagementSystem() {
   const bucketCards = useMemo(() => {
     return [individualBucket, ...bgoBuckets];
   }, [individualBucket, bgoBuckets]);
+
+  useEffect(() => {
+    if (!selectedBucket?.id) return;
+
+    const freshBucket = bucketCards.find((bucket) => bucket?.id === selectedBucket.id);
+    if (!freshBucket || freshBucket === selectedBucket) return;
+
+    setSelectedBucket(freshBucket);
+  }, [bucketCards, selectedBucket]);
 
   const visibleItems = useMemo(() => {
     let baseItems = [];
@@ -756,15 +1084,22 @@ export default function WorkorderManagementSystem() {
     }
 
     if (bucket?.bucketType === "BGOB") {
-      if (!bucket?.permissions?.canViewTrns) {
+      const isBmd = isBmdBgoBucket(bucket);
+      const canOpen = isBmd
+        ? bucket?.permissions?.canViewErfs === true
+        : bucket?.permissions?.canViewTrns === true;
+
+      if (!canOpen) {
         Alert.alert(
           "BGO Bucket Locked",
-          "This BGO bucket must be accepted before its TRNs can be viewed for execution.",
+          isBmd
+            ? "This MD-BGO bucket must be accepted before its ERF worklist can be opened."
+            : "This BGO bucket must be accepted before its TRNs can be viewed for execution.",
         );
         return;
       }
 
-      setPreparingBgoDetail(true);
+      setPreparingBgoDetail(!isBmd);
       setSelectedBucket(bucket);
       setSelectedGroup(null);
       setStateFilter("ALL");
@@ -854,7 +1189,7 @@ export default function WorkorderManagementSystem() {
         result?.message ||
           (action === "ACCEPT"
             ? isBmdBucket
-              ? "MD-BGO bucket accepted. Discovery TRNs will be created when field discovery is submitted."
+              ? "MD-BGO bucket accepted. The ERF worklist is now ready for field discovery."
               : "BGO bucket accepted and child TRNs released to execution."
             : isBmdBucket
               ? "MD-BGO bucket rejected."
@@ -1137,11 +1472,44 @@ export default function WorkorderManagementSystem() {
     });
   }
 
+  function handleOpenBmdErf({ bucket, erf }) {
+    if (!bucket?.id || !erf?.id) {
+      Alert.alert(
+        "MD-BGO ERF Not Ready",
+        "This ERF work item is missing its batch or ERF reference.",
+      );
+      return;
+    }
+
+    const warehouseErf = Array.isArray(all?.erfs)
+      ? all.erfs.find((item) => item?.id === erf.id)
+      : null;
+
+    const selectedErf = buildBmdSelectedErf({
+      erf,
+      bucket,
+      warehouseErf,
+    });
+
+    // Keep GeoContext as the single selection authority.
+    // We only select the ERF here; GeoContext handles the cascade that clears
+    // selectedPremise/selectedMeter and bumps flightSignal.
+    updateGeo({
+      selectedErf,
+      lastSelectionType: "ERF",
+    });
+
+    router.push("/(tabs)/premises");
+  }
+
+  const showBmdErfWorklist =
+    selectedBucket?.bucketType === "BGOB" && isBmdBgoBucket(selectedBucket);
+
   const showIndividualGroups =
     selectedBucket?.bucketType === "INDVG" && !selectedGroup;
 
   const showTrnDetail =
-    selectedBucket?.bucketType === "BGOB" ||
+    (selectedBucket?.bucketType === "BGOB" && !showBmdErfWorklist) ||
     (selectedBucket?.bucketType === "INDVG" && selectedGroup);
 
   const detailTitle =
@@ -1217,6 +1585,12 @@ export default function WorkorderManagementSystem() {
           groups={groups}
           onOpenGroup={openGroup}
           onBack={backToBuckets}
+        />
+      ) : showBmdErfWorklist ? (
+        <MdBgoErfWorklist
+          bucket={selectedBucket}
+          onBack={backToBuckets}
+          onOpenErf={handleOpenBmdErf}
         />
       ) : showTrnDetail ? (
         <GroupDetail
@@ -1430,7 +1804,9 @@ function BucketCard({
   const isBmd = isBmdBgoBucket(bucket);
   const counts = bucket?.counts || {};
   const statusText = isIndividual ? "Open" : getBgoBucketStatusText(bucket);
-  const canView = bucket?.permissions?.canViewTrns === true;
+  const canView = isBmd
+    ? bucket?.permissions?.canViewErfs === true
+    : bucket?.permissions?.canViewTrns === true;
   const canAccept = isBgo && bucket?.permissions?.canAccept === true;
   const canReject = isBgo && bucket?.permissions?.canReject === true;
   const processingThisBgoBucket =
@@ -1524,7 +1900,6 @@ function BucketCard({
               <MiniCount label="ERFs" value={counts.erfs ?? counts.total ?? 0} />
               <MiniCount label="Premises" value={counts.premises ?? 0} />
               <MiniCount label="Meters" value={counts.meters ?? 0} />
-              <MiniCount label="Discovery TRNs" value={counts.discoveryTrns ?? 0} />
             </>
           ) : (
             <>
@@ -1612,7 +1987,7 @@ function BucketCard({
             onPress={() => onOpenBucket(bucket)}
             disabled={deciding}
           >
-            <Text style={styles.executeBtnText}>VIEW TRNS</Text>
+            <Text style={styles.executeBtnText}>{isBmd ? "VIEW ERFS" : "VIEW TRNS"}</Text>
           </Pressable>
         ) : null}
 
@@ -1640,12 +2015,158 @@ function BucketCard({
             <Text style={styles.noActionText}>
               {isBgo
                 ? isBmd && statusText === "Accepted"
-                  ? "MD-BGO accepted. ERF worklist opens in the next BMD step."
+                  ? "MD-BGO accepted. ERF worklist is ready."
                   : "Bucket not open for execution."
                 : "No TRNs in this bucket yet."}
             </Text>
           </View>
         ) : null}
+      </View>
+    </View>
+  );
+}
+
+function getWardShortLabel(scope = {}) {
+  const raw = readFirstString(scope?.wardName, scope?.wardPcode, "NAv");
+  if (!raw || raw === "NAv") return "Ward NAv";
+
+  const clean = String(raw).trim();
+  const wardMatch = clean.match(/ward\s*0*(\d+)/i);
+  if (wardMatch?.[1]) return `Ward ${Number(wardMatch[1])}`;
+
+  const trailingDigits = clean.match(/(\d{1,3})$/);
+  if (trailingDigits?.[1]) return `Ward ${Number(trailingDigits[1])}`;
+
+  return clean;
+}
+
+function MdBgoErfWorklist({ bucket, onBack, onOpenErf }) {
+  const liveStats = bucket?.mdBgoLiveStats || {};
+  const counts = bucket?.counts || {};
+  const scope = getBmdBucketScope(bucket);
+  const wardLabel = getWardShortLabel(scope);
+
+  const erfItems = useMemo(() => {
+    return getBmdErfRefsFromBucket(bucket)
+      .reduce((acc, erf) => {
+        const erfStats = liveStats?.byErfId?.[erf?.id] || createEmptyMdBgoErfStats();
+        acc.push({
+          ...erf,
+          liveStats: erfStats,
+        });
+        return acc;
+      }, [])
+      .sort(sortMdBgoErfWorkItems);
+  }, [bucket, liveStats]);
+
+  const renderErfItem = ({ item }) => (
+    <MdBgoErfCard
+      erf={item}
+      bucket={bucket}
+      onOpenErf={onOpenErf}
+    />
+  );
+
+  return (
+    <View style={styles.detailWrap}>
+      <View style={styles.mdBgoSummaryCard}>
+        <Pressable style={styles.mdBgoBackPill} onPress={onBack}>
+          <MaterialCommunityIcons
+            name="chevron-left"
+            size={18}
+            color="#0f172a"
+          />
+          <Text style={styles.backPillText}>Buckets</Text>
+        </Pressable>
+
+        <Text style={styles.mdBgoWardText} numberOfLines={1}>
+          {wardLabel}
+        </Text>
+
+        <View style={styles.mdBgoCompactStat}>
+          <Text style={styles.mdBgoCompactStatLabel}>ERFs</Text>
+          <Text style={styles.mdBgoCompactStatValue}>{counts.erfs ?? erfItems.length}</Text>
+        </View>
+
+        <View style={styles.mdBgoCompactStat}>
+          <Text style={styles.mdBgoCompactStatLabel}>Premises</Text>
+          <Text style={styles.mdBgoCompactStatValue}>{counts.premises ?? 0}</Text>
+        </View>
+
+        <View style={styles.mdBgoCompactStat}>
+          <Text style={styles.mdBgoCompactStatLabel}>Meters</Text>
+          <Text style={styles.mdBgoCompactStatValue}>{counts.meters ?? 0}</Text>
+        </View>
+      </View>
+
+      <FlashList
+        data={erfItems}
+        keyExtractor={(item, index) => item?.id || String(index)}
+        renderItem={renderErfItem}
+        estimatedItemSize={104}
+        style={styles.scroll}
+        contentContainerStyle={styles.flashListContent}
+        ListEmptyComponent={
+          <View style={styles.emptyListCard}>
+            <MaterialCommunityIcons
+              name="vector-square-remove"
+              size={35}
+              color="#94a3b8"
+            />
+            <Text style={styles.stateTitle}>No ERFs in this worklist</Text>
+            <Text style={styles.stateText}>
+              This accepted MD-BGO batch does not have ERF references stamped yet.
+            </Text>
+          </View>
+        }
+      />
+    </View>
+  );
+}
+
+function MdBgoErfCard({ erf, bucket, onOpenErf }) {
+  const liveStats = erf?.liveStats || createEmptyMdBgoErfStats();
+
+  return (
+    <View style={styles.mdBgoErfCard}>
+      <View style={styles.mdBgoErfHeader}>
+        <View style={styles.mdBgoErfIcon}>
+          <MaterialCommunityIcons
+            name="vector-square"
+            size={21}
+            color="#2563eb"
+          />
+        </View>
+
+        <View style={styles.mdBgoErfMain}>
+          <Text style={styles.mdBgoErfTitle}>ERF {erf?.erfNo || "NAv"}</Text>
+          <Text style={styles.mdBgoErfSub} numberOfLines={1}>
+            {erf?.erfType || "NAv"}
+          </Text>
+        </View>
+
+        <View style={styles.mdBgoErfStatusBadge}>
+          <Text style={styles.mdBgoErfStatusText}>NOT STARTED</Text>
+        </View>
+      </View>
+
+      <View style={styles.mdBgoErfFooterRow}>
+        <View style={styles.mdBgoErfMiniStat}>
+          <Text style={styles.mdBgoErfMiniStatLabel}>Premises</Text>
+          <Text style={styles.mdBgoErfMiniStatValue}>{liveStats?.premiseCount ?? 0}</Text>
+        </View>
+
+        <View style={styles.mdBgoErfMiniStat}>
+          <Text style={styles.mdBgoErfMiniStatLabel}>Meters</Text>
+          <Text style={styles.mdBgoErfMiniStatValue}>{liveStats?.meterCount ?? 0}</Text>
+        </View>
+
+        <Pressable
+          style={styles.mdBgoOpenErfBtn}
+          onPress={() => onOpenErf({ bucket, erf })}
+        >
+          <Text style={styles.executeBtnText}>OPEN ERF</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -3449,6 +3970,153 @@ const styles = StyleSheet.create({
 
   instructionMediaThumbTextActive: {
     color: "#ffffff",
+  },
+
+  mdBgoSummaryCard: {
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#dbeafe",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+
+  mdBgoBackPill: {
+    height: 30,
+    borderRadius: 15,
+    paddingHorizontal: 7,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  mdBgoWardText: {
+    flex: 1,
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+
+  mdBgoCompactStat: {
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 42,
+  },
+
+  mdBgoCompactStatLabel: {
+    color: "#64748b",
+    fontSize: 7,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+
+  mdBgoCompactStatValue: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "900",
+    marginTop: 1,
+  },
+
+  mdBgoErfCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 10,
+    marginBottom: 8,
+  },
+
+  mdBgoErfHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+
+  mdBgoErfIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#eff6ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  mdBgoErfMain: {
+    flex: 1,
+  },
+
+  mdBgoErfTitle: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  mdBgoErfSub: {
+    color: "#64748b",
+    fontSize: 10,
+    fontWeight: "900",
+    marginTop: 1,
+    textTransform: "uppercase",
+  },
+
+  mdBgoErfStatusBadge: {
+    borderRadius: 999,
+    backgroundColor: "#f1f5f9",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+
+  mdBgoErfStatusText: {
+    color: "#475569",
+    fontSize: 8,
+    fontWeight: "900",
+  },
+
+  mdBgoErfFooterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 9,
+  },
+
+  mdBgoErfMiniStat: {
+    minWidth: 72,
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+
+  mdBgoErfMiniStatLabel: {
+    color: "#64748b",
+    fontSize: 8,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+
+  mdBgoErfMiniStatValue: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: 1,
+  },
+
+  mdBgoOpenErfBtn: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0f172a",
   },
 
   accessBackButton: {
