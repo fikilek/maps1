@@ -286,8 +286,8 @@ export default function FormPremise() {
         .test(
           "property-type-photo-required",
           "Property Type photo is mandatory once property type is selected",
-          function (media) {
-            const propertyType = this.parent?.propertyType?.type;
+          (media, context) => {
+            const propertyType = context?.parent?.propertyType?.type;
 
             const propertyTypeChosen =
               !!propertyType &&
@@ -302,9 +302,9 @@ export default function FormPremise() {
         .test(
           "property-address-photo-required",
           "Property Address photo is mandatory once street number and street name are completed",
-          function (media) {
-            const strNo = this.parent?.address?.strNo;
-            const strName = this.parent?.address?.strName;
+          (media, context) => {
+            const strNo = context?.parent?.address?.strNo;
+            const strName = context?.parent?.address?.strName;
 
             const addressCompleted = isFilled(strNo) && isFilled(strName);
 
@@ -754,13 +754,13 @@ export default function FormPremise() {
       // logSubmitTime("final payload built");
 
       /* ------------------------------------------------
-      4. ONLINE SUBMIT WITH 20 SECOND TIMEOUT
+      4. ONLINE SUBMIT WITH 15 SECOND TIMEOUT
       ------------------------------------------------ */
       let result = null;
       // console.log(`FormPremise handleSubmit --isEdit`, isEdit);
 
       try {
-        const firestoreSubmitStartedAtMs = Date.now();
+        // const firestoreSubmitStartedAtMs = Date.now();
 
         if (isEdit) {
           result = await withSubmitTimeout(
