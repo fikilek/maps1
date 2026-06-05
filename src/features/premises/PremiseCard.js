@@ -149,6 +149,7 @@ const PremiseCard = memo(
     onEditPress,
     onDuplicate,
     onNaPress,
+    onAccountPress,
   }) => {
     const isFlat = item?.propertyType?.type === "Flats";
     const erfId = item?.erfId; // 🎯 The link to the sovereign
@@ -188,6 +189,10 @@ const PremiseCard = memo(
     const occupancyStatus = item?.occupancy?.status || "Unknown";
     const noAccessTrnIds = Array.isArray(item?.noAccessTrnIds)
       ? item?.noAccessTrnIds.length
+      : 0;
+
+    const accountCount = Array.isArray(item?.accountRefs)
+      ? item.accountRefs.length
       : 0;
 
     const electricityStatusIndicator = getServiceStatusIndicator(
@@ -567,6 +572,35 @@ const PremiseCard = memo(
               </View>
             </View>
 
+            <TouchableOpacity
+              style={[
+                styles.statItem,
+                styles.accountStatItem,
+              ]}
+              onPress={() => onAccountPress?.(item)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.statTopRow}>
+                <MaterialCommunityIcons
+                  name="account"
+                  size={16}
+                  color="#7C3AED"
+                />
+                <Text style={styles.statCount}>{accountCount}</Text>
+              </View>
+
+              <View style={styles.statStatusRow}>
+                <MaterialCommunityIcons
+                  name="account-cash-outline"
+                  size={13}
+                  color="#7C3AED"
+                />
+                <Text style={[styles.statStatusText, { color: "#7C3AED" }]}>
+                  ACC
+                </Text>
+              </View>
+            </TouchableOpacity>
+
             {noAccessTrnIds > 0 && (
               <TouchableOpacity
                 style={styles.compactNaBadge}
@@ -699,7 +733,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#F1F5F9",
   },
-  statsRow: { flexDirection: "row", alignItems: "center", gap: 6, flex: 0.4 },
+  statsRow: { flexDirection: "row", alignItems: "center", gap: 6, flex: 0.52 },
   // statItem: {
   //   flexDirection: "row",
   //   alignItems: "center",
@@ -726,7 +760,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    flex: 0.6,
+    flex: 0.48,
     justifyContent: "flex-end",
   },
   compactBtn: {
@@ -846,6 +880,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 7,
     borderWidth: 1,
+  },
+
+  accountStatItem: {
+    backgroundColor: "#F5F3FF",
+    borderColor: "#DDD6FE",
   },
 
   statTopRow: {

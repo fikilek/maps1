@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";
 import { useCallback, useMemo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ActivityIndicator, Surface } from "react-native-paper";
 
 import MissionDiscoveryModal from "../../../components/MissionDiscoveryModal";
@@ -18,13 +18,11 @@ import { filterPremises } from "../../../src/features/premises/filterPremises";
 export default function PremisesScreen() {
   const router = useRouter();
   const { all, loading, scopeState } = useWarehouse();
-  // console.log(`all.prems?.length`, all.prems?.length);
 
   const { openMissionDiscovery } = useDiscovery();
   const { openMissionInstallation } = useInstallation();
 
   const { geoState, updateGeo } = useGeo();
-  // console.log(`geoState`, geoState);
   const { selectedLm, selectedWard, selectedErf, selectedPremise } = geoState;
 
   const { filterState } = usePremiseFilter();
@@ -51,7 +49,6 @@ export default function PremisesScreen() {
     if (!selectedErf) return all?.prems || [];
     return (all?.prems || []).filter((p) => p?.erfId === selectedErf?.id);
   }, [all?.prems, selectedWard, selectedErf]);
-  // console.log(`basePremises?.length`, basePremises?.length);
 
   const displayPremises = useMemo(() => {
     return filterPremises(basePremises, filterState);
@@ -138,6 +135,34 @@ export default function PremisesScreen() {
     [router],
   );
 
+  const handleAccountPress = useCallback(
+    (p) => {
+      const accountCount = Array.isArray(p?.accountRefs)
+        ? p.accountRefs.length
+        : 0;
+
+      const title = "Account Data Capture";
+      const message =
+        accountCount > 0
+          ? "This premise already has linked account data. You can still capture another account number or update the latest account data. A new field_account_data history record will be created."
+          : "This will open FormAccountData for this premise. You can capture one or more municipal account numbers.";
+
+      Alert.alert(title, message, [
+        { text: "CANCEL", style: "cancel" },
+        {
+          text: "CONTINUE",
+          onPress: () => {
+            router.push({
+              pathname: "/(tabs)/premises/formAccountData",
+              params: { premiseId: p?.id },
+            });
+          },
+        },
+      ]);
+    },
+    [router],
+  );
+
   const renderPremiseItem = useCallback(
     ({ item }) => {
       const parentErf = erfById[item?.erfId];
@@ -161,6 +186,7 @@ export default function PremisesScreen() {
             onEditPress={handleEditPremise}
             onNaPress={handleNaPress}
             onDuplicate={handleDuplicate}
+            onAccountPress={handleAccountPress}
           />
         </View>
       );
@@ -171,8 +197,10 @@ export default function PremisesScreen() {
       handleEditPremise,
       handleMapPress,
       handleDiscover,
+      handleInstall,
       handleNaPress,
       handleDuplicate,
+      handleAccountPress,
     ],
   );
 
@@ -252,7 +280,7 @@ export default function PremisesScreen() {
                 router.push({
                   pathname: "/premises/formPremise",
                   params: {
-                    id: selectedErf?.id, // The parent Erf ID (Anchor)
+                    id: selectedErf?.id,
                   },
                 })
               }
@@ -315,7 +343,7 @@ export default function PremisesScreen() {
                     router.push({
                       pathname: "/premises/formPremise",
                       params: {
-                        id: selectedErf?.id, // The parent Erf ID (Anchor)
+                        id: selectedErf?.id,
                       },
                     })
                   }
@@ -462,8 +490,6 @@ const styles = StyleSheet.create({
     height: 50,
     justifyContent: "center",
   },
-
-  // 8888888888888888888888888
 
   groupContainer: { marginBottom: 16 },
   groupHeader: {
