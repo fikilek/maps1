@@ -1,3 +1,5 @@
+import * as Haptics from "expo-haptics";
+import { useEffect, useRef } from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { Portal, Surface, Text } from "react-native-paper";
 
@@ -31,6 +33,23 @@ export default function WardErfsSyncDoneModal({
   onClose,
   onOpenWard,
 }) {
+  const didNotifyRef = useRef(false);
+
+  useEffect(() => {
+    if (!visible) {
+      didNotifyRef.current = false;
+      return;
+    }
+
+    if (didNotifyRef.current) return;
+
+    didNotifyRef.current = true;
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {},
+    );
+  }, [visible]);
+
   if (!visible) return null;
 
   return (
